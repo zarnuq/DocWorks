@@ -9,6 +9,21 @@ export default class DocWorksPlugin extends Plugin {
     this.claimExtension("docx", VIEW_TYPE_DOCX);
     this.claimExtension("pptx", VIEW_TYPE_PPTX);
 
+    for (const [id, name, fromStart] of [
+      ["start-presentation", "Start presentation from the beginning", true],
+      ["start-presentation-current", "Start presentation from the current slide", false],
+    ] as const) {
+      this.addCommand({
+        id,
+        name,
+        checkCallback: (checking) => {
+          const view = this.app.workspace.getActiveViewOfType(PptxView);
+          if (view && !checking) view.startPresentation(fromStart);
+          return !!view;
+        },
+      });
+    }
+
     // Flush any pending debounced save when Obsidian is closing/reloading.
     this.registerEvent(
       (this.app.workspace as { on(name: string, cb: () => Promise<void>): import("obsidian").EventRef }).on(

@@ -16,7 +16,7 @@ GPL-3.0.
 - `src/infrastructure/{pptx,docx}/` — format packages on top of it (slide ops; docx main part, images, numbering/`ensureList`).
 - `src/domain/pptx/` — `color.ts`, `slide-model.ts` (layout/master inheritance, text style chain), `slide-edit.ts` (minimal-diff text writer, shapes).
 - `src/domain/docx/` — `schema.ts` (PM schema; lists = paragraph numId/ilvl, headings = styles, `opaque`/`raw_block` atoms hold XML we don't edit), `docx-reader.ts` (body -> PM doc + `origins` key -> original XML), `docx-writer.ts` (verbatim copy if unchanged, else patch original pPr/rPr/tcPr in schema order), `docx-styles.ts` (display-only style CSS + list labels).
-- `src/presentation/pptx/` — `text-html.ts`, `text-fit.ts` (letter-spacing to match Office font widths from generated `font-metrics.ts`), `slide-renderer.ts`, `pptx-view.ts`.
+- `src/presentation/pptx/` — `text-html.ts`, `text-fit.ts` (letter-spacing to match Office font widths from generated `font-metrics.ts`), `slide-renderer.ts`, `slideshow.ts` (slideshow + presenter view, plain DOM), `pptx-view.ts`.
 - `src/presentation/docx/` — `docx-editor.ts` (PM commands, keymap, input rules, decorations; no Obsidian), `docx-image-view.ts`, `docx-view.ts` (FileView, toolbar, autosave).
 
 ## Rules

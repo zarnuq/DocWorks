@@ -275,3 +275,23 @@ export function updateParagraphs(host: HTMLElement, fn: (p: ParaAttrs) => ParaAt
     else delete p.dataset.bullet;
   }
 }
+
+/** Replace the current selection with plain text (newlines become <br>) and leave the caret after it. */
+export function insertPlainText(text: string): void {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const frag = createFragment();
+  text.replace(/\r\n?/g, "\n").split("\n").forEach((line, i) => {
+    if (i > 0) frag.appendChild(createEl("br"));
+    if (line) frag.appendChild(document.createTextNode(line));
+  });
+  const last = frag.lastChild;
+  range.insertNode(frag);
+  if (last?.nodeType === Node.TEXT_NODE) range.setStart(last, (last as Text).length);
+  else if (last) range.setStartAfter(last);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}

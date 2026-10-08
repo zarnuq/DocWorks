@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderParagraphs, markEmptyParagraphs, readParagraphs, applyRunStyle, selectionRunProps, updateParagraphs } from "../src/presentation/pptx/text-html";
+import { renderParagraphs, markEmptyParagraphs, insertPlainText, readParagraphs, applyRunStyle, selectionRunProps, updateParagraphs } from "../src/presentation/pptx/text-html";
 import type { Para, RunProps } from "../src/domain/pptx/slide-model";
 
 const PX_PER_PT = 2;
@@ -205,5 +205,19 @@ describe("renderParagraphs spacing", () => {
   it("sizes the bullet like the first run", () => {
     renderParagraphs(host, [para([run("x", { sz: 10 })], { bullet: "•", defaults: { ...defaults, sz: 28 } })], PX_PER_PT);
     expect(host.querySelector("p")!.style.getPropertyValue("--pptx-bullet-size")).toBe(`${10 * PX_PER_PT}px`);
+  });
+});
+
+describe("insertPlainText", () => {
+  it("replaces the selection with text, turning newlines into line breaks", () => {
+    renderParagraphs(host, [para([run("hello world")])], PX_PER_PT);
+    const text = host.querySelector("span")!.firstChild!;
+    select(text, 6, text, 11);
+    insertPlainText("big\nday");
+    expect(read()[0].runs.map((r) => r.text).join("")).toBe("hello big\nday");
+    // caret ends after the pasted text
+    const caret = window.getSelection()!.getRangeAt(0);
+    expect(caret.collapsed).toBe(true);
+    expect(caret.startContainer.textContent).toBe("day");
   });
 });

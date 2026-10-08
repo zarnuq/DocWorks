@@ -40,7 +40,10 @@ Lossless by design: unedited paragraphs and tables are copied back unchanged. Ed
 
 ### PowerPoint (.pptx)
 
-- Slide thumbnails, a main slide canvas and read-only speaker notes
+- Slide thumbnails, a main slide canvas and editable speaker notes (a notes page is created when a slide has none)
+- Slideshow (▶ Present, F5 from the start, Shift+F5 from the current slide): arrow keys / space / click to advance, type a number + Enter to jump, Esc to exit
+- Presenter view (press P in the slideshow): current and next slide, notes, slide counter, timer and clock
+- Hide slides from the slideshow
 - Faithful rendering: placeholder inheritance from layouts and masters, theme colors and fonts, `lumMod` / `tint` / `alpha`, gradients, pictures, tables, groups, custom and preset shapes (SVG), SmartArt, background colors and images
 - Text wraps like PowerPoint even without Office fonts: built-in width tables for ~30 common fonts (Calibri, Cambria, Aptos, Arial, Segoe UI, Verdana...) adjust letter spacing to the original widths
 - Text editing directly on the slide:
@@ -58,8 +61,7 @@ Saving changes only what you edited. Each XML part stays a live DOM, and text is
 
 - PowerPoint:
   - Editing tables or SmartArt (they render read-only); charts show a placeholder
-  - Editing speaker notes
-  - Presenter mode, animations, `arcTo` segments in freeforms
+  - Animations and transitions, `arcTo` segments in freeforms
   - Moving shapes that sit inside a group (their text is still editable)
 - Word: tracked-change wrappers and smart tags are dropped from a paragraph you edit; there are no comments, headers or footers in the editor (they are preserved in the file).
 

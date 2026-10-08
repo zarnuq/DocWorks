@@ -192,3 +192,37 @@ export function addPicture(doc: Document, rect: Rect, rId: string, name: string)
   );
 }
 
+
+const paragraphText = (p: Element) =>
+  Array.from(p.getElementsByTagNameNS(NS.a, "t"))
+    .map((t) => t.textContent)
+    .join("");
+
+/**
+ * Replace a text body's paragraphs with plain-text lines (used for speaker
+ * notes). Paragraphs whose text is unchanged are kept as they are; new or
+ * changed ones copy the paragraph and run properties of their neighbour.
+ */
+export function writePlainParagraphs(txBody: Element, text: string): void {
+  const doc = txBody.ownerDocument;
+  const original = kids(txBody, "p");
+  const written = text.split("\n").map((line, k) => {
+    const same = original[k];
+    if (same && paragraphText(same) === line && !same.getElementsByTagNameNS(NS.a, "br").length) return same;
+    const template = same ?? original[original.length - 1] ?? null;
+    const p = el(doc, "p");
+    const pPr = kids(template, "pPr")[0];
+    if (pPr) p.appendChild(pPr.cloneNode(true));
+    if (line) {
+      const r = p.appendChild(el(doc, "r"));
+      const rPr = template?.getElementsByTagNameNS(NS.a, "rPr")[0];
+      if (rPr) r.appendChild(rPr.cloneNode(true));
+      r.appendChild(el(doc, "t")).textContent = line;
+    }
+    const end = kids(template, "endParaRPr")[0];
+    if (end) p.appendChild(end.cloneNode(true));
+    return p;
+  });
+  original.forEach((p) => p.remove());
+  written.forEach((p) => txBody.appendChild(p));
+}

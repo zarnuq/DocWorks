@@ -19,6 +19,7 @@ const g = globalThis as Record<string, unknown>;
 g.createEl = (tag: keyof HTMLElementTagNameMap, o?: Info | string) => create(tag, o);
 g.createDiv = (o?: Info | string) => create("div", o);
 g.createSpan = (o?: Info | string) => create("span", o);
+g.createFragment = () => document.createDocumentFragment();
 Object.assign(Node.prototype, {
   createEl(this: Node, tag: keyof HTMLElementTagNameMap, o?: Info | string) {
     return create(tag, o, this);

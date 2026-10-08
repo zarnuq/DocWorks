@@ -4,8 +4,9 @@ import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel } from "../
 import { ParaInput, addPicture, addTextBox, setRect, writeParagraphs } from "../../domain/pptx/slide-edit";
 import { History } from "../../core/utils/history";
 import { FONTS, PaperTheme, Toolbar } from "../common/toolbar";
+import { nextVisible, Slideshow } from "./slideshow";
 import { RenderedShape, renderSlide } from "./slide-renderer";
-import { applyRunStyle, markEmptyParagraphs, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
+import { applyRunStyle, insertPlainText, markEmptyParagraphs, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
 
 export const VIEW_TYPE_PPTX = "doc-works-pptx-view";
 
@@ -52,7 +53,9 @@ export class PptxView extends FileView {
   private thumbsEl!: HTMLElement;
   private stageEl!: HTMLElement;
   private slideHostEl!: HTMLElement;
-  private notesEl!: HTMLElement;
+  private notesEl!: HTMLTextAreaElement;
+  private notesTimer: number | null = null;
+  private hideBtn: HTMLButtonElement | null = null;
   private saveIndicatorEl: HTMLElement | null = null;
   private syncTheme: ((t: PaperTheme) => void) | null = null;
 
@@ -102,7 +105,12 @@ export class PptxView extends FileView {
     this.stageEl = body.createDiv({ cls: "pptx-stage" });
     this.stageEl.tabIndex = 0;
     this.slideHostEl = this.stageEl.createDiv({ cls: "pptx-slide-host" });
-    this.notesEl = this.stageEl.createDiv({ cls: "pptx-notes" });
+    this.notesEl = this.stageEl.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes" } });
+    this.notesEl.addEventListener("input", () => {
+      if (this.notesTimer) window.clearTimeout(this.notesTimer);
+      this.notesTimer = window.setTimeout(() => this.flushNotes(), 400);
+    });
+    this.notesEl.addEventListener("blur", () => this.flushNotes());
 
     this.stageEl.addEventListener("keydown", this.onStageKey);
     this.stageEl.addEventListener("pointerdown", (e) => {
@@ -183,6 +191,7 @@ export class PptxView extends FileView {
     this.doc.slides().forEach((slide, i) => {
       const item = this.thumbsEl.createDiv({ cls: "pptx-thumb" });
       item.toggleClass("is-active", i === this.index);
+      item.toggleClass("is-hidden", this.doc!.isHidden(i));
       item.createDiv({ cls: "pptx-thumb-num", text: String(i + 1) });
       const host = item.createDiv({ cls: "pptx-thumb-slide" });
       renderSlide(host, parseSlide(this.doc!, slide.path), this.doc!.slideSize, {
@@ -213,8 +222,11 @@ export class PptxView extends FileView {
     this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: true, imageUrl: this.imageUrl });
     this.rendered.forEach((rs) => this.wireShape(rs));
 
-    this.notesEl.setText(this.model.notes);
-    this.notesEl.toggle(!!this.model.notes);
+    const canEdit = this.doc.canEditNotes(this.index);
+    this.notesEl.value = this.doc.notesText(this.index);
+    this.notesEl.disabled = !canEdit;
+    this.notesEl.placeholder = canEdit ? "Click to add speaker notes" : "This presentation has no notes master, so notes can't be added.";
+    this.hideBtn?.setText(this.doc.isHidden(this.index) ? "Show slide" : "Hide slide");
     this.selected = null;
     this.activeText = null;
     this.savedRange = null;
@@ -342,7 +354,18 @@ export class PptxView extends FileView {
     this.commitTimer = window.setTimeout(() => this.flushCommit(), 400);
   }
 
+  /** Write pending speaker-notes edits for the current slide. */
+  private flushNotes(): void {
+    if (this.notesTimer) window.clearTimeout(this.notesTimer);
+    this.notesTimer = null;
+    if (!this.doc || this.notesEl.disabled || this.notesEl.value === this.doc.notesText(this.index)) return;
+    this.pushHistory();
+    this.doc.setNotes(this.index, this.notesEl.value);
+    this.markDirty();
+  }
+
   private flushCommit(): void {
+    this.flushNotes();
     const rs = this.pendingCommit;
     if (this.commitTimer) window.clearTimeout(this.commitTimer);
     this.commitTimer = null;
@@ -441,9 +464,12 @@ export class PptxView extends FileView {
       return;
     }
     // Only plain text goes into slides; foreign HTML would bring styles we can't save.
-    if (this.rendered.some((r) => r.textEl?.contains(e.target as Node))) {
+    const target = this.rendered.find((r) => r.textEl?.contains(e.target as Node))?.textEl;
+    if (target) {
       e.preventDefault();
-      document.execCommand("insertText", false, e.clipboardData?.getData("text/plain") ?? "");
+      insertPlainText(e.clipboardData?.getData("text/plain") ?? "");
+      // Programmatic edits fire no input event; send one so the change is committed.
+      target.dispatchEvent(new Event("input", { bubbles: true }));
     }
   };
 
@@ -452,8 +478,14 @@ export class PptxView extends FileView {
   // ---------------------------------------------------------------------------
 
   private onStageKey = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement).isContentEditable) return;
+    const target = e.target as HTMLElement;
+    if (target.isContentEditable || target === this.notesEl) return;
     const key = e.key.toLowerCase();
+    if (e.key === "F5") {
+      e.preventDefault();
+      this.startPresentation(!e.shiftKey);
+      return;
+    }
     if (isMod(e) && (key === "z" || key === "y")) {
       e.preventDefault();
       if (key === "y" || e.shiftKey) this.redo();
@@ -478,6 +510,25 @@ export class PptxView extends FileView {
     this.index = i;
     this.renderCurrent();
     this.stageEl.focus({ preventScroll: true });
+  }
+
+  /** Run the slideshow from the first visible slide, or from the current one. */
+  startPresentation(fromStart: boolean): void {
+    const doc = this.doc;
+    if (!doc) return;
+    this.flushCommit();
+    const count = doc.slides().length;
+    const hidden = Array.from({ length: count }, (_, i) => doc.isHidden(i));
+    const start = fromStart ? (nextVisible(hidden, -1, 1) ?? 0) : this.index;
+    const deck = {
+      size: doc.slideSize,
+      count,
+      isHidden: (i: number) => hidden[i],
+      notes: (i: number) => doc.notesText(i),
+      render: (host: HTMLElement, i: number, width: number) =>
+        renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl }),
+    };
+    new Slideshow(deck, start, (i) => this.goTo(i)).open();
   }
 
   private pushHistory(): void {
@@ -631,6 +682,7 @@ export class PptxView extends FileView {
     btn("New slide", "Insert slide after this one", () => this.mutate((d) => (this.index = d.addSlide(this.index))));
     btn("Duplicate", "Duplicate slide", () => this.mutate((d) => (this.index = d.duplicateSlide(this.index))));
     btn("Delete slide", "Delete slide", () => this.mutate((d) => d.deleteSlide(this.index)));
+    this.hideBtn = btn("Hide slide", "Skip this slide in the slideshow", () => this.mutate((d) => d.setHidden(this.index, !d.isHidden(this.index))));
     btn("▲", "Move slide up", () =>
       this.mutate((d) => {
         if (this.index > 0) d.moveSlide(this.index, --this.index);
@@ -641,6 +693,8 @@ export class PptxView extends FileView {
         if (this.index < d.slides().length - 1) d.moveSlide(this.index, ++this.index);
       })
     );
+    sep();
+    btn("▶ Present", "Present from this slide (Shift+F5). F5 presents from the beginning.", () => this.startPresentation(false), "mod-cta");
 
     const end = tb.end(this.paperTheme, (t) => this.setPaperTheme(t), "workspace");
     this.syncTheme = end.syncTheme;

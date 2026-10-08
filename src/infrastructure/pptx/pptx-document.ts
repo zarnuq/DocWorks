@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { NS, escapeXml } from "../../core/utils/xml";
+import { writePlainParagraphs } from "../../domain/pptx/slide-edit";
 import { OoxmlPackage, PackageSnapshot, parseXml, relsPathOf } from "../ooxml/ooxml-package";
 
 export interface SlideRef {
@@ -12,6 +13,7 @@ export type PptxSnapshot = PackageSnapshot;
 
 const PRESENTATION = "ppt/presentation.xml";
 const SLIDE_CT = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
+const NOTES_CT = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
 const SKIPPED_PLACEHOLDERS = new Set(["dt", "ftr", "sldNum"]);
 
 /** A .pptx package: slide list and slide operations on top of the live-DOM OOXML package. */
@@ -120,6 +122,74 @@ export class PptxDocument extends OoxmlPackage {
     el.remove();
     const rest = ids.filter((e) => e !== el);
     list.insertBefore(el, rest[to] ?? null);
+  }
+
+  // --- Speaker notes -------------------------------------------------------
+
+  /** The notes page's body placeholder text body, if the slide has notes. */
+  private notesBody(index: number): Element | null {
+    const notes = this.notesOf(this.slides()[index]?.path ?? "");
+    const sp = Array.from(this.xml(notes ?? "")?.getElementsByTagNameNS(NS.p, "sp") ?? []).find(
+      (s) => s.getElementsByTagNameNS(NS.p, "ph")[0]?.getAttribute("type") === "body"
+    );
+    return Array.from(sp?.children ?? []).find((c) => c.localName === "txBody") ?? null;
+  }
+
+  notesText(index: number): string {
+    return Array.from(this.notesBody(index)?.getElementsByTagNameNS(NS.a, "p") ?? [])
+      .map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join(""))
+      .join("\n");
+  }
+
+  /** Notes can be edited if the slide has a notes page, or the deck has a notes master to make one from. */
+  canEditNotes(index: number): boolean {
+    return !!this.notesBody(index) || !!this.relOfType(PRESENTATION, "notesMaster");
+  }
+
+  /** Set a slide's notes as plain text, creating its notes page if needed. False if that isn't possible. */
+  setNotes(index: number, text: string): boolean {
+    let body = this.notesBody(index);
+    if (!body) {
+      if (!text) return true;
+      if (!this.canEditNotes(index)) return false;
+      body = this.createNotes(this.slides()[index].path);
+    }
+    writePlainParagraphs(body, text);
+    return true;
+  }
+
+  private createNotes(slidePath: string): Element {
+    const path = this.nextPartPath("ppt/notesSlides/notesSlide", ".xml");
+    const ph = (id: number, name: string, ph: string, extra = "") =>
+      `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
+      `<p:nvPr><p:ph ${ph}/></p:nvPr></p:nvSpPr><p:spPr/>${extra}</p:sp>`;
+    this.parts.set(
+      path,
+      parseXml(
+        `<p:notes xmlns:a="${NS.a}" xmlns:r="${NS.r}" xmlns:p="${NS.p}"><p:cSld><p:spTree>` +
+          `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>` +
+          ph(2, "Slide Image Placeholder 1", 'type="sldImg"') +
+          ph(3, "Notes Placeholder 2", 'type="body" idx="1"', `<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>`) +
+          `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>`
+      )!
+    );
+    this.addOverride(path, NOTES_CT);
+    this.addRel(path, "notesMaster", this.relOfType(PRESENTATION, "notesMaster")!);
+    this.addRel(path, "slide", slidePath);
+    this.addRel(slidePath, "notesSlide", path);
+    return Array.from(this.parts.get(path)!.getElementsByTagNameNS(NS.p, "txBody"))[0];
+  }
+
+  // --- Hidden slides -------------------------------------------------------
+
+  isHidden(index: number): boolean {
+    return this.xml(this.slides()[index]?.path ?? "")?.documentElement.getAttribute("show") === "0";
+  }
+
+  setHidden(index: number, hidden: boolean): void {
+    const root = this.xml(this.slides()[index].path)!.documentElement;
+    if (hidden) root.setAttribute("show", "0");
+    else root.removeAttribute("show");
   }
 
   /** Store image bytes in ppt/media and relate them to the slide. Returns the new rId. */

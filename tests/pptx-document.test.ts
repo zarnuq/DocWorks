@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { loadSample, roundTrip, texts } from "./helpers";
+import { NS } from "../src/core/utils/xml";
 
 describe("PptxDocument.load", () => {
   it("lists slides in presentation order with slide size", async () => {
@@ -211,5 +212,69 @@ describe("mediaPaths", () => {
     expect(doc.mediaPaths()).toEqual(["ppt/media/image1.png"]);
     doc.addImage(doc.slides()[0].path, new Uint8Array([1]), "gif");
     expect(doc.mediaPaths()).toEqual(["ppt/media/image1.png", "ppt/media/image2.gif"]);
+  });
+});
+
+describe("speaker notes", () => {
+  it("reads notes as plain text", async () => {
+    const doc = await loadSample();
+    expect(doc.notesText(0)).toBe("Speaker notes");
+    expect(doc.notesText(1)).toBe("");
+  });
+
+  it("edits existing notes and keeps unchanged paragraphs verbatim", async () => {
+    const doc = await loadSample();
+    const notesPath = doc.notesOf(doc.slides()[0].path)!;
+    const before = new XMLSerializer().serializeToString(doc.xml(notesPath)!.getElementsByTagNameNS(NS.a, "p")[0]);
+    doc.setNotes(0, "Speaker notes\nSecond line");
+    const back = await roundTrip(doc);
+    expect(back.notesText(0)).toBe("Speaker notes\nSecond line");
+    const firstP = back.xml(notesPath)!.getElementsByTagNameNS(NS.a, "p")[0];
+    expect(new XMLSerializer().serializeToString(firstP)).toBe(before);
+  });
+
+  it("creates a notes page for a slide that has none", async () => {
+    const doc = await loadSample();
+    expect(doc.setNotes(1, "New notes")).toBe(true);
+    const zip = await JSZip.loadAsync(await doc.save());
+    const back = await PptxDocument.load(await zip.generateAsync({ type: "uint8array" }));
+    const slide = back.slides()[1].path;
+    const notes = back.notesOf(slide)!;
+    expect(notes).toMatch(/^ppt\/notesSlides\/notesSlide\d+\.xml$/);
+    expect(back.notesText(1)).toBe("New notes");
+    expect(back.relOfType(notes, "slide")).toBe(slide);
+    expect(back.relOfType(notes, "notesMaster")).toBe("ppt/notesMasters/notesMaster1.xml");
+    expect(await zip.file("[Content_Types].xml")!.async("text")).toContain(`/${notes}`);
+  });
+
+  it("does not create a notes page for empty notes", async () => {
+    const doc = await loadSample();
+    doc.setNotes(1, "");
+    expect(doc.notesOf(doc.slides()[1].path)).toBeNull();
+  });
+
+  it("refuses to create notes without a notes master", async () => {
+    const doc = await loadSample();
+    // Drop the notes master relationship, as in decks that never had notes.
+    const rels = doc.xml("ppt/_rels/presentation.xml.rels")!;
+    Array.from(rels.documentElement.children).find((r) => r.getAttribute("Type")!.endsWith("/notesMaster"))!.remove();
+    expect(doc.canEditNotes(1)).toBe(false);
+    expect(doc.setNotes(1, "x")).toBe(false);
+    expect(doc.canEditNotes(0)).toBe(true);
+  });
+});
+
+describe("hidden slides", () => {
+  it("toggles show=0 on the slide and survives a save", async () => {
+    const doc = await loadSample();
+    expect(doc.isHidden(1)).toBe(false);
+    doc.setHidden(1, true);
+    let back = await roundTrip(doc);
+    expect(back.isHidden(1)).toBe(true);
+    expect(back.xml(back.slides()[1].path)!.documentElement.getAttribute("show")).toBe("0");
+    back.setHidden(1, false);
+    back = await roundTrip(back);
+    expect(back.isHidden(1)).toBe(false);
+    expect(back.xml(back.slides()[1].path)!.documentElement.hasAttribute("show")).toBe(false);
   });
 });
