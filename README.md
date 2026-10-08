@@ -2,8 +2,8 @@
 
 **Open, read and edit Word and PowerPoint files right inside Obsidian.** No Office, no LibreOffice, no conversion. Your `.docx` and `.pptx` files stay as they are, next to your notes.
 
-[![Release](https://img.shields.io/github/v/release/zarnuq/doc-works)](https://github.com/zarnuq/doc-works/releases)
-[![Downloads](https://img.shields.io/github/downloads/zarnuq/doc-works/total)](https://github.com/zarnuq/doc-works/releases)
+[![Release](https://img.shields.io/github/v/release/zarnuq/DocWorks)](https://github.com/zarnuq/DocWorks/releases)
+[![Downloads](https://img.shields.io/github/downloads/zarnuq/DocWorks/total)](https://github.com/zarnuq/DocWorks/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 ![Editing a PowerPoint slide in Obsidian](docs/pptx.gif)
@@ -67,9 +67,9 @@ Saving changes only what you edited. Each XML part stays a live DOM, and text is
 
 **Community plugins** (once listed): Settings → Community plugins → Browse → search "Doc Works".
 
-**BRAT:** add `zarnuq/doc-works` in the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin.
+**BRAT:** add `zarnuq/DocWorks` in the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin.
 
-**Manual:** download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/zarnuq/doc-works/releases), put them in `<vault>/.obsidian/plugins/doc-works/`, then enable **Doc Works** in Settings → Community plugins.
+**Manual:** download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/zarnuq/DocWorks/releases), put them in `<vault>/.obsidian/plugins/doc-works/`, then enable **Doc Works** in Settings → Community plugins.
 
 Then click any `.docx` or `.pptx` file in your vault. If another plugin already opens `.docx` or `.pptx`, it keeps that file type and Doc Works shows a notice; disable the other plugin to use Doc Works for it.
 
