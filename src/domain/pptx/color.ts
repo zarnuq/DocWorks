@@ -3,6 +3,8 @@ export interface ColorContext {
   scheme: Record<string, string>;
   /** Master clrMap: tx1/bg1/tx2/bg2 -> scheme slot */
   map: Record<string, string>;
+  /** Placeholder color (phClr) inside theme style entries: the p:style reference's color. */
+  phClr?: string;
 }
 
 const PRESET: Record<string, string> = {
@@ -58,6 +60,7 @@ function baseColor(el: Element, ctx: ColorContext): string | null {
     case "prstClr":
       return PRESET[val] ?? null;
     case "schemeClr":
+      if (val === "phClr") return ctx.phClr?.slice(0, 7) ?? null;
       return ctx.scheme[ctx.map[val] ?? val] ?? null;
     default:
       return null;

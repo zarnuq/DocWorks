@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderSlide } from "../src/presentation/pptx/slide-renderer";
+import { scalePath, renderSlide } from "../src/presentation/pptx/slide-renderer";
 import { parseSlide, SlideModel } from "../src/domain/pptx/slide-model";
 import { loadSample } from "./helpers";
 
@@ -49,11 +49,11 @@ describe("renderSlide", () => {
   it("draws fills, borders, ellipses and rotation", async () => {
     const { byName } = await render(2, true, (m) => (m.shapes.find((s) => s.name === "Rectangle 2")!.rot = 30));
     const rect = byName("Rectangle 2").el;
-    expect(rect.style.backgroundColor).toBe("rgb(0, 255, 0)");
+    expect(rect.querySelector("svg path")!.getAttribute("fill")).toBe("#00FF00");
     expect(rect.style.transform).toBe("rotate(30deg)");
-    const oval = byName("Oval 3").el;
-    expect(oval.style.borderRadius).toBe("50%");
-    expect(oval.style.borderStyle).toBe("solid");
+    const oval = byName("Oval 3").el.querySelector("svg path")!;
+    expect(oval.getAttribute("d")).toMatch(/^M0 48 A48 48 0 0 1 /);
+    expect(oval.getAttribute("stroke")).toBe("#4B7BB4");
   });
 
   it("anchors text vertically", async () => {
@@ -103,9 +103,9 @@ describe("renderSlide", () => {
     const { byName } = await render(2);
     const el = byName("Freeform").el;
     const path = el.querySelector("svg path")!;
-    expect(path.getAttribute("d")).toBe("M0 0 L914400 914400 L0 914400 Z");
-    expect(path.getAttribute("fill")).toBe("#4F81BD");
-    expect(el.querySelector("svg")!.getAttribute("viewBox")).toBe("0 0 914400 914400");
+    // drawn in pixels: 914400 EMU at 9525 EMU/px
+    expect(path.getAttribute("d")).toBe("M0 0 L96 96 L0 96 Z");
+    expect(path.getAttribute("fill")).toMatch(/^url\(#dw-grad-\d+\)$/);
     expect(el.style.background).toBe("");
     expect(el.style.borderStyle).toBe("");
   });
@@ -120,7 +120,10 @@ describe("renderSlide", () => {
 
   it("paints gradient fills", async () => {
     const { byName } = await render(2);
-    expect(byName("Gradient").el.style.background).toContain("linear-gradient");
+    const svg = byName("Gradient").el.querySelector("svg")!;
+    const stops = Array.from(svg.querySelectorAll("linearGradient stop")).map((s) => [s.getAttribute("stop-color"), s.getAttribute("stop-opacity")]);
+    expect(stops).toEqual([["#FF0000", "1"], ["#0000FF", String(0x80 / 255)]]);
+    expect(svg.querySelector("path")!.getAttribute("fill")).toBe(`url(#${svg.querySelector("linearGradient")!.id})`);
   });
 
   it("only prompts on empty placeholders", async () => {
@@ -130,13 +133,15 @@ describe("renderSlide", () => {
 
   it("paints background-filled shapes with the slide background", async () => {
     const { byName } = await render(2);
-    expect(byName("BgFill").el.style.background).toContain("rgb(255, 255, 255)");
+    expect(byName("BgFill").el.querySelector("svg path")!.getAttribute("fill")).toBe("#FFFFFF");
   });
 
   it("draws SmartArt shapes with their outline and inset text box", async () => {
     const { shapes } = await render(2);
     const chevron = shapes.find((r) => r.shape.geom === "chevron")!;
-    expect(chevron.el.querySelector("svg path")!.getAttribute("d")).toBe("M0 0 L880000 0 L1000000 200000 L880000 400000 L0 400000 L120000 200000 Z");
+    expect(chevron.el.querySelector("svg path")!.getAttribute("d")).toBe(
+      scalePath("M0 0 L880000 0 L1000000 200000 L880000 400000 L0 400000 L120000 200000 Z", 1 / 9525, 1 / 9525)
+    );
     expect(chevron.textEl!.style.left).toBe(`${120000 / 9525}px`);
     expect(chevron.textEl!.contentEditable).not.toBe("true");
   });

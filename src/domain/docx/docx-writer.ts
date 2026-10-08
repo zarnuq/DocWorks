@@ -6,6 +6,8 @@ import { EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, wVal
 export interface WriteContext {
   /** Unique id for a new wp:docPr. */
   nextDocPrId(): number;
+  /** Define paragraph styles that edited paragraphs now use (headings missing from the document...). */
+  ensureParagraphStyles?(ids: Iterable<string>): void;
 }
 
 /*
@@ -27,6 +29,8 @@ const parse = (xml: string) => new DOMParser().parseFromString(xml, "application
 
 class Writer {
   private used = new Set<string>();
+  /** Paragraph styles newly applied by this write. */
+  readonly newStyles = new Set<string>();
   private remaining = new Map<string, number>();
 
   constructor(private owner: Document, private origins: Origins, private ctx: WriteContext, doc: PMNode) {
@@ -122,6 +126,7 @@ class Writer {
     const a = attrsOf<ParagraphAttrs>(node);
 
     if (a.style !== was.style) {
+      if (a.style) this.newStyles.add(a.style);
       if (a.style) this.set(this.upsert(pPr, "pStyle"), "val", a.style);
       else this.drop(pPr, "pStyle");
     }
@@ -197,21 +202,28 @@ class Writer {
       );
     }
     tbl.appendChild(grid);
-    node.forEach((row) => tbl.appendChild(this.row(row)));
+    const colWidths = Array.from(grid.children).map((g) => Number(wVal(g, "w")) || 0);
+    node.forEach((row) => tbl.appendChild(this.row(row, colWidths)));
     return tbl;
   }
 
-  private row(node: PMNode): Element {
+  private row(node: PMNode, colWidths: number[]): Element {
     const c = this.claim(node);
     if (c.verbatim) return c.o!.el.cloneNode(true) as Element;
     const tr = this.shell("tr", c);
     const trPr = w(c.o?.el, "trPr");
     if (trPr) tr.appendChild(trPr.cloneNode(true));
-    node.forEach((cell) => tr.appendChild(this.cell(cell)));
+    let col = 0;
+    node.forEach((cell) => {
+      const span = attrsOf<CellAttrs>(cell).colspan;
+      const width = colWidths.slice(col, col + span).reduce((s, x) => s + x, 0);
+      col += span;
+      tr.appendChild(this.cell(cell, width));
+    });
     return tr;
   }
 
-  private cell(node: PMNode): Element {
+  private cell(node: PMNode, width: number): Element {
     const c = this.claim(node);
     if (c.verbatim) return c.o!.el.cloneNode(true) as Element;
     const tc = this.shell("tc", c);
@@ -221,6 +233,12 @@ class Writer {
     const wasFill = wVal(w(base, "shd"), "fill");
     const wasBg = wasFill && /^[0-9a-f]{6}$/i.test(wasFill) ? `#${wasFill.toUpperCase()}` : null;
 
+    // New cells get an explicit width, as Word writes them.
+    if (!base && width) {
+      const tcW = this.upsert(tcPr, "tcW");
+      this.set(tcW, "w", String(width));
+      this.set(tcW, "type", "dxa");
+    }
     if (node.attrs.colspan !== wasSpan) {
       if (node.attrs.colspan > 1) this.set(this.upsert(tcPr, "gridSpan"), "val", String(node.attrs.colspan));
       else this.drop(tcPr, "gridSpan");
@@ -417,6 +435,8 @@ class Writer {
  */
 export function writeBody(body: Element, doc: PMNode, origins: Origins, ctx: WriteContext): void {
   const finalSectPr = body.lastElementChild?.localName === "sectPr" ? body.lastElementChild : null;
-  const blocks = new Writer(body.ownerDocument, origins, ctx, doc).blocks(doc);
+  const writer = new Writer(body.ownerDocument, origins, ctx, doc);
+  const blocks = writer.blocks(doc);
   body.replaceChildren(...blocks, ...(finalSectPr ? [finalSectPr] : []));
+  if (writer.newStyles.size) ctx.ensureParagraphStyles?.(writer.newStyles);
 }

@@ -39,6 +39,21 @@ function abstractNumXml(id: number, kind: ListKind): string {
   return `<w:abstractNum xmlns:w="${NS.w}" w:abstractNumId="${id}"><w:multiLevelType w:val="hybridMultilevel"/>${levels}</w:abstractNum>`;
 }
 
+const heading = (lvl: number, sz: number, extra = "") =>
+  [`heading ${lvl + 1}`, `<w:keepNext/><w:spacing w:before="240" w:after="60"/><w:outlineLvl w:val="${lvl}"/>`, `<w:b/>${extra}<w:sz w:val="${sz}"/>`] as const;
+
+/** Word's built-in paragraph styles the editor can apply: [name, pPr, rPr]. */
+const BUILTIN_STYLES: Record<string, readonly [string, string, string]> = {
+  Title: ["Title", `<w:spacing w:after="120"/>`, `<w:sz w:val="56"/>`],
+  Heading1: heading(0, 32),
+  Heading2: heading(1, 26),
+  Heading3: heading(2, 24),
+  Heading4: heading(3, 22, "<w:i/>"),
+  Heading5: heading(4, 22),
+  Heading6: heading(5, 22, "<w:i/>"),
+  Quote: ["Quote", `<w:ind w:left="720" w:right="720"/>`, `<w:i/>`],
+};
+
 /**
  * A .docx package. The main document part stays a live DOM; the editor rewrites
  * only <w:body>, so headers, footers, styles, comments etc. pass through.
@@ -71,6 +86,23 @@ export class DocxDocument extends OoxmlPackage {
   stylesXml(): Document | null {
     const path = this.relOfType(this.mainPath, "styles");
     return path ? this.xml(path) : null;
+  }
+
+  /** Add definitions for built-in paragraph styles the document uses but doesn't define (Word would fall back to Normal). */
+  ensureParagraphStyles(ids: Iterable<string>): void {
+    const styles = this.stylesXml();
+    if (!styles) return;
+    const have = new Set(Array.from(styles.getElementsByTagNameNS(NS.w, "style")).map((st) => st.getAttributeNS(NS.w, "styleId")));
+    for (const id of new Set(ids)) {
+      const def = BUILTIN_STYLES[id];
+      if (!def || have.has(id)) continue;
+      const [name, pPr, rPr] = def;
+      const xml =
+        `<w:style xmlns:w="${NS.w}" w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/>` +
+        `<w:next w:val="Normal"/><w:qFormat/><w:pPr>${pPr}</w:pPr><w:rPr>${rPr}</w:rPr></w:style>`;
+      styles.documentElement.appendChild(styles.importNode(parseXml(xml)!.documentElement, true));
+      have.add(id);
+    }
   }
 
   numberingXml(): Document | null {

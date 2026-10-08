@@ -60,7 +60,7 @@ describe("letterSpacing", () => {
 });
 
 describe("renderParagraphs width fitting", () => {
-  const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 20, color: "#000000", font: "Calibri" };
+  const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 20, color: "#000000", font: "Calibri", spc: 0, link: null };
   const para = (font: string): Para => ({
     runs: [{ ...defaults, font, text: "Assumptions" }],
     align: "l",

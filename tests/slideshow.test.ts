@@ -97,6 +97,16 @@ describe("Slideshow", () => {
     expect(overlay().classList.contains("is-presenter")).toBe(false);
   });
 
+  it("opens links instead of advancing", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    show = new Slideshow({ ...deck(), render: (host) => (host.innerHTML = '<span data-link="https://x.y/">link</span>') }, 0, exit);
+    show.open();
+    overlay().querySelector<HTMLElement>("[data-link]")!.click();
+    expect(open).toHaveBeenCalledWith("https://x.y/");
+    expect(show.index).toBe(0);
+    open.mockRestore();
+  });
+
   it("says so when a slide has no notes", () => {
     show = new Slideshow({ ...deck(), notes: () => "" }, 0, exit);
     show.open();

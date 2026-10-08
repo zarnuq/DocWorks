@@ -1,12 +1,35 @@
-import { FileView, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, Menu, Modifier, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
 import { PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel } from "../../domain/pptx/slide-model";
-import { ParaInput, addPicture, addTextBox, setRect, writeParagraphs } from "../../domain/pptx/slide-edit";
+import {
+  CONNECTORS,
+  Glue,
+  ParaInput,
+  addPicture,
+  addShape,
+  addTextBox,
+  connect,
+  lineBox,
+  rerouteConnectors,
+  setAdjust,
+  setRect,
+  setTransform,
+  shapeId,
+  sitePoint,
+  reorder,
+  writeBodyPr,
+  writeParagraphs,
+} from "../../domain/pptx/slide-edit";
+import { presetGeometry, solveAdjust } from "../../domain/pptx/geometry";
+import { buildShapeGallery, ShapeChoice } from "./shape-gallery";
+import { ArrangeControl, buildArrangePanel, buildShapePanel, PanelControl } from "./shape-panel";
+import { alignRects, Alignment, Clip, copyItems, distributeRects, groupItems, itemRect, pasteItems, setItemRect, snapRect, topLevel, ungroupItem } from "../../domain/pptx/arrange";
+import { promptText } from "../common/toolbar";
 import { History } from "../../core/utils/history";
 import { FONTS, PaperTheme, Toolbar } from "../common/toolbar";
 import { nextVisible, Slideshow } from "./slideshow";
 import { RenderedShape, renderSlide } from "./slide-renderer";
-import { applyRunStyle, insertPlainText, markEmptyParagraphs, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
+import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
 
 export const VIEW_TYPE_PPTX = "doc-works-pptx-view";
 
@@ -22,10 +45,47 @@ const IMAGE_MIME: Record<string, string> = {
   svg: "image/svg+xml",
 };
 const MIN_SIZE_EMU = 91440;
+const EMU_PER_PT = 12700;
+const EMU_PER_INCH = 914400;
+/** Snap distance for connector ends, in px. */
+const SNAP_PX = 10;
 
 type Snapshot = { snap: PptxSnapshot; index: number };
 
-const isMod = (e: KeyboardEvent) => e.ctrlKey || e.metaKey;
+const isMod = (e: KeyboardEvent | MouseEvent) => e.ctrlKey || e.metaKey;
+const P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main";
+
+/** Start / end of a range as character offsets into `root`'s text. */
+function textOffsets(root: HTMLElement, range: Range): [number, number] {
+  const at = (node: Node, offset: number) => {
+    const r = document.createRange();
+    r.setStart(root, 0);
+    r.setEnd(node, offset);
+    return r.toString().length;
+  };
+  return [at(range.startContainer, range.startOffset), at(range.endContainer, range.endOffset)];
+}
+
+/** Range covering character offsets [start, end) of `root`'s text. */
+function rangeAt(root: HTMLElement, [start, end]: [number, number]): Range {
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let seen = 0;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const len = n.textContent?.length ?? 0;
+    if (start >= seen && start <= seen + len) range.setStart(n, start - seen);
+    if (end >= seen && end <= seen + len) {
+      range.setEnd(n, end - seen);
+      break;
+    }
+    seen += len;
+  }
+  return range;
+}
+
+/** Copied slide items, shared by every open presentation. */
+let clipboard: { clip: Clip; slidePath: string; pastes: number } | null = null;
 const extOf = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowerCase();
 
 export class PptxView extends FileView {
@@ -37,7 +97,13 @@ export class PptxView extends FileView {
   private model: SlideModel | null = null;
   private rendered: RenderedShape[] = [];
   private scale = 1;
+  /** Rendered shape that gets text formatting, handles and the shape panel. */
   private selected: RenderedShape | null = null;
+  /** Selected slide items (direct children of the shape tree: shapes, pictures, groups). */
+  private items: Element[] = [];
+  private autofitting = false;
+  /** Shapes whose text changed since they were last fitted. */
+  private needsFit = new Set<Element>();
   private activeText: RenderedShape | null = null;
   private savedRange: Range | null = null;
   private history = new History<Snapshot>();
@@ -55,12 +121,36 @@ export class PptxView extends FileView {
   private slideHostEl!: HTMLElement;
   private notesEl!: HTMLTextAreaElement;
   private notesTimer: number | null = null;
+  private propsEl!: HTMLElement;
+  private galleryEl: HTMLElement | null = null;
+  /** Shape picked in the gallery, waiting to be drawn on the slide. */
+  private drawing: ShapeChoice | null = null;
+  private lockAspect = false;
   private hideBtn: HTMLButtonElement | null = null;
   private saveIndicatorEl: HTMLElement | null = null;
   private syncTheme: ((t: PaperTheme) => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf);
+    // Shape shortcuts go through a view scope so they win over app hotkeys (Ctrl+G opens the graph otherwise).
+    // They only act while the slide stage has focus; in text they fall through to normal editing.
+    this.scope = new Scope(this.app.scope);
+    const keys: [Modifier[], string, () => void][] = [
+      [["Mod"], "c", () => void this.copySelection()],
+      [["Mod"], "x", () => void this.cutSelection()],
+      [["Mod"], "v", () => this.paste()],
+      [["Mod"], "d", () => void this.duplicateSelection()],
+      [["Mod"], "a", () => this.setSelection(this.slideItems())],
+      [["Mod"], "g", () => this.groupSelection()],
+      [["Mod", "Shift"], "g", () => this.ungroupSelection()],
+    ];
+    for (const [mods, key, run] of keys) {
+      this.scope.register(mods, key, () => {
+        if (!this.stageEl || document.activeElement !== this.stageEl) return true;
+        run();
+        return false;
+      });
+    }
   }
 
   getViewType(): string {
@@ -105,6 +195,9 @@ export class PptxView extends FileView {
     this.stageEl = body.createDiv({ cls: "pptx-stage" });
     this.stageEl.tabIndex = 0;
     this.slideHostEl = this.stageEl.createDiv({ cls: "pptx-slide-host" });
+    this.propsEl = body.createDiv({ cls: "pptx-props" });
+    this.propsEl.hide();
+    this.slideHostEl.addEventListener("pointerdown", (e) => this.drawing && this.startDraw(e), { capture: true });
     this.notesEl = this.stageEl.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes" } });
     this.notesEl.addEventListener("input", () => {
       if (this.notesTimer) window.clearTimeout(this.notesTimer);
@@ -114,8 +207,11 @@ export class PptxView extends FileView {
 
     this.stageEl.addEventListener("keydown", this.onStageKey);
     this.stageEl.addEventListener("pointerdown", (e) => {
-      if (e.target === this.stageEl || e.target === this.slideHostEl) this.select(null);
+      const t = e.target as HTMLElement;
+      if (this.drawing || e.button !== 0 || t.closest(".pptx-shape:not(.is-inherited)") || t.closest("textarea, .pptx-props")) return;
+      if (t === this.stageEl || this.slideHostEl.contains(t)) this.startMarquee(e);
     });
+    this.stageEl.addEventListener("contextmenu", (e) => this.contextMenu(e));
     this.stageEl.addEventListener("paste", this.onPaste);
     this.stageEl.addEventListener("dragover", (e) => e.preventDefault());
     this.stageEl.addEventListener("drop", (e) => {
@@ -198,6 +294,7 @@ export class PptxView extends FileView {
         width: THUMB_WIDTH,
         editable: false,
         imageUrl: this.imageUrl,
+        slideNumber: i + 1,
       });
       item.onclick = () => this.goTo(i);
     });
@@ -207,7 +304,7 @@ export class PptxView extends FileView {
     const host = this.thumbsEl.children[i]?.querySelector<HTMLElement>(".pptx-thumb-slide");
     const slide = this.doc?.slides()[i];
     if (!host || !slide || !this.doc) return;
-    renderSlide(host, parseSlide(this.doc, slide.path), this.doc.slideSize, { width: THUMB_WIDTH, editable: false, imageUrl: this.imageUrl });
+    renderSlide(host, parseSlide(this.doc, slide.path), this.doc.slideSize, { width: THUMB_WIDTH, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 });
   }
 
   private renderCurrent(): void {
@@ -219,7 +316,7 @@ export class PptxView extends FileView {
     this.lastStageWidth = this.stageEl.clientWidth;
     const width = Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400));
     this.scale = width / this.doc.slideSize.cx;
-    this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: true, imageUrl: this.imageUrl });
+    this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: true, imageUrl: this.imageUrl, slideNumber: this.index + 1 });
     this.rendered.forEach((rs) => this.wireShape(rs));
 
     const canEdit = this.doc.canEditNotes(this.index);
@@ -227,7 +324,13 @@ export class PptxView extends FileView {
     this.notesEl.disabled = !canEdit;
     this.notesEl.placeholder = canEdit ? "Click to add speaker notes" : "This presentation has no notes master, so notes can't be added.";
     this.hideBtn?.setText(this.doc.isHidden(this.index) ? "Show slide" : "Hide slide");
+    // Keep the selection across redraws of the same slide (resizes, edits).
+    const xml = this.currentSlideXml();
+    const keep = this.items.filter((i) => xml?.contains(i));
+    const primary = this.selected?.shape.el ?? null;
+    this.items = [];
     this.selected = null;
+    this.setSelection(keep, primary);
     this.activeText = null;
     this.savedRange = null;
     Array.from(this.thumbsEl.children).forEach((c, i) => c.toggleClass("is-active", i === this.index));
@@ -248,10 +351,17 @@ export class PptxView extends FileView {
     if (shape.inherited) return;
 
     el.addEventListener("pointerdown", (e) => {
-      this.select(rs);
+      if (e.button !== 0 || this.drawing) return;
+      const item = topLevel(shape.el);
+      if (e.shiftKey || isMod(e)) {
+        e.preventDefault();
+        this.setSelection(this.items.includes(item) ? this.items.filter((i) => i !== item) : [...this.items, item]);
+        return;
+      }
+      if (!this.items.includes(item)) this.setSelection([item], shape.el);
       if (textEl?.contains(e.target as Node)) return;
       this.stageEl.focus({ preventScroll: true });
-      if (!shape.grouped) this.startDrag(e, rs, "move");
+      this.startMoveItems(e);
     });
 
     if (!shape.grouped) {
@@ -262,30 +372,443 @@ export class PptxView extends FileView {
           e.stopPropagation();
           this.select(rs);
           this.stageEl.focus({ preventScroll: true });
-          this.startDrag(e, rs, mode);
+          if (mode === "move") this.startMoveItems(e);
+          else this.startDrag(e, rs, mode);
+        });
+      }
+      if (shape.el.localName === "sp" || shape.el.localName === "pic") {
+        const rot = el.createDiv({ cls: "pptx-handle pptx-handle-rotate", attr: { "aria-label": "Drag to rotate (Shift snaps to 15°)" } });
+        rot.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+          this.select(rs);
+          this.startRotate(e, rs);
+        });
+      }
+    }
+
+    // Text fills the shape, so its edges are the grab area for moving (as in PowerPoint).
+    if (textEl) {
+      for (const side of ["t", "r", "b", "l"]) {
+        el.createDiv({ cls: `pptx-edge pptx-edge-${side}` }).addEventListener("pointerdown", (e) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          const item = topLevel(shape.el);
+          if (e.shiftKey || isMod(e)) {
+            this.setSelection(this.items.includes(item) ? this.items.filter((i) => i !== item) : [...this.items, item]);
+            return;
+          }
+          if (!this.items.includes(item)) this.setSelection([item], shape.el);
+          this.stageEl.focus({ preventScroll: true });
+          this.startMoveItems(e);
         });
       }
     }
 
     if (textEl) {
+      textEl.addEventListener("click", (e) => {
+        // Ctrl / Cmd + click follows a link.
+        const link = (e.target as HTMLElement).closest<HTMLElement>("[data-link]")?.dataset.link;
+        if (link && isMod(e)) window.open(link);
+      });
       textEl.addEventListener("input", () => {
         textEl.toggleClass("is-empty", !textEl.textContent);
-        markEmptyParagraphs(textEl);
+        refreshMarks(textEl);
         this.scheduleCommit(rs);
       });
       textEl.addEventListener("focus", () => {
         this.activeText = rs;
-        this.select(rs);
+        if (this.items.includes(topLevel(shape.el))) this.selected = rs;
+        else this.select(rs);
       });
-      textEl.addEventListener("blur", () => this.flushCommit());
+      textEl.addEventListener("blur", () => {
+        this.flushCommit();
+        // Refit only text that was edited: opening and clicking around must not change the file.
+        if (this.needsFit.delete(shape.el)) this.autofit(rs);
+      });
       textEl.addEventListener("keydown", (e) => this.onTextKey(e, rs));
     }
   }
 
+  /** Select one rendered shape's slide item (null clears the selection). */
   private select(rs: RenderedShape | null): void {
-    this.selected?.el.removeClass("is-selected");
-    this.selected = rs;
-    rs?.el.addClass("is-selected");
+    this.setSelection(rs ? [topLevel(rs.shape.el)] : [], rs?.shape.el ?? null);
+  }
+
+  /** Select the rendered shape for `el` again after a redraw. */
+  private reselect(el: Element | null): void {
+    if (el) this.setSelection([topLevel(el)], el);
+  }
+
+  /**
+   * Set the selected items. A single plain shape gets handles and the shape
+   * panel; groups and multi-selections get a selection box and the arrange panel.
+   */
+  private setSelection(items: Element[], primaryEl: Element | null = null): void {
+    for (const r of this.rendered) {
+      r.el.removeClass("is-selected", "is-in-selection");
+      r.el.querySelectorAll(".pptx-handle-adjust").forEach((h) => h.remove());
+    }
+    this.slideHostEl.querySelectorAll(".pptx-selbox").forEach((b) => b.remove());
+    this.items = items;
+    const single = items.length === 1 && items[0].localName !== "grpSp" ? items[0] : null;
+    this.selected = this.rendered.find((r) => r.shape.el === (primaryEl ?? single)) ?? null;
+    for (const r of this.rendered) if (items.includes(topLevel(r.shape.el))) r.el.addClass("is-in-selection");
+
+    if (!items.length) {
+      this.propsEl.hide();
+      return;
+    }
+    const rs = single ? this.rendered.find((r) => r.shape.el === single) : null;
+    if (rs && !rs.shape.inherited) {
+      this.selected = rs;
+      rs.el.addClass("is-selected");
+      this.addAdjustHandles(rs);
+      const ctl = { edit: (fn: (el: Element) => void) => this.editShape(rs.shape.el, fn, true), arrange: this.arrangeControl() } as PanelControl;
+      Object.defineProperty(ctl, "lockAspect", { get: () => this.lockAspect, set: (v: boolean) => (this.lockAspect = v) });
+      buildShapePanel(this.propsEl, rs.shape, ctl);
+    } else {
+      this.drawSelectionBox();
+      buildArrangePanel(this.propsEl, this.arrangeControl());
+    }
+    this.propsEl.show();
+  }
+
+  /** Dashed box around a group or multi-selection; a single group can be resized from its corner. */
+  private drawSelectionBox(): void {
+    const slide = this.slideHostEl.querySelector<HTMLElement>(".pptx-slide");
+    if (!slide || !this.items.length) return;
+    const b = this.union(this.items.map((i) => this.itemBounds(i)));
+    const box = slide.createDiv({ cls: "pptx-selbox" });
+    Object.assign(box.style, { left: `${b.x * this.scale}px`, top: `${b.y * this.scale}px`, width: `${b.w * this.scale}px`, height: `${b.h * this.scale}px` });
+    if (this.items.length === 1) {
+      const group = this.items[0];
+      box.createDiv({ cls: "pptx-handle pptx-handle-resize" }).addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+        this.startResizeItem(e, group, box);
+      });
+    }
+  }
+
+  private union(rects: Rect[]): Rect {
+    const x = Math.min(...rects.map((r) => r.x));
+    const y = Math.min(...rects.map((r) => r.y));
+    return { x, y, w: Math.max(...rects.map((r) => r.x + r.w)) - x, h: Math.max(...rects.map((r) => r.y + r.h)) - y };
+  }
+
+  /** Bounds of a slide item: a group's own box, else the shape as parsed (placeholders may inherit theirs). */
+  private itemBounds(item: Element): Rect {
+    if (item.localName === "grpSp") return itemRect(item);
+    return this.rendered.find((r) => r.shape.el === item)?.shape.rect ?? itemRect(item);
+  }
+
+  /** Slide-owned items on the current slide, in drawing order. */
+  private slideItems(): Element[] {
+    return [...new Set(this.rendered.filter((r) => !r.shape.inherited).map((r) => topLevel(r.shape.el)))];
+  }
+
+  /** One undoable XML change to a shape; keeps glued connectors attached and the shape selected. `refit` re-runs autofit. */
+  private editShape(el: Element, fn: (el: Element) => void, refit = false): void {
+    this.mutate(() => {
+      fn(el);
+      this.reroute();
+    }, "slide");
+    this.reselect(el);
+    const rs = refit ? this.rendered.find((r) => r.shape.el === el) : null;
+    if (rs) this.autofit(rs);
+  }
+
+  /** One undoable change to several items, which stay selected. */
+  private editItems(items: Element[], fn: () => void): void {
+    this.mutate(() => {
+      fn();
+      this.reroute();
+    }, "slide");
+    this.setSelection(items.filter((i) => i.isConnected));
+  }
+
+  private arrangeControl(): ArrangeControl {
+    const items = this.items;
+    const rects = () => items.map((i) => this.itemBounds(i));
+    const slide = { x: 0, y: 0, w: this.doc?.slideSize.cx ?? 0, h: this.doc?.slideSize.cy ?? 0 };
+    const place = (out: Rect[]) => this.editItems(items, () => items.forEach((it, k) => setItemRect(it, out[k])));
+    return {
+      count: items.length,
+      groups: items.filter((i) => i.localName === "grpSp").length,
+      align: (mode: Alignment) => place(alignRects(rects(), mode, items.length === 1 ? slide : undefined)),
+      distribute: (axis) => place(distributeRects(rects(), axis)),
+      group: () => this.groupSelection(),
+      ungroup: () => this.ungroupSelection(),
+      order: (to) => {
+        // Keep the items' relative order: "front" and "backward" go in document order, the others in reverse.
+        const sorted = [...items].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        const seq = to === "front" || to === "backward" ? sorted : sorted.reverse();
+        this.editItems(items, () => seq.forEach((it) => reorder(it, to)));
+      },
+    };
+  }
+
+  private groupSelection(): void {
+    const xml = this.currentSlideXml();
+    if (!xml || this.items.length < 2) return;
+    if (this.items.some((i) => i.getElementsByTagNameNS(P_NS, "ph").length)) {
+      new Notice("Placeholders can't be grouped.");
+      return;
+    }
+    const items = this.items;
+    const rects = items.map((i) => this.itemBounds(i));
+    let group: Element | null = null;
+    this.mutate(() => (group = groupItems(xml, items, rects)), "slide");
+    if (group) this.setSelection([group]);
+  }
+
+  private ungroupSelection(): void {
+    const items = this.items;
+    const out: Element[] = [];
+    this.mutate(() => {
+      for (const it of items) out.push(...(it.localName === "grpSp" ? ungroupItem(it) : [it]));
+    }, "slide");
+    this.setSelection(out.filter((i) => i.isConnected));
+  }
+
+  // --- Copy / paste -----------------------------------------------------------
+
+  private async copySelection(): Promise<boolean> {
+    if (!this.doc || !this.items.length) return false;
+    const slidePath = this.doc.slides()[this.index].path;
+    clipboard = { clip: await copyItems(this.doc, slidePath, this.items), slidePath, pastes: 0 };
+    return true;
+  }
+
+  private paste(): void {
+    if (!this.doc || !clipboard) return;
+    const slidePath = this.doc.slides()[this.index].path;
+    // Pasting where the items came from offsets each copy so it doesn't hide the original.
+    const same = clipboard.clip.doc === this.doc && clipboard.slidePath === slidePath;
+    const step = same ? ++clipboard.pastes * (EMU_PER_INCH / 10) : 0;
+    const clip = clipboard.clip;
+    let result: { pasted: Element[]; skipped: number } = { pasted: [], skipped: 0 };
+    this.mutate((doc) => (result = pasteItems(doc, slidePath, clip, { dx: step, dy: step })), "slide");
+    if (result.skipped) new Notice(`${result.skipped} item(s) (charts or diagrams) can't be pasted.`);
+    this.setSelection(result.pasted);
+  }
+
+  private async cutSelection(): Promise<void> {
+    if (await this.copySelection()) this.deleteSelected();
+  }
+
+  private async duplicateSelection(): Promise<void> {
+    if (await this.copySelection()) this.paste();
+  }
+
+  // --- Moving, marquee, snapping ----------------------------------------------
+
+  /** Drag every selected item together, snapping the selection to other shapes and the slide (Alt: no snapping). */
+  private startMoveItems(e: PointerEvent): void {
+    e.preventDefault();
+    const items = this.items.slice();
+    if (!items.length || !this.doc) return;
+    const start = { x: e.clientX, y: e.clientY };
+    const rects0 = items.map((i) => this.itemBounds(i));
+    const box0 = this.union(rects0);
+    const others = this.slideItems().filter((i) => !items.includes(i)).map((i) => this.itemBounds(i));
+    const moving = this.rendered.filter((r) => items.includes(topLevel(r.shape.el))).map((r) => ({ el: r.el, left: r.el.offsetLeft, top: r.el.offsetTop }));
+    const selbox = this.slideHostEl.querySelector<HTMLElement>(".pptx-selbox");
+    const box = selbox ? { left: selbox.offsetLeft, top: selbox.offsetTop } : null;
+    const size = this.doc.slideSize;
+    let d = { dx: 0, dy: 0 };
+
+    const onMove = (ev: PointerEvent) => {
+      d = { dx: (ev.clientX - start.x) / this.scale, dy: (ev.clientY - start.y) / this.scale };
+      let guides: ({ x: number } | { y: number })[] = [];
+      if (!ev.altKey) {
+        const snap = snapRect({ ...box0, x: box0.x + d.dx, y: box0.y + d.dy }, others, size, SNAP_PX / this.scale);
+        d = { dx: d.dx + snap.dx, dy: d.dy + snap.dy };
+        guides = snap.guides;
+      }
+      for (const m of moving) Object.assign(m.el.style, { left: `${m.left + d.dx * this.scale}px`, top: `${m.top + d.dy * this.scale}px` });
+      if (selbox && box) Object.assign(selbox.style, { left: `${box.left + d.dx * this.scale}px`, top: `${box.top + d.dy * this.scale}px` });
+      this.showGuides(guides);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      this.showGuides([]);
+      if (Math.hypot(d.dx, d.dy) * this.scale < 1) return;
+      this.editItems(items, () =>
+        items.forEach((it, k) => {
+          setItemRect(it, { ...rects0[k], x: rects0[k].x + d.dx, y: rects0[k].y + d.dy });
+          // Dragging a connector away unglues it, as in PowerPoint.
+          if (it.localName === "cxnSp") {
+            connect(it, "st", null);
+            connect(it, "end", null);
+          }
+        })
+      );
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  /** Scale a group from its selection box corner (Shift keeps the aspect ratio). */
+  private startResizeItem(e: PointerEvent, item: Element, box: HTMLElement): void {
+    e.preventDefault();
+    const start = { x: e.clientX, y: e.clientY };
+    const r0 = this.itemBounds(item);
+    let next: Rect | null = null;
+    const onMove = (ev: PointerEvent) => {
+      let w = Math.max(MIN_SIZE_EMU, r0.w + (ev.clientX - start.x) / this.scale);
+      let h = Math.max(MIN_SIZE_EMU, r0.h + (ev.clientY - start.y) / this.scale);
+      if ((ev.shiftKey || this.lockAspect) && r0.w && r0.h) {
+        const k = Math.max(w / r0.w, h / r0.h);
+        [w, h] = [r0.w * k, r0.h * k];
+      }
+      next = { ...r0, w, h };
+      Object.assign(box.style, { width: `${w * this.scale}px`, height: `${h * this.scale}px` });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const rect = next;
+      if (rect) this.editItems([item], () => setItemRect(item, rect));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  private showGuides(guides: ({ x: number } | { y: number })[]): void {
+    const slide = this.slideHostEl.querySelector<HTMLElement>(".pptx-slide");
+    slide?.querySelectorAll(".pptx-guide").forEach((g) => g.remove());
+    for (const g of guides) {
+      const line = slide?.createDiv({ cls: `pptx-guide ${"x" in g ? "is-vertical" : "is-horizontal"}` });
+      if (line) line.setCssProps({ "--pptx-guide-at": `${("x" in g ? g.x : g.y) * this.scale}px` });
+    }
+  }
+
+  /** Rubber-band selection: items entirely inside the dragged box (Shift adds to the selection). */
+  private startMarquee(e: PointerEvent): void {
+    const slide = this.slideHostEl.querySelector<HTMLElement>(".pptx-slide");
+    if (!slide) return;
+    const origin = slide.getBoundingClientRect();
+    const at = (ev: PointerEvent) => ({ x: (ev.clientX - origin.left) / this.scale, y: (ev.clientY - origin.top) / this.scale });
+    const a = at(e);
+    let b = a;
+    const add = e.shiftKey;
+    const band = slide.createDiv({ cls: "pptx-marquee" });
+    const onMove = (ev: PointerEvent) => {
+      b = at(ev);
+      const r = lineBox(a, b).rect;
+      Object.assign(band.style, { left: `${r.x * this.scale}px`, top: `${r.y * this.scale}px`, width: `${r.w * this.scale}px`, height: `${r.h * this.scale}px` });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      band.remove();
+      const r = lineBox(a, b).rect;
+      if (r.w * this.scale < 3 && r.h * this.scale < 3) {
+        if (!add) this.setSelection([]);
+        return;
+      }
+      const inside = this.slideItems().filter((i) => {
+        const q = this.itemBounds(i);
+        return q.x >= r.x && q.y >= r.y && q.x + q.w <= r.x + r.w && q.y + q.h <= r.y + r.h;
+      });
+      this.setSelection(add ? [...new Set([...this.items, ...inside])] : inside);
+      this.stageEl.focus({ preventScroll: true });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  private contextMenu(e: MouseEvent): void {
+    const target = e.target as HTMLElement;
+    if (target.closest("textarea, .pptx-text[contenteditable='true']:focus")) return;
+    const shapeEl = target.closest<HTMLElement>(".pptx-shape:not(.is-inherited)");
+    const rs = shapeEl ? this.rendered.find((r) => r.el === shapeEl) : null;
+    if (rs && !this.items.includes(topLevel(rs.shape.el))) this.select(rs);
+    e.preventDefault();
+    const menu = new Menu();
+    const item = (title: string, fn: () => void, enabled = true) => menu.addItem((i) => i.setTitle(title).setDisabled(!enabled).onClick(fn));
+    const has = this.items.length > 0;
+    item("Cut", () => void this.cutSelection(), has);
+    item("Copy", () => void this.copySelection(), has);
+    item("Paste", () => this.paste(), !!clipboard);
+    item("Duplicate", () => void this.duplicateSelection(), has);
+    item("Delete", () => this.deleteSelected(), has);
+    menu.addSeparator();
+    item("Group", () => this.groupSelection(), this.items.length > 1);
+    item("Ungroup", () => this.ungroupSelection(), this.items.some((i) => i.localName === "grpSp"));
+    item("Bring to front", () => this.arrangeControl().order("front"), has);
+    item("Send to back", () => this.arrangeControl().order("back"), has);
+    menu.addSeparator();
+    item("Select all", () => this.setSelection(this.slideItems()));
+    menu.showAtMouseEvent(e);
+  }
+
+  // --- Autofit ----------------------------------------------------------------
+
+  /**
+   * PowerPoint's autofit, applied when editing ends: "shrink" finds the largest
+   * font scale (with 20% less line spacing) that fits the box; "resize" sets
+   * the shape height to the text height.
+   */
+  private autofit(rs: RenderedShape): void {
+    const t = rs.shape.text;
+    const el = rs.textEl;
+    if (!t || !el || t.autofit === "none" || rs.shape.inherited || this.autofitting || !el.isConnected) return;
+    // Measure on a hidden copy so the live text (and the caret / selection in it) is left alone.
+    const probe = el.cloneNode(false) as HTMLElement;
+    probe.removeAttribute("contenteditable");
+    probe.addClass("pptx-measure");
+    el.parentElement!.appendChild(probe);
+    const base = EMU_PER_PT * this.scale;
+    const render = (scale: number, reduction: number) =>
+      renderParagraphs(probe, t.paras, base * scale, this.scale, reduction, { slideNumber: this.index + 1 });
+    let apply: (() => void) | null = null;
+    try {
+      if (t.autofit === "resize") {
+        render(t.fontScale, t.lnSpcReduction);
+        Object.assign(probe.style, { bottom: "auto", height: "auto" });
+        const needed = probe.offsetHeight / this.scale;
+        if (Math.abs(needed - rs.shape.rect.h) > EMU_PER_PT * 2) apply = () => this.editShape(rs.shape.el, (x) => setRect(x, { ...rs.shape.rect, h: needed }));
+      } else {
+        const fits = () => probe.scrollHeight <= probe.clientHeight + 1;
+        let scale = 1;
+        let reduction = 0;
+        render(1, 0);
+        if (!fits()) {
+          reduction = 0.2;
+          let [lo, hi] = [0.25, 1];
+          for (let i = 0; i < 10; i++) {
+            const mid = (lo + hi) / 2;
+            render(mid, reduction);
+            if (fits()) lo = mid;
+            else hi = mid;
+          }
+          // PowerPoint steps the font scale in 2.5% increments.
+          scale = Math.floor(lo * 40) / 40;
+        }
+        if (Math.abs(scale - t.fontScale) > 0.001 || Math.abs(reduction - t.lnSpcReduction) > 0.001) {
+          apply = () => this.editShape(rs.shape.el, () => writeBodyPr(t.el, { autofit: { type: "shrink", fontScale: scale, lnSpcReduction: reduction } }));
+        }
+      }
+    } finally {
+      probe.remove();
+    }
+    if (!apply) return;
+    this.autofitting = true;
+    try {
+      apply();
+    } finally {
+      this.autofitting = false;
+    }
+  }
+
+
+  /** Move glued connector ends after shapes moved. Re-parses the current slide. */
+  private reroute(): boolean {
+    const xml = this.currentSlideXml();
+    if (!xml || !this.doc) return false;
+    return rerouteConnectors(xml, parseSlide(this.doc, this.doc.slides()[this.index].path).shapes);
   }
 
   private activeTextFocused(): boolean {
@@ -296,15 +819,25 @@ export class PptxView extends FileView {
     e.preventDefault();
     const start = { x: e.clientX, y: e.clientY };
     const r0 = { ...rs.shape.rect };
+    const el = rs.shape.el;
+    const isConnector = el.localName === "cxnSp";
+    const min = isConnector ? 0 : MIN_SIZE_EMU;
     let next: Rect | null = null;
 
     const onMove = (ev: PointerEvent) => {
       const dx = (ev.clientX - start.x) / this.scale;
       const dy = (ev.clientY - start.y) / this.scale;
-      next =
-        mode === "move"
-          ? { ...r0, x: r0.x + dx, y: r0.y + dy }
-          : { ...r0, w: Math.max(MIN_SIZE_EMU, r0.w + dx), h: Math.max(MIN_SIZE_EMU, r0.h + dy) };
+      if (mode === "move") next = { ...r0, x: r0.x + dx, y: r0.y + dy };
+      else {
+        let w = Math.max(min, r0.w + dx);
+        let h = Math.max(min, r0.h + dy);
+        // Shift, the panel's lock, or a picture: keep the aspect ratio.
+        if ((ev.shiftKey || this.lockAspect || rs.shape.kind === "pic") && r0.w && r0.h) {
+          const k = Math.max(w / r0.w, h / r0.h);
+          [w, h] = [r0.w * k, r0.h * k];
+        }
+        next = { ...r0, w, h };
+      }
       Object.assign(rs.el.style, {
         left: `${next.x * this.scale}px`,
         top: `${next.y * this.scale}px`,
@@ -315,13 +848,200 @@ export class PptxView extends FileView {
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      if (!next || !this.doc) return;
-      this.flushCommit();
-      this.pushHistory();
-      setRect(rs.shape.el, next);
-      this.refreshModel();
-      this.markDirty();
-      this.refreshThumb(this.index);
+      const rect = next;
+      if (!rect || !this.doc) return;
+      this.editShape(el, (x) => {
+        setRect(x, rect);
+        // Dragging a connector away unglues it, as in PowerPoint.
+        if (isConnector && mode === "move") {
+          connect(x, "st", null);
+          connect(x, "end", null);
+        }
+      }, mode === "resize");
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  private startRotate(e: PointerEvent, rs: RenderedShape): void {
+    e.preventDefault();
+    const box = rs.el.getBoundingClientRect();
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    let angle: number | null = null;
+    const onMove = (ev: PointerEvent) => {
+      angle = (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI + 90;
+      if (ev.shiftKey) angle = Math.round(angle / 15) * 15;
+      angle = ((angle % 360) + 360) % 360;
+      rs.el.style.transform = `rotate(${angle}deg)`;
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const rot = angle;
+      if (rot !== null) this.editShape(rs.shape.el, (x) => setTransform(x, { rot }));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  /** Yellow handles that change a preset's adjust values (arrow head size, corner rounding...). */
+  private addAdjustHandles(rs: RenderedShape): void {
+    const { shape } = rs;
+    if (shape.inherited || shape.grouped || shape.geom === "custom" || !shape.handles.length) return;
+    const place = (h: HTMLElement, x: number, y: number) =>
+      Object.assign(h.style, {
+        left: `${(shape.flipH ? shape.rect.w - x : x) * this.scale}px`,
+        top: `${(shape.flipV ? shape.rect.h - y : y) * this.scale}px`,
+      });
+    shape.handles.forEach((handle, i) => {
+      const h = rs.el.createDiv({ cls: "pptx-handle pptx-handle-adjust", attr: { "aria-label": "Drag to adjust the shape" } });
+      place(h, handle.x, handle.y);
+      h.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const box = rs.el.getBoundingClientRect();
+        const [cx, cy] = [box.left + box.width / 2, box.top + box.height / 2];
+        const a = (-shape.rot * Math.PI) / 180;
+        const { w, h: ht } = shape.rect;
+        let adj = shape.adj;
+        const onMove = (ev: PointerEvent) => {
+          // Pointer in the shape's own (unrotated, unflipped) coordinates.
+          const [dx, dy] = [ev.clientX - cx, ev.clientY - cy];
+          let x = (dx * Math.cos(a) - dy * Math.sin(a)) / this.scale + w / 2;
+          let y = (dx * Math.sin(a) + dy * Math.cos(a)) / this.scale + ht / 2;
+          if (shape.flipH) x = w - x;
+          if (shape.flipV) y = ht - y;
+          adj = solveAdjust(shape.geom, w, ht, shape.adj, i, { x, y });
+          const moved = presetGeometry(shape.geom, w, ht, adj)?.handles[i];
+          if (moved) place(h, moved.x, moved.y);
+        };
+        const onUp = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          const changed = Object.entries(adj).filter(([k, v]) => shape.adj[k] !== v);
+          if (changed.length) this.editShape(shape.el, (x) => changed.forEach(([k, v]) => setAdjust(x, k, v)));
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drawing new shapes
+  // ---------------------------------------------------------------------------
+
+  private toggleGallery(anchor: HTMLElement): void {
+    if (this.galleryEl) return this.closeGallery();
+    const g = (this.galleryEl = this.contentEl.createDiv({ cls: "pptx-gallery" }));
+    buildShapeGallery(g, (choice) => {
+      this.closeGallery();
+      this.drawing = choice;
+      this.stageEl.addClass("is-drawing");
+      new Notice("Drag on the slide to draw the shape, or click for a default size. Esc cancels.");
+    });
+    const a = anchor.getBoundingClientRect();
+    const c = this.contentEl.getBoundingClientRect();
+    const left = Math.max(0, Math.min(a.left - c.left, c.width - g.offsetWidth - 8));
+    g.setCssProps({ "--pptx-gallery-top": `${a.bottom - c.top + 4}px`, "--pptx-gallery-left": `${left}px` });
+    const outside = (e: PointerEvent) => {
+      if (g.contains(e.target as Node) || anchor.contains(e.target as Node)) return;
+      this.closeGallery();
+    };
+    window.addEventListener("pointerdown", outside, { capture: true });
+    this.closeGalleryListener = () => window.removeEventListener("pointerdown", outside, { capture: true });
+  }
+
+  private closeGalleryListener: (() => void) | null = null;
+
+  private closeGallery(): void {
+    this.closeGalleryListener?.();
+    this.closeGalleryListener = null;
+    this.galleryEl?.remove();
+    this.galleryEl = null;
+  }
+
+  private cancelDrawing(): void {
+    this.drawing = null;
+    this.stageEl.removeClass("is-drawing");
+  }
+
+  /** The connection site of a slide shape near `p` (EMU), for gluing connector ends. */
+  private snapToSite(p: { x: number; y: number }): { p: { x: number; y: number }; glue: Glue | null } {
+    let best: { p: { x: number; y: number }; glue: Glue; d: number } | null = null;
+    for (const rs of this.rendered) {
+      const s = rs.shape;
+      if (s.inherited || s.el.localName === "cxnSp") continue;
+      s.sites.forEach((_, idx) => {
+        const q = sitePoint(s, idx);
+        const d = q ? Math.hypot(q.x - p.x, q.y - p.y) : Infinity;
+        if (q && d * this.scale <= SNAP_PX && (!best || d < best.d)) best = { p: q, glue: { id: shapeId(s.el), idx }, d };
+      });
+    }
+    const found = best as { p: { x: number; y: number }; glue: Glue } | null;
+    return found ? { p: found.p, glue: found.glue } : { p, glue: null };
+  }
+
+  private startDraw(e: PointerEvent): void {
+    const choice = this.drawing;
+    const slideEl = this.slideHostEl.querySelector<HTMLElement>(".pptx-slide");
+    if (!choice || !slideEl || !this.doc) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const box = slideEl.getBoundingClientRect();
+    const toEmu = (ev: PointerEvent) => ({ x: (ev.clientX - box.left) / this.scale, y: (ev.clientY - box.top) / this.scale });
+    const isLine = CONNECTORS.has(choice.prst);
+    const snap = (p: { x: number; y: number }) => (isLine ? this.snapToSite(p) : { p, glue: null });
+    const a = snap(toEmu(e));
+    let b = a;
+    const preview = slideEl.createDiv({ cls: "pptx-draw-preview" });
+
+    const onMove = (ev: PointerEvent) => {
+      let p = toEmu(ev);
+      if (ev.shiftKey) {
+        const [dx, dy] = [p.x - a.p.x, p.y - a.p.y];
+        if (isLine) {
+          // Snap to multiples of 45 degrees.
+          const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+          const len = Math.hypot(dx, dy);
+          p = { x: a.p.x + len * Math.cos(ang), y: a.p.y + len * Math.sin(ang) };
+        } else {
+          const side = Math.max(Math.abs(dx), Math.abs(dy));
+          p = { x: a.p.x + Math.sign(dx || 1) * side, y: a.p.y + Math.sign(dy || 1) * side };
+        }
+      }
+      b = snap(p);
+      const r = lineBox(a.p, b.p).rect;
+      Object.assign(preview.style, {
+        left: `${r.x * this.scale}px`,
+        top: `${r.y * this.scale}px`,
+        width: `${r.w * this.scale}px`,
+        height: `${r.h * this.scale}px`,
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      preview.remove();
+      this.cancelDrawing();
+      const dragged = Math.hypot(b.p.x - a.p.x, b.p.y - a.p.y) * this.scale > 4;
+      let box2: { rect: Rect; flipH: boolean; flipV: boolean };
+      if (isLine) box2 = lineBox(a.p, dragged ? b.p : { x: a.p.x + EMU_PER_INCH, y: a.p.y });
+      else
+        box2 = dragged
+          ? { rect: lineBox(a.p, b.p).rect, flipH: false, flipV: false }
+          : { rect: { x: a.p.x - EMU_PER_INCH / 2, y: a.p.y - EMU_PER_INCH / 2, w: EMU_PER_INCH, h: EMU_PER_INCH }, flipH: false, flipV: false };
+      let added: Element | null = null;
+      this.mutate(() => {
+        added = addShape(this.currentSlideXml()!, choice.prst, box2.rect, { flipH: box2.flipH, flipV: box2.flipV, tailArrow: choice.tailArrow });
+        if (isLine) {
+          connect(added, "st", a.glue);
+          connect(added, "end", dragged ? b.glue : null);
+          this.reroute();
+        }
+      }, "slide");
+      this.reselect(added);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -374,6 +1094,7 @@ export class PptxView extends FileView {
   }
 
   private commitText(rs: RenderedShape, paras?: ParaInput[]): void {
+    this.needsFit.add(rs.shape.el);
     if (!this.doc || !rs.textEl || !rs.shape.text) return;
     this.pushHistory();
     writeParagraphs(rs.shape.text, paras ?? readParagraphs(rs.textEl, rs.pxPerPt, this.defaultsFor(rs)));
@@ -422,7 +1143,47 @@ export class PptxView extends FileView {
   private updateParas(fn: Parameters<typeof updateParagraphs>[1]): void {
     const rs = this.withText((_, el) => updateParagraphs(el, fn), false);
     // Levels change indents and default sizes: redraw from the saved model.
-    if (rs?.textEl && rs.shape.text) renderParagraphs(rs.textEl, rs.shape.text.paras, rs.pxPerPt, this.scale, rs.shape.text.lnSpcReduction);
+    if (rs?.textEl && rs.shape.text) renderParagraphs(rs.textEl, rs.shape.text.paras, rs.pxPerPt, this.scale, rs.shape.text.lnSpcReduction, { slideNumber: this.index + 1 });
+  }
+
+  private async editLink(): Promise<void> {
+    const rs = this.activeText ?? (this.selected?.textEl ? this.selected : null);
+    if (!rs?.textEl) {
+      new Notice("Select some text first.");
+      return;
+    }
+    const current = selectionRunProps(rs.textEl, rs.pxPerPt, this.defaultsFor(rs))?.link ?? "";
+    // The prompt takes focus and the text may be redrawn meanwhile: remember the selection as character offsets.
+    const offsets = this.savedRange && rs.textEl.contains(this.savedRange.commonAncestorContainer) ? textOffsets(rs.textEl, this.savedRange) : null;
+    const url = await promptText(this.app, "Link address (empty removes the link)", current || "https://");
+    if (url === null) return;
+    const live = this.rendered.find((r) => r.shape.el === rs.shape.el) ?? rs;
+    this.activeText = live;
+    this.savedRange = offsets && live.textEl ? rangeAt(live.textEl, offsets) : null;
+    const link = url.trim() && url.trim() !== "https://" ? url.trim() : null;
+    this.withText((r, el) => applyRunStyle(el, { link }, r.pxPerPt));
+  }
+
+  private fieldMenu(anchor: HTMLElement): void {
+    const menu = new Menu();
+    const add = (title: string, type: string, text: () => string) =>
+      menu.addItem((i) =>
+        i.setTitle(title).onClick(() => {
+          // Without a caret in the box, insert at the end rather than over everything.
+          const el = (this.activeText ?? this.selected)?.textEl;
+          if (el && !(this.savedRange && el.contains(this.savedRange.commonAncestorContainer))) {
+            const end = document.createRange();
+            end.selectNodeContents(el.lastElementChild ?? el);
+            end.collapse(false);
+            this.savedRange = end;
+          }
+          this.withText((_, host) => insertField(host, type, text()), false);
+        })
+      );
+    add("Slide number", "slidenum", () => String(this.index + 1));
+    add("Date", "datetime1", () => new Date().toLocaleDateString());
+    const r = anchor.getBoundingClientRect();
+    menu.showAtPosition({ x: r.left, y: r.bottom });
   }
 
   private clearFormatting(): void {
@@ -435,7 +1196,7 @@ export class PptxView extends FileView {
     }));
     this.flushCommit();
     this.commitText(rs, paras);
-    renderParagraphs(rs.textEl, rs.shape.text.paras, rs.pxPerPt, this.scale, rs.shape.text.lnSpcReduction);
+    renderParagraphs(rs.textEl, rs.shape.text.paras, rs.pxPerPt, this.scale, rs.shape.text.lnSpcReduction, { slideNumber: this.index + 1 });
   }
 
   private onTextKey(e: KeyboardEvent, rs: RenderedShape): void {
@@ -490,7 +1251,18 @@ export class PptxView extends FileView {
       e.preventDefault();
       if (key === "y" || e.shiftKey) this.redo();
       else this.undo();
-    } else if ((e.key === "Delete" || e.key === "Backspace") && this.selected) {
+    } else if (e.key === "Escape" && (this.drawing || this.galleryEl)) {
+      this.cancelDrawing();
+      this.closeGallery();
+    } else if (e.key.startsWith("Arrow") && this.items.length) {
+      // Nudge: 0.1", or one pixel with Alt.
+      e.preventDefault();
+      const step = e.altKey ? 1 / this.scale : EMU_PER_INCH / 10;
+      const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0];
+      const items = this.items;
+      const rects = items.map((i) => this.itemBounds(i));
+      this.editItems(items, () => items.forEach((it, k) => setItemRect(it, { ...rects[k], x: rects[k].x + dx, y: rects[k].y + dy })));
+    } else if ((e.key === "Delete" || e.key === "Backspace") && this.items.length) {
       e.preventDefault();
       this.deleteSelected();
     } else if (e.key === "PageDown" || e.key === "ArrowDown" || e.key === "ArrowRight") {
@@ -526,7 +1298,7 @@ export class PptxView extends FileView {
       isHidden: (i: number) => hidden[i],
       notes: (i: number) => doc.notesText(i),
       render: (host: HTMLElement, i: number, width: number) =>
-        renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl }),
+        renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 }),
     };
     new Slideshow(deck, start, (i) => this.goTo(i)).open();
   }
@@ -535,8 +1307,8 @@ export class PptxView extends FileView {
     if (this.doc) this.history.push({ snap: this.doc.snapshot(), index: this.index });
   }
 
-  /** Snapshot, apply a structural change, then redraw everything. */
-  private mutate(fn: (doc: PptxDocument) => void): void {
+  /** Snapshot, apply a change, then redraw everything (or only the current slide and its thumbnail). */
+  private mutate(fn: (doc: PptxDocument) => void, scope: "all" | "slide" = "all"): void {
     if (!this.doc) return;
     this.flushCommit();
     const before = this.doc.snapshot();
@@ -551,7 +1323,11 @@ export class PptxView extends FileView {
     }
     this.history.push({ snap: before, index });
     this.markDirty();
-    this.renderAll();
+    if (scope === "all") this.renderAll();
+    else {
+      this.renderCurrent();
+      this.refreshThumb(this.index);
+    }
   }
 
   private undo(): void {
@@ -592,9 +1368,10 @@ export class PptxView extends FileView {
   }
 
   private deleteSelected(): void {
-    const rs = this.selected;
-    if (!rs || rs.shape.inherited) return;
-    this.mutate(() => rs.shape.el.remove());
+    const items = this.items;
+    if (!items.length) return;
+    this.mutate(() => items.forEach((i) => i.remove()), "slide");
+    this.setSelection([]);
   }
 
   private promptInsertImage(): void {
@@ -669,12 +1446,22 @@ export class PptxView extends FileView {
     ] as [string, Align][]) {
       btn(label, `Align ${label.toLowerCase()}`, () => this.updateParas((p) => ({ ...p, align })));
     }
-    btn("• List", "Toggle bullets", () => this.updateParas((p) => ({ ...p, bullet: p.bullet ? null : "•" })));
+    btn("• List", "Toggle bullets", () => this.updateParas((p) => ({ ...p, bullet: p.bullet && !p.bullet.startsWith("#") ? null : "•" })));
+    btn("1. List", "Toggle numbering", () => this.updateParas((p) => ({ ...p, bullet: p.bullet?.startsWith("#") ? null : "#arabicPeriod" })));
     btn("Outdent", "Decrease list level (Shift+Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })));
     btn("Indent", "Increase list level (Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })));
+    tb.select("Line spacing", "Line spacing", ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"].map((v) => [v, v]), (v) =>
+      this.updateParas((p) => ({ ...p, lnSpc: { pct: Number(v) } }))
+    );
+    tb.select("Character spacing", "Character spacing", [["Very tight", "-3"], ["Tight", "-1.5"], ["Normal", "0"], ["Loose", "3"], ["Very loose", "6"]], (v) =>
+      this.setRunStyle({ spc: Number(v) })
+    );
+    btn("Link", "Add, change or remove a link (Ctrl+click follows it)", () => void this.editLink());
+    const fieldBtn = btn("Field ▾", "Insert the slide number or date", () => this.fieldMenu(fieldBtn));
     sep();
 
     btn("Text box", "Insert text box", () => this.addTextBox());
+    const shapesBtn = btn("Shapes ▾", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
     btn("Image", "Insert image from file", () => this.promptInsertImage());
     btn("Delete shape", "Delete selected shape (Del)", () => this.deleteSelected());
     sep();

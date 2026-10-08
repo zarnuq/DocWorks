@@ -1,4 +1,5 @@
 import type { ShapeModel, SlideModel } from "../../domain/pptx/slide-model";
+import { fillCss } from "../../domain/pptx/shape-style";
 import { renderParagraphs } from "./text-html";
 
 export interface RenderOptions {
@@ -8,6 +9,8 @@ export interface RenderOptions {
   editable: boolean;
   /** Media path -> URL usable in <img src>, or null if not loaded. */
   imageUrl: (mediaPath: string) => string | null;
+  /** 1-based number shown by slide-number fields. */
+  slideNumber?: number;
 }
 
 export interface RenderedShape {
@@ -19,28 +22,129 @@ export interface RenderedShape {
 }
 
 const EMU_PER_PT = 12700;
-const RADIUS: Record<string, string> = { ellipse: "50%", roundRect: "12%", flowChartAlternateProcess: "12%" };
 const JUSTIFY = { t: "flex-start", ctr: "center", b: "flex-end" } as const;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const svgEl = <K extends keyof SVGElementTagNameMap>(parent: Element, tag: K, attrs: Record<string, string | number> = {}) => {
+  const el = parent.appendChild(document.createElementNS(SVG_NS, tag));
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  return el;
+};
 
-/** Custom geometry and lines: one stretched SVG per path. Gradients fall back to their first color. */
-function drawPaths(el: HTMLElement, shape: ShapeModel, scale: number): void {
-  const fill = shape.fill?.match(/#[0-9A-F]{6}(?:[0-9A-F]{2})?/i)?.[0] ?? "none";
-  for (const path of shape.paths!) {
-    const svg = document.createElementNS(SVG_NS, "svg");
-    svg.setAttribute("viewBox", `0 0 ${path.w} ${path.h}`);
-    svg.setAttribute("preserveAspectRatio", "none");
-    svg.classList.add("pptx-geom");
-    if (shape.flipH || shape.flipV) svg.style.transform = `scale(${shape.flipH ? -1 : 1}, ${shape.flipV ? -1 : 1})`;
-    const p = svg.appendChild(document.createElementNS(SVG_NS, "path"));
-    p.setAttribute("d", path.d);
-    p.setAttribute("fill", path.fill ? fill : "none");
-    p.setAttribute("stroke", path.stroke && shape.line ? shape.line.color : "none");
-    p.setAttribute("stroke-width", String(Math.max(1, (shape.line?.width ?? 0) * scale)));
-    p.setAttribute("vector-effect", "non-scaling-stroke");
-    el.appendChild(svg);
+/** Scale SVG path data (M L C Q A Z with absolute coordinates) by sx, sy. */
+export function scalePath(d: string, sx: number, sy: number): string {
+  const f = (n: number) => String(Math.round(n * 100) / 100);
+  return d.replace(/([MLCQAZ])([^MLCQAZ]*)/g, (_, op: string, args: string) => {
+    const n = args.trim() ? args.trim().split(/\s+/).map(Number) : [];
+    // Arc: rx ry rotation large-arc sweep x y; others: x y pairs.
+    const scaled = n.map((v, i) => (op === "A" ? ([0, 5].includes(i) ? f(v * sx) : [1, 6].includes(i) ? f(v * sy) : String(v)) : f(v * (i % 2 ? sy : sx))));
+    return scaled.length ? `${op}${scaled.join(" ")} ` : `${op} `;
+  }).trim();
+}
+
+/** "#RRGGBB[AA]" -> [color, opacity] for SVG paint attributes. */
+const paint = (c: string): [string, number] => [c.slice(0, 7), c.length === 9 ? parseInt(c.slice(7), 16) / 255 : 1];
+
+const DASHES: Record<string, number[]> = {
+  dot: [1, 1], dash: [4, 3], lgDash: [8, 3], dashDot: [4, 3, 1, 3], lgDashDot: [8, 3, 1, 3], lgDashDotDot: [8, 3, 1, 3, 1, 3],
+  sysDash: [3, 1], sysDot: [1, 1], sysDashDot: [3, 1, 1, 1], sysDashDotDot: [3, 1, 1, 1, 1, 1],
+};
+const OVERLAY: Record<string, [string, number]> = { lighten: ["#FFFFFF", 0.4], lightenLess: ["#FFFFFF", 0.2], darken: ["#000000", 0.4], darkenLess: ["#000000", 0.2] };
+const ARROW_SIZE = { sm: 2, med: 3, lg: 5 };
+const ARROWS: Record<string, string> = {
+  triangle: "M0 0 L10 5 L0 10 Z",
+  stealth: "M0 0 L10 5 L0 10 L3.5 5 Z",
+  diamond: "M0 5 L5 0 L10 5 L5 10 Z",
+  oval: "M0 5 A5 5 0 1 1 10 5 A5 5 0 1 1 0 5 Z",
+  arrow: "M0 0 L10 5 L0 10",
+};
+
+let uid = 0;
+
+/** Draw a shape's geometry as one SVG in pixel space: fill (solid/gradient), shading, outline, arrowheads. */
+function drawGeometry(el: HTMLElement, shape: ShapeModel, scale: number, withFill: boolean): SVGSVGElement | null {
+  const line = shape.line;
+  const fill = withFill ? shape.fill : null;
+  if (!shape.paths?.length || (!fill && !line)) return null;
+  const W = shape.rect.w * scale;
+  const H = shape.rect.h * scale;
+  const svg = svgEl(el, "svg", { class: "pptx-geom", width: Math.max(W, 1), height: Math.max(H, 1) });
+  if (shape.flipH || shape.flipV) svg.style.transform = `scale(${shape.flipH ? -1 : 1}, ${shape.flipV ? -1 : 1})`;
+  const defs = svgEl(svg, "defs");
+
+  let fillPaint = "none";
+  let fillOpacity = 1;
+  if (fill?.type === "solid") [fillPaint, fillOpacity] = paint(fill.color);
+  else if (fill?.type === "gradient") {
+    const id = `dw-grad-${++uid}`;
+    let grad: SVGElement;
+    if (fill.radial) grad = svgEl(defs, "radialGradient", { id });
+    else {
+      const a = (fill.angle * Math.PI) / 180;
+      const [dx, dy] = [Math.cos(a), Math.sin(a)];
+      const half = (Math.abs(W * dx) + Math.abs(H * dy)) / 2;
+      grad = svgEl(defs, "linearGradient", {
+        id, gradientUnits: "userSpaceOnUse",
+        x1: W / 2 - dx * half, y1: H / 2 - dy * half, x2: W / 2 + dx * half, y2: H / 2 + dy * half,
+      });
+    }
+    for (const stop of fill.stops) {
+      const [c, o] = paint(stop.color);
+      svgEl(grad, "stop", { offset: stop.pos, "stop-color": c, "stop-opacity": o });
+    }
+    fillPaint = `url(#${id})`;
   }
+
+  const strokeWidth = line ? Math.max(1, line.width * scale) : 0;
+  const marker = (end: "head" | "tail") => {
+    const arrow = line?.[end];
+    if (!arrow || !line) return null;
+    const id = `dw-arrow-${++uid}`;
+    const m = svgEl(defs, "marker", {
+      id, viewBox: "0 0 10 10", refX: arrow.type === "arrow" || arrow.type === "triangle" || arrow.type === "stealth" ? 9 : 5, refY: 5,
+      markerUnits: "strokeWidth", markerWidth: ARROW_SIZE[arrow.len], markerHeight: ARROW_SIZE[arrow.w], orient: "auto-start-reverse",
+    });
+    const [c, o] = paint(line.color);
+    const open = arrow.type === "arrow";
+    svgEl(m, "path", { d: ARROWS[arrow.type] ?? ARROWS.triangle, fill: open ? "none" : c, stroke: open ? c : "none", "stroke-width": 1.5, opacity: o });
+    return `url(#${id})`;
+  };
+  const head = marker("head");
+  const tail = marker("tail");
+
+  // Paths are in shape EMU (geometry size); the shape may have been resized by a group transform.
+  for (const path of shape.paths) {
+    const d = scalePath(path.d, (W || 1) / (path.w || 1), (H || 1) / (path.h || 1));
+    const p = svgEl(svg, "path", { d, fill: "none", stroke: "none" });
+    if (path.fill !== "none" && fill) {
+      p.setAttribute("fill", fillPaint);
+      if (fillOpacity < 1) p.setAttribute("fill-opacity", String(fillOpacity));
+      const shade = OVERLAY[path.fill];
+      if (shade) svgEl(svg, "path", { d, fill: shade[0], "fill-opacity": shade[1], stroke: "none" });
+    }
+    if (path.stroke && line) {
+      const [c, o] = paint(line.color);
+      Object.entries({
+        stroke: c, "stroke-opacity": o, "stroke-width": strokeWidth,
+        "stroke-linecap": line.cap === "rnd" ? "round" : line.cap === "sq" ? "square" : "butt", "stroke-linejoin": "round",
+      }).forEach(([k, v]) => p.setAttribute(k, String(v)));
+      const dash = DASHES[line.dash];
+      if (dash) p.setAttribute("stroke-dasharray", dash.map((n) => n * strokeWidth).join(" "));
+      if (head) p.setAttribute("marker-start", head);
+      if (tail) p.setAttribute("marker-end", tail);
+    }
+  }
+  return svg;
+}
+
+/** CSS drop-shadow for a shape's outer shadow. */
+function shadowCss(shape: ShapeModel, scale: number): string | null {
+  const s = shape.shadow;
+  if (!s) return null;
+  const a = (s.dir * Math.PI) / 180;
+  const [c, o] = paint(s.color);
+  const rgb = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)).join(", ");
+  return `drop-shadow(${s.dist * Math.cos(a) * scale}px ${s.dist * Math.sin(a) * scale}px ${(s.blur * scale) / 2}px rgba(${rgb}, ${o}))`;
 }
 
 /** Draw a slide into `host` (replacing its contents) with plain DOM APIs. */
@@ -66,18 +170,26 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     el.dataset.index = String(index);
     Object.assign(el.style, { left: px(shape.rect.x), top: px(shape.rect.y), width: px(shape.rect.w), height: px(shape.rect.h) });
     if (shape.rot) el.style.transform = `rotate(${shape.rot}deg)`;
-    if (shape.paths) {
-      drawPaths(el, shape, scale);
-    } else {
-      if (shape.fill) el.style.background = shape.fill;
-      if (shape.line) el.style.border = `${Math.max(1, shape.line.width * scale)}px solid ${shape.line.color}`;
-      if (RADIUS[shape.geom]) el.style.borderRadius = RADIUS[shape.geom];
-    }
-
+    const shadow = shadowCss(shape, scale);
     if (shape.image) {
       const img = el.createEl("img");
       img.src = opts.imageUrl(shape.image) ?? "";
       img.draggable = false;
+      // Pictures cropped to a shape (ellipse, rounded rectangle...).
+      if (shape.geom && shape.geom !== "rect" && shape.paths?.[0]) {
+        const p = shape.paths[0];
+        img.style.clipPath = `path("${scalePath(p.d, (shape.rect.w * scale) / (p.w || 1), (shape.rect.h * scale) / (p.h || 1))}")`;
+      }
+      if (shadow) img.style.filter = shadow;
+      drawGeometry(el, shape, scale, false);
+    } else if (shape.paths) {
+      const svg = drawGeometry(el, shape, scale, true);
+      if (svg && shadow) svg.style.filter = shadow;
+    } else {
+      const fill = fillCss(shape.fill, shape.flipH, shape.flipV);
+      if (fill) el.style.background = fill;
+      if (shape.line) el.style.border = `${Math.max(1, shape.line.width * scale)}px solid ${shape.line.color}`;
+      if (shadow) el.style.filter = shadow;
     }
 
     if (shape.table) {
@@ -104,7 +216,10 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
       }
       textEl.style.justifyContent = JUSTIFY[t.anchor];
       textEl.style.padding = [t.insets.t, t.insets.r, t.insets.b, t.insets.l].map(px).join(" ");
-      renderParagraphs(textEl, t.paras, pxPerPt, scale, t.lnSpcReduction);
+      renderParagraphs(textEl, t.paras, pxPerPt, scale, t.lnSpcReduction, { slideNumber: opts.slideNumber });
+      const hlink = t.style.colors.scheme.hlink;
+      if (hlink) textEl.style.setProperty("--pptx-hlink", hlink);
+      textEl.classList.toggle("is-nowrap", !t.wrap);
       textEl.classList.toggle("is-empty", shape.placeholder && t.paras.every((p) => p.runs.length === 0));
       if (opts.editable && !shape.inherited) {
         textEl.contentEditable = "true";

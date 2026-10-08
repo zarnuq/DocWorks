@@ -75,3 +75,22 @@ describe("DocxDocument", () => {
     expect(await out.file("word/_rels/document.xml.rels")!.async("text")).toMatch(/Target="numbering\.xml"/);
   });
 });
+
+describe("ensureParagraphStyles", () => {
+  const styleIds = (doc: Document) => Array.from(doc.getElementsByTagNameNS(W, "style")).map((s) => s.getAttributeNS(W, "styleId"));
+
+  it("adds missing built-in heading styles, once", async () => {
+    const docx = await DocxDocument.load(fixture("sample.docx"));
+    const styles = docx.stylesXml()!;
+    for (const s of Array.from(styles.getElementsByTagNameNS(W, "style"))) if (s.getAttributeNS(W, "styleId") === "Heading2") s.remove();
+    docx.ensureParagraphStyles(["Heading2", "Heading2", "Heading1", "NotAStyle"]);
+    const ids = styleIds(styles);
+    expect(ids.filter((id) => id === "Heading2")).toHaveLength(1);
+    expect(ids.filter((id) => id === "Heading1")).toHaveLength(1);
+    expect(ids).not.toContain("NotAStyle");
+    const back = await DocxDocument.load(await docx.save());
+    const h2 = Array.from(back.stylesXml()!.getElementsByTagNameNS(W, "style")).find((s) => s.getAttributeNS(W, "styleId") === "Heading2")!;
+    expect(h2.getElementsByTagNameNS(W, "name")[0].getAttributeNS(W, "val")).toBe("heading 2");
+    expect(h2.getElementsByTagNameNS(W, "outlineLvl")[0].getAttributeNS(W, "val")).toBe("1");
+  });
+});

@@ -3,13 +3,23 @@
  * createDiv, createSpan and their Node methods), so plain-DOM modules can use
  * them and still run under jsdom.
  */
-type Info = { cls?: string | string[]; text?: string; attr?: Record<string, string | number | boolean | null> };
+type Info = {
+  cls?: string | string[];
+  text?: string;
+  attr?: Record<string, string | number | boolean | null>;
+  value?: string;
+  type?: string;
+  placeholder?: string;
+  title?: string;
+};
 
 function create<K extends keyof HTMLElementTagNameMap>(tag: K, o?: Info | string, parent?: Node): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
   const info = typeof o === "string" ? { cls: o } : o ?? {};
   if (info.cls) el.className = ([] as string[]).concat(info.cls).join(" ");
   if (info.text) el.textContent = info.text;
+  for (const k of ["type", "value", "placeholder", "title"] as const) if (info[k] !== undefined) el.setAttribute(k, info[k]);
+  if (info.value !== undefined) (el as HTMLInputElement).value = info.value;
   for (const [k, v] of Object.entries(info.attr ?? {})) if (v !== null && v !== false) el.setAttribute(k, String(v));
   parent?.appendChild(el);
   return el;

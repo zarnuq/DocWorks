@@ -151,7 +151,7 @@ export class OoxmlPackage {
     return parseXml(`<Relationships xmlns="${NS.pkgRels}"/>`)!;
   }
 
-  protected addRel(fromPath: string, type: string, targetPath: string): string {
+  protected addRel(fromPath: string, type: string, targetPath: string, external = false): string {
     if (!this.parts.has(relsPathOf(fromPath))) this.parts.set(relsPathOf(fromPath), this.emptyRels());
     const relsDoc = this.parts.get(relsPathOf(fromPath))!;
     const existing = Array.from(relsDoc.getElementsByTagNameNS(NS.pkgRels, "Relationship"));
@@ -160,7 +160,8 @@ export class OoxmlPackage {
     const rel = relsDoc.createElementNS(NS.pkgRels, "Relationship");
     rel.setAttribute("Id", id);
     rel.setAttribute("Type", REL_TYPE + type);
-    rel.setAttribute("Target", relativePath(dirOf(fromPath), targetPath));
+    rel.setAttribute("Target", external ? targetPath : relativePath(dirOf(fromPath), targetPath));
+    if (external) rel.setAttribute("TargetMode", "External");
     relsDoc.documentElement.appendChild(rel);
     return id;
   }

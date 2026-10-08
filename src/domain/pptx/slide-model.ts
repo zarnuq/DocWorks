@@ -1,17 +1,14 @@
 import { NS, childNS } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { ColorContext, resolveColor } from "./color";
+import { customGeometry, GeomPath, Geometry, Handle, presetGeometry, Rect, Site } from "./geometry";
+import { Fill, fillCss, Line, readFill, readFillRef, readLine, readShadow, Shadow, ThemeStyles, themeStyles } from "./shape-style";
+
+export type { GeomPath, Rect } from "./geometry";
 
 export type Align = "l" | "ctr" | "r" | "just";
 
 /** Geometry in EMU (914400 per inch). */
-export interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
 export interface RunProps {
   b: boolean;
   i: boolean;
@@ -21,11 +18,17 @@ export interface RunProps {
   sz: number;
   color: string;
   font: string;
+  /** Character spacing in points (a:rPr spc). */
+  spc: number;
+  /** Hyperlink address (a:hlinkClick). */
+  link: string | null;
 }
 
 export interface Run extends RunProps {
   /** "\n" marks an a:br line break. */
   text: string;
+  /** a:fld type ("slidenum", "datetime1"...) for field runs. */
+  field?: string;
 }
 
 /** Spacing as a fraction of single line spacing, or in points. */
@@ -35,7 +38,7 @@ export interface Para {
   runs: Run[];
   align: Align;
   lvl: number;
-  /** Bullet character, or null for none. */
+  /** Bullet character, "#scheme[@start]" for automatic numbering (a:buAutoNum), or null for none. */
   bullet: string | null;
   /** EMU */
   marL: number;
@@ -54,21 +57,15 @@ export interface TextBody {
   paras: Para[];
   anchor: "t" | "ctr" | "b";
   insets: { l: number; t: number; r: number; b: number };
+  /** a:normAutofit = shrink text on overflow, a:spAutoFit = resize shape to fit text. */
+  autofit: "none" | "shrink" | "resize";
+  /** Wrap text in the shape (bodyPr wrap != "none"). */
+  wrap: boolean;
   /** normAutofit fontScale, 1 = 100%. */
   fontScale: number;
   /** normAutofit lnSpcReduction, 0.1 = line spacing 10 points of percentage lower. */
   lnSpcReduction: number;
   style: TextStyle;
-}
-
-/** One a:path of a custom (or line) geometry, in its own w x h coordinate space. */
-export interface GeomPath {
-  w: number;
-  h: number;
-  /** SVG path data. */
-  d: string;
-  fill: boolean;
-  stroke: boolean;
 }
 
 export interface ShapeModel {
@@ -88,12 +85,18 @@ export interface ShapeModel {
   flipV: boolean;
   /** Is a slide placeholder (title, body...). */
   placeholder: boolean;
+  /** Preset name, "custom" for a:custGeom, "" when the element has no geometry (pictures without one, frames). */
   geom: string;
-  /** Vector outline for custom geometry and lines; null = draw the box. */
+  /** Preset adjust values set on the shape (a:avLst). */
+  adj: Record<string, number>;
+  /** Outline paths in shape coordinates; null = no geometry. */
   paths: GeomPath[] | null;
-  /** CSS background: a color ("#RRGGBB[AA]") or a gradient. */
-  fill: string | null;
-  line: { color: string; width: number } | null;
+  /** Adjust handles and connection sites, in shape coordinates. */
+  handles: Handle[];
+  sites: Site[];
+  fill: Fill | null;
+  line: Line | null;
+  shadow: Shadow | null;
   /** Media path of a picture. */
   image: string | null;
   table: string[][] | null;
@@ -120,6 +123,8 @@ export interface TextStyle {
   fontRefColor: string | null;
   colors: ColorContext;
   fonts: { major: string; minor: string };
+  /** Hyperlink relationships of the part the text lives in. */
+  links?: { target(rId: string): string | null; add(url: string): string };
 }
 
 const DEFAULT_INSETS = { l: 91440, t: 45720, r: 91440, b: 45720 };
@@ -152,6 +157,9 @@ function mergeRunProps(props: Partial<RunProps>, rPr: Element | null, style: Tex
   if (props.u === undefined && rPr.hasAttribute("u")) props.u = rPr.getAttribute("u") !== "none";
   if (props.strike === undefined && rPr.hasAttribute("strike")) props.strike = rPr.getAttribute("strike") !== "noStrike";
   if (props.sz === undefined && rPr.hasAttribute("sz")) props.sz = Number(rPr.getAttribute("sz")) / 100;
+  if (props.spc === undefined && rPr.hasAttribute("spc")) props.spc = Number(rPr.getAttribute("spc")) / 100;
+  const link = kid(rPr, NS.a, "hlinkClick")?.getAttributeNS(NS.r, "id");
+  if (props.link === undefined && link) props.link = style.links?.target(link) ?? null;
   if (props.color === undefined) {
     const c = resolveColor(kid(rPr, NS.a, "solidFill"), style.colors);
     if (c) props.color = c;
@@ -193,7 +201,11 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
     if (bullet === undefined) {
       if (kid(l, NS.a, "buNone")) bullet = null;
       else if (kid(l, NS.a, "buChar")) bullet = kid(l, NS.a, "buChar")!.getAttribute("char") ?? "•";
-      else if (kid(l, NS.a, "buAutoNum")) bullet = "1.";
+      else if (kid(l, NS.a, "buAutoNum")) {
+        const auto = kid(l, NS.a, "buAutoNum")!;
+        const start = auto.getAttribute("startAt");
+        bullet = `#${auto.getAttribute("type") ?? "arabicPeriod"}${start ? `@${start}` : ""}`;
+      }
     }
     for (const key of ["lnSpc", "spcBef", "spcAft"] as const) spacing[key] ??= readSpacing(kid(l, NS.a, key));
     mergeRunProps(props, kid(l, NS.a, "defRPr"), style);
@@ -214,6 +226,9 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
       sz: props.sz ?? 18,
       color: props.color ?? "#000000",
       font: props.font ?? style.fonts.minor,
+      spc: props.spc ?? 0,
+      // Links belong to runs, never to level defaults.
+      link: null,
     },
   };
 }
@@ -239,7 +254,9 @@ export function readParagraphs(txBody: Element, style: TextStyle): Para[] {
     const runs: Run[] = [];
     for (const child of Array.from(p.children)) {
       if (child.localName === "r" || child.localName === "fld") {
-        runs.push({ ...runProps(kid(child, NS.a, "rPr"), level.defaults, style), text: kid(child, NS.a, "t")?.textContent ?? "" });
+        const run: Run = { ...runProps(kid(child, NS.a, "rPr"), level.defaults, style), text: kid(child, NS.a, "t")?.textContent ?? "" };
+        if (child.localName === "fld") run.field = child.getAttribute("type") ?? "";
+        runs.push(run);
       } else if (child.localName === "br") {
         runs.push({ ...runProps(kid(child, NS.a, "rPr"), level.defaults, style), text: "\n" });
       }
@@ -302,203 +319,12 @@ function readXfrm(xfrm: Element | null): { rect: Rect; rot: number; flipH: boole
   };
 }
 
-const LINE_GEOMS = new Set(["line", "straightConnector1"]);
-
-const fmt = (n: number) => String(Math.round(n * 1000) / 1000);
-const poly = (...pts: [number, number][]) => pts.map(([x, y], i) => `${i ? "L" : "M"}${fmt(x)} ${fmt(y)}`).join(" ") + " Z";
-
-/**
- * Outline of common preset shapes in shape coordinates (w x h), using the
- * spec's default adjust values unless given. Null = drawn with CSS (rect, ellipse...).
- */
-// ponytail: the common outline presets only; others fall back to a box. Add from presetShapeDefinitions.xml as decks need them.
-export function presetPath(prst: string, w: number, h: number, adj: number[]): string | null {
-  const ss = Math.min(w, h);
-  const a = (i: number, def: number) => (Number.isFinite(adj[i]) ? adj[i] : def) / 100000;
-  const hc = w / 2;
-  const vc = h / 2;
-  switch (prst) {
-    case "chevron": {
-      const x1 = ss * a(0, 50000);
-      return poly([0, 0], [w - x1, 0], [w, vc], [w - x1, h], [0, h], [x1, vc]);
-    }
-    case "homePlate": {
-      const x1 = ss * a(0, 50000);
-      return poly([0, 0], [w - x1, 0], [w, vc], [w - x1, h], [0, h]);
-    }
-    case "triangle":
-      return poly([w * a(0, 50000), 0], [w, h], [0, h]);
-    case "rtTriangle":
-      return poly([0, 0], [w, h], [0, h]);
-    case "diamond":
-      return poly([hc, 0], [w, vc], [hc, h], [0, vc]);
-    case "parallelogram": {
-      const x = ss * a(0, 25000);
-      return poly([x, 0], [w, 0], [w - x, h], [0, h]);
-    }
-    case "trapezoid": {
-      const x = ss * a(0, 25000);
-      return poly([0, h], [x, 0], [w - x, 0], [w, h]);
-    }
-    case "hexagon": {
-      const x = ss * a(0, 25000);
-      return poly([0, vc], [x, 0], [w - x, 0], [w, vc], [w - x, h], [x, h]);
-    }
-    case "octagon": {
-      const x = ss * a(0, 29289);
-      return poly([x, 0], [w - x, 0], [w, x], [w, h - x], [w - x, h], [x, h], [0, h - x], [0, x]);
-    }
-    case "pentagon":
-      return poly([hc, 0], [w, h * 0.382], [w * 0.809, h], [w * 0.191, h], [0, h * 0.382]);
-    case "plus": {
-      const x = ss * a(0, 25000);
-      return poly([x, 0], [w - x, 0], [w - x, x], [w, x], [w, h - x], [w - x, h - x], [w - x, h], [x, h], [x, h - x], [0, h - x], [0, x], [x, x]);
-    }
-    case "rightArrow":
-    case "leftArrow": {
-      const dy = (h * a(0, 50000)) / 2;
-      const x = w - ss * a(1, 50000);
-      const pts: [number, number][] = [[0, vc - dy], [x, vc - dy], [x, 0], [w, vc], [x, h], [x, vc + dy], [0, vc + dy]];
-      return poly(...(prst === "rightArrow" ? pts : pts.map(([px, py]): [number, number] => [w - px, py])));
-    }
-    case "downArrow":
-    case "upArrow": {
-      const dx = (w * a(0, 50000)) / 2;
-      const y = h - ss * a(1, 50000);
-      const pts: [number, number][] = [[hc - dx, 0], [hc - dx, y], [0, y], [hc, h], [w, y], [hc + dx, y], [hc + dx, 0]];
-      return poly(...(prst === "downArrow" ? pts : pts.map(([px, py]): [number, number] => [px, h - py])));
-    }
-    default:
-      return null;
-  }
-}
-
-// ponytail: arcTo is skipped (drawn as a straight jump); add elliptical arcs if decks look wrong.
-/**
- * Evaluate a custGeom's avLst + gdLst formulas ("*\/ a b c", "+- a b c", ...)
- * against the shape size. Returns a lookup for names and literals.
- */
-// ponytail: covers the arithmetic operators PowerPoint writes for freeforms; trig ops (at2, cat2, sin...) read as 0.
-function guides(custGeom: Element | null, rect: Rect): (token: string | null) => number {
-  const { w, h } = rect;
-  const vars: Record<string, number> = {
-    w, h, l: 0, t: 0, r: w, b: h, hc: w / 2, vc: h / 2,
-    wd2: w / 2, hd2: h / 2, wd4: w / 4, hd4: h / 4, wd8: w / 8, hd8: h / 8,
-    ss: Math.min(w, h), ls: Math.max(w, h), ssd2: Math.min(w, h) / 2, ssd4: Math.min(w, h) / 4,
-  };
-  const val = (token: string | null): number => (token === null ? 0 : token in vars ? vars[token] : Number(token) || 0);
-  const ops: Record<string, (a: number, b: number, c: number) => number> = {
-    "*/": (a, b, c) => (c ? (a * b) / c : 0),
-    "+-": (a, b, c) => a + b - c,
-    "+/": (a, b, c) => (c ? (a + b) / c : 0),
-    "?:": (a, b, c) => (a > 0 ? b : c),
-    val: (a) => a,
-    abs: (a) => Math.abs(a),
-    sqrt: (a) => Math.sqrt(Math.max(0, a)),
-    min: (a, b) => Math.min(a, b),
-    max: (a, b) => Math.max(a, b),
-    pin: (a, b, c) => (b < a ? a : b > c ? c : b),
-  };
-  for (const list of ["avLst", "gdLst"]) {
-    for (const gd of kids(kid(custGeom, NS.a, list), NS.a, "gd")) {
-      const [op, ...args] = (gd.getAttribute("fmla") ?? "").trim().split(/\s+/);
-      const name = gd.getAttribute("name");
-      if (name) vars[name] = (ops[op] ?? (() => 0))(val(args[0] ?? null), val(args[1] ?? null), val(args[2] ?? null));
-    }
-  }
-  return val;
-}
-
-function geometryPaths(spPr: Element | null, geom: string, rect: Rect): GeomPath[] | null {
-  if (LINE_GEOMS.has(geom)) return [{ w: 1, h: 1, d: "M0 0 L1 1", fill: false, stroke: true }];
-  const prstGeom = kid(spPr, NS.a, "prstGeom");
-  if (prstGeom) {
-    const adj = kids(kid(prstGeom, NS.a, "avLst"), NS.a, "gd")
-      .sort((x, y) => (x.getAttribute("name") ?? "").localeCompare(y.getAttribute("name") ?? ""))
-      .map((gd) => Number(/^val (-?\d+)/.exec(gd.getAttribute("fmla") ?? "")?.[1] ?? NaN));
-    const d = presetPath(geom, rect.w, rect.h, adj);
-    return d ? [{ w: rect.w, h: rect.h, d, fill: true, stroke: true }] : null;
-  }
-  const custGeom = kid(spPr, NS.a, "custGeom");
-  const pathLst = kid(custGeom, NS.a, "pathLst");
-  if (!pathLst) return null;
-  const val = guides(custGeom, rect);
-  return kids(pathLst, NS.a, "path").map((path) => {
-    const pt = (p: Element) => `${Math.round(val(p.getAttribute("x")))} ${Math.round(val(p.getAttribute("y")))}`;
-    const cmds = Array.from(path.children).flatMap((c) => {
-      const pts = kids(c, NS.a, "pt").map(pt);
-      switch (c.localName) {
-        case "moveTo":
-          return [`M${pts[0]}`];
-        case "lnTo":
-          return [`L${pts[0]}`];
-        case "cubicBezTo":
-          return [`C${pts.join(" ")}`];
-        case "quadBezTo":
-          return [`Q${pts.join(" ")}`];
-        case "close":
-          return ["Z"];
-        default:
-          return [];
-      }
-    });
-    return {
-      w: num(path, "w") ?? rect.w,
-      h: num(path, "h") ?? rect.h,
-      d: cmds.join(" "),
-      fill: path.getAttribute("fill") !== "none",
-      stroke: !["0", "false"].includes(path.getAttribute("stroke") ?? ""),
-    };
-  });
-}
-
-function gradientCss(grad: Element, colors: ColorContext, flipH = false, flipV = false): string | null {
-  const stops = Array.from(grad.getElementsByTagNameNS(NS.a, "gs"))
-    .map((gs) => ({ pos: (num(gs, "pos") ?? 0) / 1000, color: resolveColor(gs, colors) }))
-    .filter((s) => s.color)
-    .sort((a, b) => a.pos - b.pos)
-    .map((s) => `${s.color} ${s.pos}%`);
-  if (!stops.length) return null;
-  if (kid(grad, NS.a, "path")) return `radial-gradient(${stops.join(", ")})`;
-  // DrawingML angles run clockwise from "left to right"; CSS 0deg points up.
-  // A flipped shape mirrors its gradient (CSS rotate() only covers rotation).
-  let ang = (num(kid(grad, NS.a, "lin"), "ang") ?? 0) / 60000;
-  if (flipH) ang = 180 - ang;
-  if (flipV) ang = -ang;
-  const deg = (((ang + 90) % 360) + 360) % 360;
-  return `linear-gradient(${deg}deg, ${stops.join(", ")})`;
-}
-
 const applyTransform = (r: Rect, t: Transform): Rect => ({
   x: Math.round(r.x * t.sx + t.dx),
   y: Math.round(r.y * t.sy + t.dy),
   w: Math.round(r.w * t.sx),
   h: Math.round(r.h * t.sy),
 });
-
-function fillColor(spPr: Element | null, styleEl: Element | null, colors: ColorContext, flips = { flipH: false, flipV: false }): string | null {
-  if (kid(spPr, NS.a, "noFill")) return null;
-  const solid = kid(spPr, NS.a, "solidFill");
-  if (solid) return resolveColor(solid, colors);
-  const grad = kid(spPr, NS.a, "gradFill");
-  if (grad) return gradientCss(grad, colors, flips.flipH, flips.flipV);
-  const ref = kid(styleEl, NS.a, "fillRef");
-  return ref && ref.getAttribute("idx") !== "0" ? resolveColor(ref, colors) : null;
-}
-
-function lineOf(spPr: Element | null, styleEl: Element | null, colors: ColorContext): ShapeModel["line"] {
-  const ln = kid(spPr, NS.a, "ln");
-  if (kid(ln, NS.a, "noFill")) return null;
-  const width = num(ln, "w") ?? 12700;
-  const solid = kid(ln, NS.a, "solidFill");
-  if (solid) {
-    const color = resolveColor(solid, colors);
-    return color ? { color, width } : null;
-  }
-  const ref = kid(styleEl, NS.a, "lnRef");
-  const color = ref && ref.getAttribute("idx") !== "0" ? resolveColor(ref, colors) : null;
-  return color ? { color, width } : null;
-}
 
 function plainText(txBody: Element | null): string {
   return kids(txBody, NS.a, "p")
@@ -513,6 +339,10 @@ class SlideParser {
   fonts = { major: "Calibri", minor: "Calibri" };
   shapes: ShapeModel[] = [];
   private bg: SlideModel["background"] = { color: "#FFFFFF", image: null };
+  private bgFill: Fill | null = { type: "solid", color: "#FFFFFF" };
+  private theme: ThemeStyles;
+  /** Fill of the group being walked, for a:grpFill. */
+  private groupFill: Fill | null = null;
 
   constructor(private doc: PptxDocument, private slidePath: string) {
     const layoutPath = doc.layoutOf(slidePath);
@@ -532,6 +362,7 @@ class SlideParser {
     const font = (tag: string) =>
       kid(theme?.getElementsByTagNameNS(NS.a, tag)[0], NS.a, "latin")?.getAttribute("typeface") || "Calibri";
     this.fonts = { major: font("majorFont"), minor: font("minorFont") };
+    this.theme = themeStyles(theme);
   }
 
   parse(): SlideModel {
@@ -572,8 +403,14 @@ class SlideParser {
         const target = this.doc.relTarget(path, blip.getAttributeNS(NS.r, "embed") ?? "");
         if (target) return { color: null, image: target };
       }
-      const color = bgPr ? fillColor(bgPr, null, this.colors) : resolveColor(kid(bg, NS.p, "bgRef"), this.colors);
-      if (color) return { color, image: null };
+      const bgRef = kid(bg, NS.p, "bgRef");
+      let fill = bgPr ? readFill(bgPr, null, this.colors, this.theme) : readFillRef(bgRef, this.colors, this.theme);
+      const refColor = !bgPr && resolveColor(bgRef, this.colors);
+      if (!fill && refColor) fill = { type: "solid", color: refColor };
+      if (fill) {
+        this.bgFill = fill;
+        return { color: fillCss(fill), image: null };
+      }
     }
     return { color: "#FFFFFF", image: null };
   }
@@ -607,7 +444,10 @@ class SlideParser {
           const sy = num(chExt, "cy") ? num(ext, "cy")! / num(chExt, "cy")! : 1;
           local = { sx, sy, dx: num(off, "x")! - num(chOff, "x")! * sx, dy: num(off, "y")! - num(chOff, "y")! * sy };
         }
+        const outer = this.groupFill;
+        this.groupFill = readFill(kid(el, el.namespaceURI, "grpSpPr"), null, this.colors, this.theme, outer);
         this.walk(el, part, { sx: t.sx * local.sx, sy: t.sy * local.sy, dx: t.sx * local.dx + t.dx, dy: t.sy * local.dy + t.dy }, true, inherited);
+        this.groupFill = outer;
       } else if (el.localName === "sp" || el.localName === "cxnSp" || el.localName === "pic" || el.localName === "graphicFrame") {
         const shape = this.shape(el, part, inherited);
         if (shape) {
@@ -651,7 +491,16 @@ class SlideParser {
       readXfrm(kid(kid(layoutPh, NS.p, "spPr"), NS.a, "xfrm")) ??
       readXfrm(kid(kid(masterPh, NS.p, "spPr"), NS.a, "xfrm"));
     if (!geo) return null;
-    const geom = kid(spPr, NS.a, "prstGeom")?.getAttribute("prst") ?? (kid(spPr, NS.a, "custGeom") ? "custom" : "rect");
+    const prstGeom = kid(spPr, NS.a, "prstGeom");
+    const custGeom = kid(spPr, NS.a, "custGeom");
+    const geom = prstGeom?.getAttribute("prst") ?? (custGeom ? "custom" : el.localName === "sp" || el.localName === "cxnSp" ? "rect" : "");
+    const adj: Record<string, number> = {};
+    for (const gd of kids(kid(prstGeom, NS.a, "avLst"), NS.a, "gd")) {
+      const v = /^val\s+(-?[\d.]+)/.exec(gd.getAttribute("fmla") ?? "");
+      if (v) adj[gd.getAttribute("name") ?? ""] = Number(v[1]);
+    }
+    const { w, h } = geo.rect;
+    const g: Geometry | null = custGeom ? customGeometry(custGeom, w, h) : geom ? presetGeometry(geom, w, h, adj) : null;
 
     const model: ShapeModel = {
       el,
@@ -666,10 +515,14 @@ class SlideParser {
       flipV: geo.flipV,
       placeholder: !!ph,
       geom,
-      paths: geometryPaths(spPr, geom, geo.rect),
+      adj,
+      paths: g?.paths ?? null,
+      handles: g?.handles ?? [],
+      sites: g?.sites ?? [],
       // useBgFill: "fill with the slide background" (PowerPoint Designer layouts use it a lot).
-      fill: el.getAttribute("useBgFill") === "1" ? this.bg.color : fillColor(spPr, styleEl, this.colors, geo),
-      line: lineOf(spPr, styleEl, this.colors),
+      fill: el.getAttribute("useBgFill") === "1" ? this.bgFill : readFill(spPr, styleEl, this.colors, this.theme, this.groupFill),
+      line: readLine(spPr, styleEl, this.colors, this.theme),
+      shadow: readShadow(spPr, styleEl, this.colors, this.theme),
       image: null,
       table: null,
       text: null,
@@ -694,6 +547,9 @@ class SlideParser {
     }
 
     const txBody = kid(el, ns, "txBody");
+    // Preset text area (inside an ellipse, triangle...), unless it is the whole shape.
+    const tr = g?.textRect;
+    if (tr && (tr.x || tr.y || Math.abs(tr.w - w) > 1 || Math.abs(tr.h - h) > 1)) model.textRect = tr;
     const tx = readXfrm(kid(el, NS.dsp, "txXfrm"));
     if (tx) model.textRect = { x: tx.rect.x - geo.rect.x, y: tx.rect.y - geo.rect.y, w: tx.rect.w, h: tx.rect.h };
     if (txBody) {
@@ -712,6 +568,7 @@ class SlideParser {
         fontRefColor: resolveColor(kid(styleEl, NS.a, "fontRef"), this.colors),
         colors: this.colors,
         fonts: this.fonts,
+        links: { target: (id) => this.doc.relTarget(part, id), add: (url) => this.doc.linkRel(part, url) },
       };
       const bodyPrs = [txBody, kid(layoutPh, NS.p, "txBody"), kid(masterPh, NS.p, "txBody")].map((b) => kid(b, NS.a, "bodyPr"));
       const pick = (attr: string) => bodyPrs.find((b) => b?.hasAttribute(attr))?.getAttribute(attr) ?? null;
@@ -721,6 +578,11 @@ class SlideParser {
         el: txBody,
         paras: readParagraphs(txBody, style),
         anchor: anchor === "ctr" || anchor === "b" ? anchor : "t",
+        autofit: ((): TextBody["autofit"] => {
+          const fit = bodyPrs.map((b) => Array.from(b?.children ?? []).find((c) => c.localName.endsWith("utofit") || c.localName === "spAutoFit")).find(Boolean);
+          return fit?.localName === "normAutofit" ? "shrink" : fit?.localName === "spAutoFit" ? "resize" : "none";
+        })(),
+        wrap: pick("wrap") !== "none",
         insets: {
           l: inset("lIns", DEFAULT_INSETS.l),
           t: inset("tIns", DEFAULT_INSETS.t),

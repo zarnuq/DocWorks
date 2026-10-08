@@ -1,15 +1,20 @@
 import { NS, childNS, escapeXml } from "../../core/utils/xml";
-import { Para, Rect, Run, TextBody, resolveLevel, runProps } from "./slide-model";
+import { Para, Rect, Run, Spacing, TextBody, TextStyle, resolveLevel, runProps } from "./slide-model";
 
-/** What the editor hands back per paragraph; extra fields from Para are ignored. */
-export type ParaInput = Pick<Para, "runs" | "align" | "lvl" | "bullet">;
+/**
+ * What the editor hands back per paragraph; extra fields from Para are ignored.
+ * Spacing left undefined is not touched.
+ */
+export type ParaInput = Pick<Para, "runs" | "align" | "lvl" | "bullet"> & Partial<Pick<Para, "lnSpc" | "spcBef" | "spcAft">>;
 
 const RUN_TAGS = new Set(["r", "br", "fld"]);
-const RUN_KEYS: (keyof Run)[] = ["text", "b", "i", "u", "strike", "sz", "color", "font"];
-const sameRun = (a: Run, b: Run) => RUN_KEYS.every((k) => String(a[k]).toUpperCase() === String(b[k]).toUpperCase());
+const RUN_KEYS: (keyof Run)[] = ["text", "b", "i", "u", "strike", "sz", "color", "font", "spc", "link", "field"];
+const sameRun = (a: Run, b: Run) => RUN_KEYS.every((k) => String(a[k] ?? "").toUpperCase() === String(b[k] ?? "").toUpperCase());
 const BULLET_TAGS = new Set(["buNone", "buAutoNum", "buChar", "buBlip"]);
-/** Children of a:pPr that must come after the bullet element. */
-const AFTER_BULLET = new Set(["tabLst", "defRPr", "extLst"]);
+/** a:pPr children in schema order (bullet color/size/font and the bullet itself share slots). */
+const PPR_ORDER = ["lnSpc", "spcBef", "spcAft", "buClrTx", "buClr", "buSzTx", "buSzPct", "buSzPts", "buFontTx", "buFont", "bullet", "tabLst", "defRPr", "extLst"];
+const pprSlot = (local: string) => (BULLET_TAGS.has(local) ? "bullet" : local);
+const sameSpacing = (a: Spacing | null | undefined, b: Spacing | null | undefined) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const FILL_TAGS = new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"]);
 /** Children of a:rPr that must come after a:latin. */
 const AFTER_LATIN = new Set(["ea", "cs", "sym", "hlinkClick", "hlinkMouseOver", "rtl", "extLst"]);
@@ -23,8 +28,36 @@ function insertBeforeFirst(parent: Element, child: Element, after: Set<string>):
   parent.insertBefore(child, anchor);
 }
 
-function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>): void {
+/** Put `child` into a:pPr at its schema position, replacing any element in the same slot. */
+function placeInPPr(pPr: Element, child: Element | null, slot: string): void {
+  Array.from(pPr.children).filter((c) => pprSlot(c.localName) === slot).forEach((c) => c.remove());
+  if (!child) return;
+  const at = PPR_ORDER.indexOf(slot);
+  const next = Array.from(pPr.children).find((c) => PPR_ORDER.indexOf(pprSlot(c.localName)) > at) ?? null;
+  pPr.insertBefore(child, next);
+}
+
+function spacingEl(doc: Document, local: string, s: Spacing): Element {
+  const outer = el(doc, local);
+  const inner = outer.appendChild(el(doc, "pct" in s ? "spcPct" : "spcPts"));
+  inner.setAttribute("val", String(Math.round("pct" in s ? s.pct * 100000 : s.pts * 100)));
+  return outer;
+}
+
+function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>, style: TextStyle): void {
   const doc = rPr.ownerDocument;
+  if (Math.abs(run.spc - base.spc) > 0.001) {
+    if (run.spc) rPr.setAttribute("spc", String(Math.round(run.spc * 100)));
+    else rPr.removeAttribute("spc");
+  }
+  if (run.link !== base.link) {
+    childNS(rPr, NS.a, "hlinkClick")?.remove();
+    if (run.link && style.links) {
+      const h = el(doc, "hlinkClick");
+      h.setAttributeNS(NS.r, "r:id", style.links.add(run.link));
+      insertBeforeFirst(rPr, h, new Set(["hlinkMouseOver", "rtl", "extLst"]));
+    }
+  }
   if (run.b !== base.b) rPr.setAttribute("b", run.b ? "1" : "0");
   if (run.i !== base.i) rPr.setAttribute("i", run.i ? "1" : "0");
   if (run.u !== base.u) rPr.setAttribute("u", run.u ? "sng" : "none");
@@ -75,10 +108,18 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
     const level = resolveLevel(style, para.lvl, pPr);
     if (para.align !== level.align) pPr.setAttribute("algn", para.align);
     if (para.bullet !== level.bullet) {
-      Array.from(pPr.children).filter((c) => BULLET_TAGS.has(c.localName)).forEach((c) => c.remove());
-      const bu = el(doc, para.bullet === null ? "buNone" : "buChar");
-      if (para.bullet !== null) bu.setAttribute("char", para.bullet);
-      insertBeforeFirst(pPr, bu, AFTER_BULLET);
+      const auto = para.bullet?.startsWith("#") ? /^#(\w+)(?:@(\d+))?$/.exec(para.bullet) : null;
+      const bu = el(doc, para.bullet === null ? "buNone" : auto ? "buAutoNum" : "buChar");
+      if (auto) {
+        bu.setAttribute("type", auto[1]);
+        if (auto[2] && auto[2] !== "1") bu.setAttribute("startAt", auto[2]);
+      } else if (para.bullet !== null) bu.setAttribute("char", para.bullet);
+      placeInPPr(pPr, bu, "bullet");
+    }
+    for (const key of ["lnSpc", "spcBef", "spcAft"] as const) {
+      const v = para[key];
+      if (v === undefined || sameSpacing(v, level[key])) continue;
+      placeInPPr(pPr, v ? spacingEl(doc, key, v) : null, key);
     }
     if (pPr.attributes.length || pPr.children.length) p.appendChild(pPr);
 
@@ -93,8 +134,17 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
       }
       const baseRPr = kids(origItems[j] ?? origItems[origItems.length - 1] ?? null, "rPr")[0];
       const rPr = (baseRPr?.cloneNode(true) as Element | undefined) ?? el(doc, "rPr");
-      writeRunProps(rPr, run, runProps(rPr, level.defaults, style));
+      writeRunProps(rPr, run, runProps(rPr, level.defaults, style), style);
       const hasProps = rPr.attributes.length > 0 || rPr.children.length > 0;
+      if (run.field !== undefined) {
+        const fld = el(doc, "fld");
+        fld.setAttribute("id", `{${crypto.randomUUID().toUpperCase()}}`);
+        fld.setAttribute("type", run.field);
+        fld.appendChild(hasProps ? rPr : el(doc, "rPr"));
+        fld.appendChild(el(doc, "t")).textContent = run.text;
+        p.appendChild(fld);
+        return;
+      }
 
       run.text.split("\n").forEach((segment, s) => {
         if (s > 0) {
@@ -119,6 +169,41 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
 
   original.forEach((p) => p.remove());
   written.forEach((p) => txBody.appendChild(p));
+}
+
+export interface BodyPrPatch {
+  anchor?: "t" | "ctr" | "b";
+  insets?: { l: number; t: number; r: number; b: number };
+  wrap?: boolean;
+  autofit?: { type: "none" } | { type: "resize" } | { type: "shrink"; fontScale?: number; lnSpcReduction?: number };
+}
+
+const AUTOFIT_TAGS = new Set(["noAutofit", "normAutofit", "spAutoFit"]);
+
+/** Change text box settings on a:bodyPr (anchor, insets, wrapping, autofit). */
+export function writeBodyPr(txBody: Element, patch: BodyPrPatch): void {
+  const doc = txBody.ownerDocument;
+  const bodyPr = kids(txBody, "bodyPr")[0] ?? txBody.insertBefore(el(doc, "bodyPr"), txBody.firstChild);
+  if (patch.anchor) bodyPr.setAttribute("anchor", patch.anchor);
+  if (patch.insets) {
+    for (const [k, attr] of [["l", "lIns"], ["t", "tIns"], ["r", "rIns"], ["b", "bIns"]] as const) {
+      bodyPr.setAttribute(attr, String(Math.round(patch.insets[k])));
+    }
+  }
+  if (patch.wrap !== undefined) bodyPr.setAttribute("wrap", patch.wrap ? "square" : "none");
+  if (patch.autofit) {
+    Array.from(bodyPr.children).filter((c) => AUTOFIT_TAGS.has(c.localName)).forEach((c) => c.remove());
+    const fit = patch.autofit;
+    const tag = fit.type === "shrink" ? "normAutofit" : fit.type === "resize" ? "spAutoFit" : "noAutofit";
+    const child = el(doc, tag);
+    if (fit.type === "shrink") {
+      if (fit.fontScale !== undefined && fit.fontScale < 1) child.setAttribute("fontScale", String(Math.round(fit.fontScale * 100000)));
+      if (fit.lnSpcReduction) child.setAttribute("lnSpcReduction", String(Math.round(fit.lnSpcReduction * 100000)));
+    }
+    // a:prstTxWarp comes first; autofit precedes scene3d, sp3d, flatTx, extLst.
+    const warp = kids(bodyPr, "prstTxWarp")[0];
+    bodyPr.insertBefore(child, warp ? warp.nextSibling : bodyPr.firstChild);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -152,7 +237,7 @@ export function setRect(shape: Element, rect: Rect): void {
   ext.setAttribute("cy", String(Math.round(rect.h)));
 }
 
-function nextShapeId(doc: Document): number {
+export function nextShapeId(doc: Document): number {
   return Array.from(doc.getElementsByTagNameNS(NS.p, "cNvPr")).reduce((m, c) => Math.max(m, Number(c.getAttribute("id")) || 0), 0) + 1;
 }
 
@@ -179,6 +264,131 @@ export function addTextBox(doc: Document, rect: Rect, text: string): Element {
       `<p:txBody><a:bodyPr wrap="square" rtlCol="0"/><a:lstStyle/>` +
       `<a:p><a:r><a:rPr lang="en-US"/><a:t>${escapeXml(text)}</a:t></a:r></a:p></p:txBody></p:sp>`
   );
+}
+
+/** Presets drawn as connector shapes (p:cxnSp): no text, styled by the theme's line. */
+export const CONNECTORS = new Set([
+  "line", "straightConnector1",
+  "bentConnector2", "bentConnector3", "bentConnector4", "bentConnector5",
+  "curvedConnector2", "curvedConnector3", "curvedConnector4", "curvedConnector5",
+]);
+
+const flipAttrs = (f?: { flipH?: boolean; flipV?: boolean }) => `${f?.flipH ? ' flipH="1"' : ""}${f?.flipV ? ' flipV="1"' : ""}`;
+
+/** Insert a preset shape styled like PowerPoint's defaults (accent fill, darker outline, light text). */
+export function addShape(
+  doc: Document,
+  prst: string,
+  rect: Rect,
+  opts: { flipH?: boolean; flipV?: boolean; tailArrow?: boolean } = {}
+): Element {
+  const id = nextShapeId(doc);
+  const xfrm = xfrmXml(rect).replace("<a:xfrm>", `<a:xfrm${flipAttrs(opts)}>`);
+  const geom = `<a:prstGeom prst="${escapeXml(prst)}"><a:avLst/></a:prstGeom>`;
+  if (CONNECTORS.has(prst)) {
+    const ln = opts.tailArrow ? `<a:ln><a:tailEnd type="triangle"/></a:ln>` : "";
+    return appendShape(
+      doc,
+      `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="Connector ${id}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr>` +
+        `<p:spPr>${xfrm}${geom}${ln}</p:spPr>` +
+        `<p:style><a:lnRef idx="1"><a:schemeClr val="accent1"/></a:lnRef><a:fillRef idx="0"><a:schemeClr val="accent1"/></a:fillRef>` +
+        `<a:effectRef idx="0"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="tx1"/></a:fontRef></p:style></p:cxnSp>`
+    );
+  }
+  return appendShape(
+    doc,
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Shape ${id}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>` +
+      `<p:spPr>${xfrm}${geom}</p:spPr>` +
+      `<p:style><a:lnRef idx="2"><a:schemeClr val="accent1"><a:shade val="50000"/></a:schemeClr></a:lnRef>` +
+      `<a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef><a:effectRef idx="0"><a:schemeClr val="accent1"/></a:effectRef>` +
+      `<a:fontRef idx="minor"><a:schemeClr val="lt1"/></a:fontRef></p:style>` +
+      `<p:txBody><a:bodyPr rtlCol="0" anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp>`
+  );
+}
+
+export const shapeId = (shape: Element) => shape.getElementsByTagNameNS(NS.p, "cNvPr")[0]?.getAttribute("id") ?? "";
+
+function xfrmOf(shape: Element): Element {
+  const spPr = ensureChild(shape, NS.p, "p:spPr", "nv");
+  return ensureChild(spPr, NS.a, "a:xfrm", null);
+}
+
+/** Set rotation (degrees clockwise) and flips; 0 / false remove the attribute. */
+export function setTransform(shape: Element, t: { rot?: number; flipH?: boolean; flipV?: boolean }): void {
+  const xfrm = xfrmOf(shape);
+  if (t.rot !== undefined) {
+    const rot = Math.round((((t.rot % 360) + 360) % 360) * 60000);
+    if (rot) xfrm.setAttribute("rot", String(rot));
+    else xfrm.removeAttribute("rot");
+  }
+  for (const k of ["flipH", "flipV"] as const) {
+    if (t[k] === undefined) continue;
+    if (t[k]) xfrm.setAttribute(k, "1");
+    else xfrm.removeAttribute(k);
+  }
+}
+
+/** Set one preset adjust value (a:avLst/a:gd). */
+export function setAdjust(shape: Element, name: string, value: number): void {
+  const prstGeom = shape.getElementsByTagNameNS(NS.a, "prstGeom")[0];
+  if (!prstGeom) return;
+  const avLst = childNS(prstGeom, NS.a, "avLst") ?? prstGeom.appendChild(el(shape.ownerDocument, "avLst"));
+  const gd = Array.from(avLst.children).find((g) => g.getAttribute("name") === name) ?? avLst.appendChild(el(shape.ownerDocument, "gd"));
+  gd.setAttribute("name", name);
+  gd.setAttribute("fmla", `val ${Math.round(value)}`);
+}
+
+export type ZOrder = "front" | "back" | "forward" | "backward";
+
+/** Move a shape in the drawing order among its sibling shapes. */
+export function reorder(shape: Element, to: ZOrder): void {
+  const tree = shape.parentElement!;
+  const shapes = Array.from(tree.children).filter((c) => !["nvGrpSpPr", "grpSpPr", "extLst"].includes(c.localName));
+  const i = shapes.indexOf(shape);
+  const target =
+    to === "front" ? null : to === "back" ? shapes[0] : to === "forward" ? (shapes[i + 1]?.nextSibling ?? null) : shapes[i - 1];
+  if (to === "forward" && i === shapes.length - 1) return;
+  if (to === "backward" && i === 0) return;
+  tree.insertBefore(shape, target === null ? childNS(tree, NS.p, "extLst") : target);
+}
+
+export interface Glue {
+  /** cNvPr id of the shape */
+  id: string;
+  /** connection site index */
+  idx: number;
+}
+
+/** Glue (or unglue, with null) one end of a connector to a shape's connection site. */
+export function connect(cxn: Element, end: "st" | "end", target: Glue | null): void {
+  const nv = cxn.getElementsByTagNameNS(NS.p, "cNvCxnSpPr")[0];
+  if (!nv) return;
+  childNS(nv, NS.a, `${end}Cxn`)?.remove();
+  if (!target) return;
+  const g = el(cxn.ownerDocument, `${end}Cxn`);
+  g.setAttribute("id", target.id);
+  g.setAttribute("idx", String(target.idx));
+  // a:cxnSpLocks, a:stCxn, a:endCxn, a:extLst
+  const before = end === "st" ? (childNS(nv, NS.a, "endCxn") ?? childNS(nv, NS.a, "extLst")) : childNS(nv, NS.a, "extLst");
+  nv.insertBefore(g, before);
+}
+
+export function connections(cxn: Element): { st: Glue | null; end: Glue | null } {
+  const nv = cxn.getElementsByTagNameNS(NS.p, "cNvCxnSpPr")[0];
+  const read = (end: string): Glue | null => {
+    const g = nv && childNS(nv, NS.a, `${end}Cxn`);
+    return g ? { id: g.getAttribute("id") ?? "", idx: Number(g.getAttribute("idx")) } : null;
+  };
+  return { st: read("st"), end: read("end") };
+}
+
+/** Bounding box and flips of a line from `a` to `b`. */
+export function lineBox(a: { x: number; y: number }, b: { x: number; y: number }): { rect: Rect; flipH: boolean; flipV: boolean } {
+  return {
+    rect: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) },
+    flipH: b.x < a.x,
+    flipV: b.y < a.y,
+  };
 }
 
 export function addPicture(doc: Document, rect: Rect, rId: string, name: string): Element {
@@ -225,4 +435,49 @@ export function writePlainParagraphs(txBody: Element, text: string): void {
   });
   original.forEach((p) => p.remove());
   written.forEach((p) => txBody.appendChild(p));
+}
+
+interface Placed {
+  el: Element;
+  rect: Rect;
+  rot: number;
+  flipH: boolean;
+  flipV: boolean;
+  sites: { x: number; y: number }[];
+}
+
+/** Slide position of a shape's connection site, after flips and rotation. */
+export function sitePoint(s: Placed, idx: number): { x: number; y: number } | null {
+  const site = s.sites[idx];
+  if (!site) return null;
+  let x = (s.flipH ? s.rect.w - site.x : site.x) - s.rect.w / 2;
+  let y = (s.flipV ? s.rect.h - site.y : site.y) - s.rect.h / 2;
+  const a = (s.rot * Math.PI) / 180;
+  [x, y] = [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
+  return { x: s.rect.x + s.rect.w / 2 + x, y: s.rect.y + s.rect.h / 2 + y };
+}
+
+/** Move the ends of glued connectors onto their shapes' connection sites. Returns whether anything changed. */
+export function rerouteConnectors(slide: Document, shapes: Placed[]): boolean {
+  const byId = new Map(shapes.map((s) => [shapeId(s.el), s]));
+  let changed = false;
+  for (const cxn of Array.from(slide.getElementsByTagNameNS(NS.p, "cxnSp"))) {
+    const glue = connections(cxn);
+    const self = shapes.find((s) => s.el === cxn);
+    if (!self || (!glue.st && !glue.end)) continue;
+    const { rect: r, flipH, flipV } = self;
+    let a = { x: flipH ? r.x + r.w : r.x, y: flipV ? r.y + r.h : r.y };
+    let b = { x: flipH ? r.x : r.x + r.w, y: flipV ? r.y : r.y + r.h };
+    const at = (g: Glue | null) => (g && byId.has(g.id) ? sitePoint(byId.get(g.id)!, g.idx) : null);
+    a = at(glue.st) ?? a;
+    b = at(glue.end) ?? b;
+    const box = lineBox(a, b);
+    const round = (v: Rect) => ({ x: Math.round(v.x), y: Math.round(v.y), w: Math.round(v.w), h: Math.round(v.h) });
+    const next = round(box.rect);
+    if (JSON.stringify(next) === JSON.stringify(round(r)) && box.flipH === flipH && box.flipV === flipV) continue;
+    setRect(cxn, next);
+    setTransform(cxn, { flipH: box.flipH, flipV: box.flipV });
+    changed = true;
+  }
+  return changed;
 }

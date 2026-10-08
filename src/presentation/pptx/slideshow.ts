@@ -37,7 +37,10 @@ export class Slideshow {
     const o = (this.overlay = document.body.createDiv({ cls: "dw-show", attr: { tabindex: "-1" } }));
     o.addEventListener("keydown", this.onKey);
     o.addEventListener("click", (e) => {
-      if (!(e.target as HTMLElement).closest("button, .dw-show-notes")) this.next();
+      const target = e.target as HTMLElement;
+      const link = target.closest<HTMLElement>("[data-link]")?.dataset.link;
+      if (link) window.open(link);
+      else if (!target.closest("button, .dw-show-notes")) this.next();
     });
     o.addEventListener("wheel", (e) => (e.deltaY > 0 ? this.next() : this.prev()), { passive: true });
     document.addEventListener("fullscreenchange", this.onFullscreenChange);

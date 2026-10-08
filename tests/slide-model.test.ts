@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseSlide, presetPath, readParagraphs, ShapeModel, SlideModel, TextStyle } from "../src/domain/pptx/slide-model";
+import { parseSlide, readParagraphs, ShapeModel, SlideModel, TextStyle } from "../src/domain/pptx/slide-model";
 import { loadSample } from "./helpers";
+import { fillCss } from "../src/domain/pptx/shape-style";
 
 const byName = (s: SlideModel, name: string) => {
   const shape = s.shapes.find((x) => x.name === name);
   if (!shape) throw new Error(`no shape ${name}: ${s.shapes.map((x) => x.name).join(", ")}`);
   return shape;
 };
+const css = (sh: ShapeModel) => fillCss(sh.fill, sh.flipH, sh.flipV);
 const textOf = (sh: ShapeModel) => sh.text!.paras.map((p) => p.runs.map((r) => r.text).join(""));
 
 async function slide(i: number) {
@@ -79,17 +81,18 @@ describe("parseSlide: free shapes", () => {
 
   it("reads solid fills and shape-style font color", async () => {
     const rect = byName(await slide(2), "Rectangle 2");
-    expect(rect.fill).toBe("#00FF00");
+    expect(css(rect)).toBe("#00FF00");
     expect(rect.geom).toBe("rect");
     expect(rect.text!.paras[0].runs[0].color).toBe("#FFFFFF"); // fontRef lt1
     expect(rect.text!.anchor).toBe("ctr");
   });
 
-  it("falls back to the style fillRef color", async () => {
+  it("falls back to the theme fill style the fillRef points at", async () => {
     const oval = byName(await slide(2), "Oval 3");
     expect(oval.geom).toBe("ellipse");
-    expect(oval.fill).toBe("#4F81BD");
-    expect(oval.line?.color).toBe("#4F81BD");
+    // fillRef idx 3 = the theme's third fill style, a gradient of the accent1 placeholder color
+    expect(oval.fill).toMatchObject({ type: "gradient", angle: 270, stops: [{ pos: 0, color: "#4F81BD" }, { pos: 1 }] });
+    expect(oval.line?.color).toBe("#4B7BB4"); // theme line style 1: accent1 shaded 95%
   });
 
   it("reads pictures as media paths", async () => {
@@ -124,14 +127,14 @@ describe("parseSlide: free shapes", () => {
   });
 
   it("turns gradient fills into CSS gradients with alpha", async () => {
-    expect(byName(await slide(2), "Gradient").fill).toBe("linear-gradient(90deg, #FF0000 0%, #0000FF80 100%)");
+    expect(css(byName(await slide(2), "Gradient"))).toBe("linear-gradient(90deg, #FF0000 0%, #0000FF80 100%)");
   });
 
   it("reads custom geometry as SVG paths", async () => {
     const f = byName(await slide(2), "Freeform");
     expect(f.geom).toBe("custom");
-    expect(f.paths).toEqual([{ w: 914400, h: 914400, d: "M0 0 L914400 914400 L0 914400 Z", fill: true, stroke: true }]);
-    expect(f.fill).toBe("#4F81BD");
+    expect(f.paths).toEqual([{ w: 914400, h: 914400, d: "M0 0 L914400 914400 L0 914400 Z", fill: "norm", stroke: true }]);
+    expect(f.fill).toMatchObject({ type: "gradient", stops: [{ color: "#4F81BD" }, {}] });
   });
 
   it("reads lines with flips as a stroked path", async () => {
@@ -139,24 +142,25 @@ describe("parseSlide: free shapes", () => {
     expect(l.geom).toBe("line");
     expect(l.flipH).toBe(true);
     expect(l.flipV).toBe(false);
-    expect(l.paths).toEqual([{ w: 1, h: 1, d: "M0 0 L1 1", fill: false, stroke: true }]);
+    const { w, h } = l.rect;
+    expect(l.paths).toEqual([{ w, h, d: `M0 0 L${w} ${h}`, fill: "norm", stroke: true }]);
     expect(l.line?.color).toBe("#4F81BD");
   });
 
   it("flags placeholders", async () => {
     expect(byName(await slide(0), "Title 1").placeholder).toBe(true);
     expect(byName(await slide(2), "TextBox 1").placeholder).toBe(false);
-    expect(byName(await slide(2), "Rectangle 2").paths).toBeNull();
+    expect(byName(await slide(2), "Rectangle 2").paths![0].d).toBe("M0 0 L1828800 0 L1828800 914400 L0 914400 Z");
   });
 
   it("fills useBgFill shapes with the slide background (PowerPoint Designer layouts)", async () => {
     const s = await slide(2);
-    expect(byName(s, "BgFill").fill).toBe(s.background.color);
+    expect(css(byName(s, "BgFill"))).toBe(s.background.color);
   });
 
   it("mirrors gradient direction for flipped shapes", async () => {
     // ang 50deg, flipH -> 130deg in DrawingML terms -> CSS 220deg
-    expect(byName(await slide(2), "FlippedGradient").fill).toBe("linear-gradient(220deg, #000000 0%, #FFFFFF 100%)");
+    expect(css(byName(await slide(2), "FlippedGradient"))).toBe("linear-gradient(220deg, #000000 0%, #FFFFFF 100%)");
   });
 
   it("evaluates formula guides in freeform points", async () => {
@@ -182,32 +186,14 @@ describe("SmartArt", () => {
   it("reads diagram text, fills and the separate text box", async () => {
     const [chevron, box] = await diagram();
     expect(chevron.geom).toBe("chevron");
-    expect(chevron.fill).toBe("#C0504D");
+    expect(css(chevron)).toBe("#C0504D");
     expect(chevron.text!.paras[0].runs[0]).toMatchObject({ text: "Step", sz: 28, b: true, color: "#FFFFFF" });
     expect(chevron.textRect).toEqual({ x: 120000, y: 0, w: 760000, h: 400000 });
-    expect(box.fill).toMatch(/^#[0-9A-F]{6}E6$/); // tinted accent2 at 90% alpha
+    expect(css(box)).toMatch(/^#[0-9A-F]{6}E6$/); // tinted accent2 at 90% alpha
   });
 
   it("keeps diagram shapes read-only (PowerPoint rebuilds them from the diagram data)", async () => {
     expect((await diagram()).every((s) => s.inherited)).toBe(true);
-  });
-});
-
-describe("presetPath", () => {
-  it("draws chevrons and home plates using the adjust value", () => {
-    expect(presetPath("chevron", 1000, 400, [30000])).toBe("M0 0 L880 0 L1000 200 L880 400 L0 400 L120 200 Z");
-    expect(presetPath("homePlate", 1000, 400, [])).toBe("M0 0 L800 0 L1000 200 L800 400 L0 400 Z");
-  });
-
-  it("draws basic polygons", () => {
-    expect(presetPath("triangle", 100, 50, [])).toBe("M50 0 L100 50 L0 50 Z");
-    expect(presetPath("diamond", 100, 50, [])).toBe("M50 0 L100 25 L50 50 L0 25 Z");
-    expect(presetPath("rightArrow", 100, 50, [])).toBe("M0 12.5 L75 12.5 L75 0 L100 25 L75 50 L75 37.5 L0 37.5 Z");
-  });
-
-  it("returns null for shapes drawn with CSS", () => {
-    expect(presetPath("rect", 10, 10, [])).toBeNull();
-    expect(presetPath("ellipse", 10, 10, [])).toBeNull();
   });
 });
 

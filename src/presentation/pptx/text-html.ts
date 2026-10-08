@@ -5,6 +5,9 @@
  * Each paragraph is a <p data-lvl data-bullet> styled with its level defaults;
  * runs are <span>s styled only where they differ from those defaults. Reading
  * back resolves unstyled text against the (possibly changed) level's defaults.
+ * data-bullet is the model's bullet ("•", "#arabicPeriod"); data-label is what
+ * is drawn (the char, or the computed number). Fields are non-editable
+ * <span data-field>; links are <span data-link> ("" = explicitly no link).
  */
 import type { Align, Para, Run, RunProps, Spacing } from "../../domain/pptx/slide-model";
 import type { ParaInput } from "../../domain/pptx/slide-edit";
@@ -14,7 +17,7 @@ const CSS_ALIGN: Record<Align, string> = { l: "left", ctr: "center", r: "right",
 const FROM_CSS_ALIGN: Record<string, Align> = { left: "l", start: "l", center: "ctr", right: "r", end: "r", justify: "just" };
 const BLOCK = new Set(["P", "DIV", "LI", "H1", "H2", "H3", "H4", "H5", "H6"]);
 const EMU_PER_PT = 12700;
-const PROP_KEYS: (keyof RunProps)[] = ["b", "i", "u", "strike", "sz", "color", "font"];
+const PROP_KEYS: (keyof RunProps)[] = ["b", "i", "u", "strike", "sz", "color", "font", "spc", "link"];
 
 export type DefaultsFor = (lvl: number) => RunProps;
 
@@ -30,6 +33,14 @@ function styleRun(el: HTMLElement, props: Partial<RunProps>, pxPerPt: number, de
   if (props.sz !== undefined) el.style.fontSize = `${props.sz * pxPerPt}px`;
   if (props.color !== undefined) el.style.color = props.color;
   if (props.font !== undefined) el.style.fontFamily = fontStack(props.font);
+  if (props.spc !== undefined) {
+    el.dataset.spc = String(props.spc);
+    el.style.letterSpacing = `${props.spc * pxPerPt}px`;
+  }
+  if (props.link !== undefined) {
+    el.dataset.link = props.link ?? "";
+    el.classList.toggle("pptx-link", !!props.link);
+  }
 }
 
 function diff(run: RunProps, base: RunProps): Partial<RunProps> {
@@ -41,7 +52,26 @@ function diff(run: RunProps, base: RunProps): Partial<RunProps> {
   return out;
 }
 
-export function renderParagraphs(host: HTMLElement, paras: Para[], pxPerPt: number, pxPerEmu = pxPerPt / EMU_PER_PT, lnSpcReduction = 0): void {
+export interface RenderTextOptions {
+  /** Shown by slide-number fields. */
+  slideNumber?: number;
+}
+
+/** What a field shows: the live slide number or today's date, else its cached text. */
+function fieldText(run: Run, opts: RenderTextOptions): string {
+  if (run.field === "slidenum" && opts.slideNumber) return String(opts.slideNumber);
+  if (run.field?.startsWith("datetime")) return new Date().toLocaleDateString();
+  return run.text;
+}
+
+export function renderParagraphs(
+  host: HTMLElement,
+  paras: Para[],
+  pxPerPt: number,
+  pxPerEmu = pxPerPt / EMU_PER_PT,
+  lnSpcReduction = 0,
+  opts: RenderTextOptions = {}
+): void {
   host.replaceChildren();
   paras.forEach((para, index) => {
     const p = host.createEl("p");
@@ -62,27 +92,83 @@ export function renderParagraphs(host: HTMLElement, paras: Para[], pxPerPt: numb
     if (para.spcBef && index > 0) p.style.marginTop = `${space(para.spcBef)}px`;
     if (para.spcAft) p.style.marginBottom = `${space(para.spcAft)}px`;
     if (para.bullet) p.style.setProperty("--pptx-bullet-size", `${(para.runs[0]?.sz ?? size) * pxPerPt}px`);
+    p.dataset.spacing = JSON.stringify({ lnSpc: para.lnSpc ?? null, spcBef: para.spcBef ?? null, spcAft: para.spcAft ?? null });
 
     for (const run of para.runs) {
+      if (run.field !== undefined) {
+        const span = p.createSpan({ text: fieldText(run, opts) });
+        span.dataset.field = run.field;
+        span.contentEditable = "false";
+        styleRun(span, diff(run, para.defaults), pxPerPt);
+        continue;
+      }
       run.text.split("\n").forEach((segment, i) => {
         if (i > 0) p.createEl("br");
         if (!segment) return;
         const span = p.createSpan();
         span.textContent = segment;
         styleRun(span, diff(run, para.defaults), pxPerPt);
-        const ls = letterSpacing(segment, run, run.sz * pxPerPt);
-        if (ls !== null && Math.abs(ls) > 0.01) span.style.letterSpacing = `${ls}px`;
+        // Match PowerPoint's widths (font fitting) plus the run's own character spacing.
+        const ls = (letterSpacing(segment, run, run.sz * pxPerPt) ?? 0) + run.spc * pxPerPt;
+        if (Math.abs(ls) > 0.01) span.style.letterSpacing = `${ls}px`;
       });
     }
     if (!p.querySelector("span")) p.createEl("br");
   });
-  markEmptyParagraphs(host);
+  refreshMarks(host);
 }
 
-/** Flag paragraphs without text: PowerPoint draws no bullet for them. */
-export function markEmptyParagraphs(host: HTMLElement): void {
-  for (const p of Array.from(host.children)) p.toggleAttribute("data-empty", !p.textContent);
+const ROMAN: [number, string][] = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+const roman = (n: number) => ROMAN.reduce((out, [v, s]) => {
+  for (; n >= v; n -= v) out += s;
+  return out;
+}, "");
+const alpha = (n: number) => {
+  let out = "";
+  for (; n > 0; n = Math.floor((n - 1) / 26)) out = String.fromCharCode(97 + ((n - 1) % 26)) + out;
+  return out;
+};
+
+/** Label for number `n` in a DrawingML auto-number scheme ("arabicPeriod", "alphaUcParenR"...). */
+export function numberLabel(scheme: string, n: number): string {
+  const m = /^(arabic|alphaLc|alphaUc|romanLc|romanUc)(Period|ParenR|ParenBoth|Plain)$/.exec(scheme) ?? [scheme, "arabic", "Period"];
+  const kind = m[1];
+  let text = kind === "arabic" ? String(n) : kind.startsWith("alpha") ? alpha(n) : roman(n);
+  if (kind.endsWith("Uc")) text = text.toUpperCase();
+  return m[2] === "Period" ? `${text}.` : m[2] === "ParenR" ? `${text})` : m[2] === "ParenBoth" ? `(${text})` : text;
 }
+
+/**
+ * Recompute what each paragraph's marker shows: nothing for empty paragraphs
+ * (PowerPoint draws no bullet there), the bullet character, or the paragraph's
+ * number in its level's run of numbered paragraphs.
+ */
+export function refreshMarks(host: HTMLElement): void {
+  const counters: ({ scheme: string; n: number } | null)[] = [];
+  for (const p of Array.from(host.children) as HTMLElement[]) {
+    const empty = !p.textContent;
+    p.toggleAttribute("data-empty", empty);
+    const lvl = Number(p.dataset.lvl) || 0;
+    counters.length = lvl + 1;
+    const bullet = p.dataset.bullet ?? "";
+    const auto = /^#(\w+)(?:@(\d+))?$/.exec(bullet);
+    if (!auto) {
+      counters[lvl] = null;
+      if (bullet) p.dataset.label = bullet;
+      else delete p.dataset.label;
+      continue;
+    }
+    if (empty) {
+      p.dataset.label = "";
+      continue;
+    }
+    const prev = counters[lvl];
+    const n = prev && prev.scheme === auto[1] ? prev.n + 1 : Number(auto[2] ?? 1);
+    counters[lvl] = { scheme: auto[1], n };
+    p.dataset.label = numberLabel(auto[1], n);
+  }
+}
+
 
 function cssColorToHex(value: string): string | null {
   if (/^#[0-9a-f]{6}$/i.test(value)) return value.toUpperCase();
@@ -119,6 +205,11 @@ function explicitProps(el: Element | null, stop: Element, pxPerPt: number): Part
     }
     if (style.color) set("color", cssColorToHex(style.color));
     if (style.fontFamily) set("font", style.fontFamily.split(",")[0].trim().replace(/^["']|["']$/g, ""));
+    const data = (el as HTMLElement).dataset;
+    if (data) {
+      if (data.spc !== undefined) set("spc", Number(data.spc));
+      if (data.link !== undefined && !("link" in out)) out.link = data.link || null;
+    }
     const size = style.fontSize;
     if (size.endsWith("px")) set("sz", Math.round((parseFloat(size) / pxPerPt) * 100) / 100);
     else if (size.endsWith("pt")) set("sz", parseFloat(size));
@@ -158,7 +249,9 @@ function readGroup(host: HTMLElement, block: Element | null, nodes: Node[], pxPe
     if (node.nodeType === Node.TEXT_NODE) {
       if (node.textContent) runs.push({ ...defaults, ...explicitProps(node.parentElement, stop, pxPerPt), text: node.textContent });
     } else if (isElement(node)) {
-      if (node.tagName === "BR") runs.push({ ...defaults, ...explicitProps(node.parentElement, stop, pxPerPt), text: "\n" });
+      const field = (node as HTMLElement).dataset?.field;
+      if (field !== undefined) runs.push({ ...defaults, ...explicitProps(node, stop, pxPerPt), text: node.textContent ?? "", field });
+      else if (node.tagName === "BR") runs.push({ ...defaults, ...explicitProps(node.parentElement, stop, pxPerPt), text: "\n" });
       else node.childNodes.forEach(visit);
     }
   };
@@ -170,7 +263,8 @@ function readGroup(host: HTMLElement, block: Element | null, nodes: Node[], pxPe
   const merged: Run[] = [];
   for (const run of runs) {
     const prev = merged.at(-1);
-    if (prev && prev.text !== "\n" && run.text !== "\n" && sameProps(prev, run)) prev.text += run.text;
+    const plain = (r: Run) => r.text !== "\n" && r.field === undefined;
+    if (prev && plain(prev) && plain(run) && sameProps(prev, run)) prev.text += run.text;
     else merged.push(run);
   }
 
@@ -179,7 +273,17 @@ function readGroup(host: HTMLElement, block: Element | null, nodes: Node[], pxPe
     align: FROM_CSS_ALIGN[(block as HTMLElement | null)?.style.textAlign ?? ""] ?? "l",
     lvl,
     bullet: data?.bullet || null,
+    ...spacingOf(block as HTMLElement | null),
   };
+}
+
+/** Line / paragraph spacing stored on a rendered paragraph (absent = leave as is). */
+function spacingOf(p: HTMLElement | null): Partial<Pick<ParaInput, "lnSpc" | "spcBef" | "spcAft">> {
+  try {
+    return p?.dataset.spacing ? (JSON.parse(p.dataset.spacing) as Pick<ParaInput, "lnSpc" | "spcBef" | "spcAft">) : {};
+  } catch {
+    return {};
+  }
 }
 
 export function readParagraphs(host: HTMLElement, pxPerPt: number, defaultsFor: DefaultsFor): ParaInput[] {
@@ -256,7 +360,7 @@ export function selectionRunProps(host: HTMLElement, pxPerPt: number, defaultsFo
   };
 }
 
-type ParaAttrs = Pick<ParaInput, "align" | "lvl" | "bullet">;
+type ParaAttrs = Pick<ParaInput, "align" | "lvl" | "bullet" | "lnSpc">;
 
 /** Update alignment / level / bullet of every paragraph touched by the selection. */
 export function updateParagraphs(host: HTMLElement, fn: (p: ParaAttrs) => ParaAttrs): void {
@@ -264,16 +368,36 @@ export function updateParagraphs(host: HTMLElement, fn: (p: ParaAttrs) => ParaAt
   if (!range) return;
   for (const p of Array.from(host.children) as HTMLElement[]) {
     if (!BLOCK.has(p.tagName) || !range.intersectsNode(p)) continue;
+    const spacing = spacingOf(p);
     const next = fn({
       align: FROM_CSS_ALIGN[p.style.textAlign] ?? "l",
       lvl: Number(p.dataset.lvl) || 0,
       bullet: p.dataset.bullet || null,
+      lnSpc: spacing.lnSpc ?? null,
     });
+    p.dataset.spacing = JSON.stringify({ ...spacing, lnSpc: next.lnSpc ?? null });
     p.style.textAlign = CSS_ALIGN[next.align];
     p.dataset.lvl = String(Math.max(0, Math.min(8, next.lvl)));
     if (next.bullet) p.dataset.bullet = next.bullet;
     else delete p.dataset.bullet;
   }
+  refreshMarks(host);
+}
+
+/** Insert a non-editable field (slide number, date) at the caret. */
+export function insertField(host: HTMLElement, type: string, text: string): void {
+  const range = rangeIn(host);
+  if (!range) return;
+  range.deleteContents();
+  const span = createSpan({ text });
+  span.dataset.field = type;
+  span.contentEditable = "false";
+  range.insertNode(span);
+  range.setStartAfter(span);
+  range.collapse(true);
+  const sel = window.getSelection()!;
+  sel.removeAllRanges();
+  sel.addRange(range);
 }
 
 /** Replace the current selection with plain text (newlines become <br>) and leave the caret after it. */

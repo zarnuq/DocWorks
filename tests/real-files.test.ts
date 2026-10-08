@@ -8,6 +8,7 @@ import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { parseSlide } from "../src/domain/pptx/slide-model";
+import { fillCss } from "../src/domain/pptx/shape-style";
 import { writeParagraphs } from "../src/domain/pptx/slide-edit";
 import { renderSlide } from "../src/presentation/pptx/slide-renderer";
 import { Transform } from "prosemirror-transform";
@@ -41,9 +42,9 @@ describe.skipIf(!dir)("real decks", () => {
       for (const s of model.shapes) {
         const where = `${slide.path} ${s.name}`;
         expect(Object.values(s.rect).every(Number.isFinite), where).toBe(true);
-        if (s.fill) expect(s.fill, where).toMatch(css);
-        if (s.el.getAttribute("useBgFill") === "1") expect(s.fill, where).toBe(model.background.color);
-        for (const p of s.paths ?? []) expect(p.d, where).toMatch(/^[MLCQZ0-9 .-]*$/);
+        if (s.fill) expect(fillCss(s.fill), where).toMatch(css);
+        if (s.el.getAttribute("useBgFill") === "1") expect(fillCss(s.fill), where).toBe(model.background.color);
+        for (const p of s.paths ?? []) expect(p.d, where).toMatch(/^[MLACQZ0-9 .-]*$/);
         if (s.image) expect(media.has(s.image), where).toBe(true);
       }
       // SmartArt with a cached drawing must be drawn, not left as a placeholder frame.

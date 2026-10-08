@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderParagraphs, markEmptyParagraphs, insertPlainText, readParagraphs, applyRunStyle, selectionRunProps, updateParagraphs } from "../src/presentation/pptx/text-html";
+import { renderParagraphs, refreshMarks, insertPlainText, readParagraphs, applyRunStyle, selectionRunProps, updateParagraphs } from "../src/presentation/pptx/text-html";
 import type { Para, RunProps } from "../src/domain/pptx/slide-model";
 
 const PX_PER_PT = 2;
-const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri" };
+const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri", spc: 0, link: null };
 const defaultsFor = (lvl: number): RunProps => ({ ...defaults, sz: 18 - lvl * 2 });
 const run = (text: string, extra: Partial<RunProps> = {}) => ({ ...defaults, text, ...extra });
 const para = (runs: Para["runs"], extra: Partial<Para> = {}): Para => ({
@@ -40,7 +40,7 @@ describe("renderParagraphs / readParagraphs", () => {
     ];
     paras[1].runs[0].sz = 16;
     renderParagraphs(host, paras, PX_PER_PT);
-    expect(read()).toEqual(paras.map(({ runs, align, lvl, bullet }) => ({ runs, align, lvl, bullet })));
+    expect(read()).toEqual(paras.map(({ runs, align, lvl, bullet }) => ({ runs, align, lvl, bullet, lnSpc: null, spcBef: null, spcAft: null })));
   });
 
   it("styles only runs that differ from the paragraph defaults", () => {
@@ -64,7 +64,7 @@ describe("renderParagraphs / readParagraphs", () => {
     expect(empty.hasAttribute("data-empty")).toBe(true);
     expect(full.hasAttribute("data-empty")).toBe(false);
     empty.textContent = "typed";
-    markEmptyParagraphs(host);
+    refreshMarks(host);
     expect(empty.hasAttribute("data-empty")).toBe(false);
     expect(read()[0].bullet).toBe("•");
   });

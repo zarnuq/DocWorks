@@ -192,6 +192,16 @@ export class PptxDocument extends OoxmlPackage {
     else root.removeAttribute("show");
   }
 
+  /** Add a relationship from a slide (used when pasting shapes). */
+  addSlideRel(slidePath: string, type: string, target: string, external = false): string {
+    return this.addRel(slidePath, type, target, external);
+  }
+
+  /** Relationship id of a hyperlink from `part` to `url`, adding one if needed. */
+  linkRel(part: string, url: string): string {
+    return this.rels(part).find((r) => r.type === "hyperlink" && r.external && r.target === url)?.id ?? this.addRel(part, "hyperlink", url, true);
+  }
+
   /** Store image bytes in ppt/media and relate them to the slide. Returns the new rId. */
   addImage(slidePath: string, bytes: Uint8Array, ext: string): string {
     return this.addRel(slidePath, "image", this.storeImage("ppt", bytes, ext));

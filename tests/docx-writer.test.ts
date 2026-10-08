@@ -211,6 +211,29 @@ describe("writeBody", () => {
     expect(all(tbl, "shd")[0].getAttribute("w:fill")).toBe("ABCDEF");
   });
 
+  it("gives new cells a width matching their grid columns (Word and LibreOffice expect one)", async () => {
+    const { doc, write } = await setup();
+    const cell = (colspan = 1) => schema.nodes.table_cell.create({ colspan }, schema.nodes.paragraph.create());
+    const table = schema.nodes.table.create(null, [
+      schema.nodes.table_row.create(null, [cell(), cell(), cell()]),
+      schema.nodes.table_row.create(null, [cell(2), cell()]),
+    ]);
+    const tbl = write(new Transform(doc).insert(blockPos(doc, 1), table).doc)[1];
+    const widths = all(tbl, "tcW").map((w) => [w.getAttribute("w:w"), w.getAttribute("w:type")]);
+    expect(widths).toEqual([["3000", "dxa"], ["3000", "dxa"], ["3000", "dxa"], ["6000", "dxa"], ["3000", "dxa"]]);
+    expect(children(all(tbl, "tc")[3])).toEqual(["tcPr", "p"]);
+    expect(children(all(tbl, "tcPr")[3])).toEqual(["tcW", "gridSpan"]);
+  });
+
+  it("asks the package to define paragraph styles it newly applies", async () => {
+    const { doc, docx, origins } = await setup();
+    const asked: string[] = [];
+    const ctx = { nextDocPrId: () => docx.nextDocPrId(), ensureParagraphStyles: (ids: Iterable<string>) => asked.push(...ids) };
+    const tr = new Transform(doc).setNodeMarkup(blockPos(doc, 1), undefined, { ...doc.child(1).attrs, style: "Heading3" });
+    writeBody(docx.body, tr.doc, origins, ctx);
+    expect(asked).toEqual(["Heading3"]);
+  });
+
   it("writes horizontal rules as bottom-bordered paragraphs", async () => {
     const { doc, write } = await setup();
     const hr = schema.nodes.raw_block.create({ kind: "hr" });

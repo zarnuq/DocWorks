@@ -445,7 +445,7 @@
 }
 
 .pptx-text p[data-bullet]::before {
-  content: attr(data-bullet);
+  content: attr(data-label);
   /* A flex box ignores the paragraph's first-line indent, unlike inline-block. */
   display: inline-flex;
   min-width: var(--pptx-bullet-width, 1em);
@@ -509,6 +509,7 @@
 
 /* Speaker notes, hidden slides */
 textarea.pptx-notes {
+  align-self: stretch;
   display: block;
   width: 100%;
   min-height: 5em;
@@ -598,4 +599,236 @@ textarea.pptx-notes {
 
 .dw-show-notes.is-empty {
   color: #888888;
+}
+
+/* Shape handles: rotate (above), adjust (yellow) */
+.pptx-handle-rotate {
+  top: -28px;
+  left: calc(50% - 6px);
+  border-radius: 50%;
+  cursor: grab;
+}
+
+.pptx-handle-adjust {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  background: #ffd400;
+  border: 1px solid #806a00;
+  border-radius: 0;
+  transform: rotate(45deg);
+  cursor: pointer;
+  z-index: 3;
+}
+
+/* Drawing new shapes */
+.pptx-stage.is-drawing .pptx-slide,
+.pptx-stage.is-drawing .pptx-shape {
+  cursor: crosshair;
+}
+
+.pptx-draw-preview {
+  position: absolute;
+  border: 1px dashed var(--interactive-accent);
+  background: rgba(var(--interactive-accent-rgb), 0.1);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Shape gallery popover */
+.pptx-editor-root {
+  position: relative;
+}
+
+.pptx-gallery {
+  position: absolute;
+  top: var(--pptx-gallery-top, 48px);
+  left: var(--pptx-gallery-left, 0);
+  z-index: var(--layer-popover);
+  width: min(420px, calc(100% - 16px));
+  max-height: 70%;
+  overflow-y: auto;
+  padding: var(--size-4-2);
+  background: var(--background-primary);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+}
+
+.pptx-gallery-title {
+  margin: var(--size-4-2) 0 var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.pptx-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: var(--size-2-1);
+}
+
+.pptx-gallery-item {
+  height: 32px;
+  padding: 2px;
+  box-shadow: none;
+  background: transparent;
+}
+
+.pptx-gallery-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.pptx-gallery-item svg {
+  width: 100%;
+  height: 100%;
+  stroke: var(--text-normal);
+  stroke-width: 1.2;
+}
+
+.pptx-gallery-item path.is-filled {
+  fill: var(--interactive-accent);
+  fill-opacity: 0.25;
+}
+
+.pptx-gallery-item path.is-outline {
+  fill: none;
+}
+
+/* Format panel */
+.pptx-props {
+  flex: 0 0 240px;
+  overflow-y: auto;
+  padding: var(--size-4-2) var(--size-4-3);
+  border-left: var(--border-width) solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.pptx-props-title {
+  margin: var(--size-4-3) 0 var(--size-2-2);
+  font-weight: var(--font-semibold);
+}
+
+.pptx-props-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-2-2);
+}
+
+.pptx-props-row input[type="number"],
+.pptx-props-row select {
+  width: 110px;
+}
+
+.pptx-props-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+
+.pptx-props-buttons button {
+  font-size: var(--font-ui-smaller);
+}
+
+/* Edges of text shapes: drag to move, click to select without editing text. */
+.pptx-edge {
+  position: absolute;
+  z-index: 2;
+  cursor: move;
+}
+
+.pptx-edge-t,
+.pptx-edge-b {
+  left: -4px;
+  right: -4px;
+  height: 8px;
+}
+
+.pptx-edge-l,
+.pptx-edge-r {
+  top: -4px;
+  bottom: -4px;
+  width: 8px;
+}
+
+.pptx-edge-t { top: -4px; }
+.pptx-edge-b { bottom: -4px; }
+.pptx-edge-l { left: -4px; }
+.pptx-edge-r { right: -4px; }
+
+/* Hyperlinks, fields, unwrapped text */
+.pptx-text .pptx-link {
+  color: var(--pptx-hlink, #0563c1);
+  text-decoration: underline;
+}
+
+.pptx-text [data-field] {
+  border-radius: 2px;
+}
+
+.pptx-text[contenteditable="true"] [data-field] {
+  background: rgba(var(--interactive-accent-rgb), 0.12);
+}
+
+.pptx-text.is-nowrap {
+  white-space: pre;
+}
+
+/* Multi-selection, marquee, snapping guides */
+.pptx-shape.is-in-selection:not(.is-selected) {
+  outline: 1px dashed var(--interactive-accent);
+}
+
+.pptx-selbox {
+  position: absolute;
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: 2px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.pptx-selbox .pptx-handle {
+  display: block;
+  pointer-events: auto;
+}
+
+.pptx-marquee {
+  position: absolute;
+  border: 1px solid var(--interactive-accent);
+  background: rgba(var(--interactive-accent-rgb), 0.08);
+  pointer-events: none;
+  z-index: 6;
+}
+
+.pptx-guide {
+  position: absolute;
+  pointer-events: none;
+  z-index: 6;
+  background: #ff3d7f;
+}
+
+.pptx-guide.is-vertical {
+  top: 0;
+  bottom: 0;
+  left: var(--pptx-guide-at);
+  width: 1px;
+}
+
+.pptx-guide.is-horizontal {
+  left: 0;
+  right: 0;
+  top: var(--pptx-guide-at);
+  height: 1px;
+}
+
+.pptx-props-heading {
+  margin-top: var(--size-4-2);
+  font-weight: var(--font-semibold);
+}
+
+.pptx-text.pptx-measure {
+  visibility: hidden;
+  pointer-events: none;
 }
