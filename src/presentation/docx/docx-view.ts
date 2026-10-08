@@ -302,7 +302,7 @@ export class DocxView extends FileView {
       menu.addItem((i) =>
         i.setTitle(title).onClick(() => {
           if (!this.editor) return;
-          if (!command(this.editor.state, this.editor.dispatch)) new Notice("Place the cursor inside a table first.");
+          if (!command(this.editor.state, this.editor.dispatch)) new Notice("Click inside a table first.");
           this.editor.focus();
         })
       );

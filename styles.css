@@ -444,17 +444,12 @@
   margin: 0;
 }
 
-/* PowerPoint ignores space before the first paragraph of a text box. */
-.pptx-text p:first-child {
-  margin-top: 0 !important;
-}
-
 .pptx-text p[data-bullet]::before {
   content: attr(data-bullet);
-  display: inline-block;
+  /* A flex box ignores the paragraph's first-line indent, unlike inline-block. */
+  display: inline-flex;
   min-width: var(--pptx-bullet-width, 1em);
   font-size: var(--pptx-bullet-size, inherit);
-  text-indent: 0;
 }
 
 .pptx-text:not(:focus) p[data-empty]::before {

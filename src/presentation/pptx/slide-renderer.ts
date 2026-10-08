@@ -48,7 +48,7 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
   const scale = opts.width / size.cx;
   const px = (emu: number) => `${emu * scale}px`;
 
-  const slide = document.createElement("div");
+  const slide = createDiv();
   slide.className = "pptx-slide";
   slide.style.width = `${opts.width}px`;
   slide.style.height = px(size.cy);
@@ -60,7 +60,7 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
   host.replaceChildren(slide);
 
   return model.shapes.map((shape, index) => {
-    const el = slide.appendChild(document.createElement("div"));
+    const el = slide.createDiv();
     el.className = `pptx-shape pptx-kind-${shape.kind}`;
     el.classList.toggle("is-inherited", shape.inherited);
     el.dataset.index = String(index);
@@ -75,20 +75,20 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     }
 
     if (shape.image) {
-      const img = el.appendChild(document.createElement("img"));
+      const img = el.createEl("img");
       img.src = opts.imageUrl(shape.image) ?? "";
       img.draggable = false;
     }
 
     if (shape.table) {
-      const table = el.appendChild(document.createElement("table"));
+      const table = el.createEl("table");
       table.style.fontSize = `${14 * EMU_PER_PT * scale}px`;
       for (const row of shape.table) {
-        const tr = table.appendChild(document.createElement("tr"));
-        for (const cell of row) tr.appendChild(document.createElement("td")).textContent = cell;
+        const tr = table.createEl("tr");
+        for (const cell of row) tr.createEl("td").textContent = cell;
       }
     } else if (shape.kind === "frame") {
-      el.appendChild(document.createElement("div")).className = "pptx-frame-label";
+      el.createDiv().className = "pptx-frame-label";
       el.lastElementChild!.textContent = "Chart or diagram (view only)";
     }
 
@@ -96,7 +96,7 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     let textEl: HTMLElement | null = null;
     if (shape.text) {
       const t = shape.text;
-      textEl = el.appendChild(document.createElement("div"));
+      textEl = el.createDiv();
       textEl.className = "pptx-text";
       if (shape.textRect) {
         const r = shape.textRect;

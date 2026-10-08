@@ -193,9 +193,11 @@ describe("renderParagraphs spacing", () => {
     expect(host.querySelector("p")!.style.lineHeight).toBe(`${1.2 * 12 * PX_PER_PT}px`);
   });
 
-  it("adds space before and after paragraphs", () => {
-    renderParagraphs(host, [para([run("x")], { spcBef: { pts: 10 }, spcAft: { pct: 0.5 } })], PX_PER_PT);
-    const p = host.querySelector("p")!;
+  it("adds space before and after paragraphs, but not before the first (like PowerPoint)", () => {
+    const spaced = para([run("x")], { spcBef: { pts: 10 }, spcAft: { pct: 0.5 } });
+    renderParagraphs(host, [spaced, spaced], PX_PER_PT);
+    const [first, p] = Array.from(host.querySelectorAll("p"));
+    expect(first.style.marginTop).toBe("");
     expect(p.style.marginTop).toBe(`${10 * PX_PER_PT}px`);
     expect(parseFloat(p.style.marginBottom)).toBeCloseTo(0.5 * 1.2 * 18 * PX_PER_PT, 5);
   });

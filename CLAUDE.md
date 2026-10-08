@@ -21,8 +21,9 @@ GPL-3.0.
 
 ## Rules
 
-- Only `main.ts`, `*-view.ts` and `presentation/common/` use Obsidian APIs. Everything else uses plain DOM APIs so it runs under jsdom tests — don't use Obsidian's `createEl`/`empty()` helpers there.
+- Only `main.ts`, `*-view.ts` and `presentation/common/` import from `obsidian`. Other modules run under jsdom; they may use Obsidian's global DOM helpers `createEl`/`createDiv`/`createSpan` (shimmed in `tests/setup.ts`, which the directory scanner prefers over `document.createElement`) but nothing else Obsidian-specific.
 - Writers must not touch what the user didn't change: unchanged runs/paragraphs/tables are cloned verbatim, edited ones only rewrite differing modeled props. Real-file tests assert byte-identical no-op writes for both formats.
+- Manifest description must not contain "Obsidian". Avoid `!important` and `text-indent` in styles.css (directory CSS lint).
 - Never dispatch transactions on load (image node views etc.) — opening a file must not save it.
 - Keep OOXML child order valid (pptx: bullets before `tabLst`/`defRPr`; docx: `ORDER` table in docx-writer) — Office rejects misordered XML.
 - View type ids must be unique (`doc-works-*`); Office Suite already owns `docx-editor-view`.

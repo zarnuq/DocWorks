@@ -43,8 +43,8 @@ function diff(run: RunProps, base: RunProps): Partial<RunProps> {
 
 export function renderParagraphs(host: HTMLElement, paras: Para[], pxPerPt: number, pxPerEmu = pxPerPt / EMU_PER_PT, lnSpcReduction = 0): void {
   host.replaceChildren();
-  for (const para of paras) {
-    const p = host.appendChild(document.createElement("p"));
+  paras.forEach((para, index) => {
+    const p = host.createEl("p");
     p.dataset.lvl = String(para.lvl);
     if (para.bullet) p.dataset.bullet = para.bullet;
     p.style.textAlign = CSS_ALIGN[para.align];
@@ -58,23 +58,24 @@ export function renderParagraphs(host: HTMLElement, paras: Para[], pxPerPt: numb
     const single = 1.2 * size * pxPerPt;
     const space = (s: Spacing | null | undefined, reduce = 0) => (!s ? 0 : "pts" in s ? s.pts * pxPerPt : (s.pct - reduce) * single);
     p.style.lineHeight = `${para.lnSpc ? space(para.lnSpc, lnSpcReduction) : (1 - lnSpcReduction) * single}px`;
-    if (para.spcBef) p.style.marginTop = `${space(para.spcBef)}px`;
+    // PowerPoint ignores space before the first paragraph of a text box.
+    if (para.spcBef && index > 0) p.style.marginTop = `${space(para.spcBef)}px`;
     if (para.spcAft) p.style.marginBottom = `${space(para.spcAft)}px`;
     if (para.bullet) p.style.setProperty("--pptx-bullet-size", `${(para.runs[0]?.sz ?? size) * pxPerPt}px`);
 
     for (const run of para.runs) {
       run.text.split("\n").forEach((segment, i) => {
-        if (i > 0) p.appendChild(document.createElement("br"));
+        if (i > 0) p.createEl("br");
         if (!segment) return;
-        const span = p.appendChild(document.createElement("span"));
+        const span = p.createSpan();
         span.textContent = segment;
         styleRun(span, diff(run, para.defaults), pxPerPt);
         const ls = letterSpacing(segment, run, run.sz * pxPerPt);
         if (ls !== null && Math.abs(ls) > 0.01) span.style.letterSpacing = `${ls}px`;
       });
     }
-    if (!p.querySelector("span")) p.appendChild(document.createElement("br"));
-  }
+    if (!p.querySelector("span")) p.createEl("br");
+  });
   markEmptyParagraphs(host);
 }
 
@@ -219,7 +220,7 @@ export function applyRunStyle(host: HTMLElement, patch: Partial<RunProps>, pxPer
     if (start > 0) node = node.splitText(start);
 
     const current = explicitProps(node.parentElement, host, pxPerPt);
-    const span = document.createElement("span");
+    const span = createSpan();
     node.parentNode!.insertBefore(span, node);
     span.appendChild(node);
     styleRun(span, patch, pxPerPt, { u: current.u ?? false, strike: current.strike ?? false });
