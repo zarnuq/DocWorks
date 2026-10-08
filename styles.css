@@ -1,0 +1,513 @@
+/* Shared editor chrome: root layout, toolbar, controls. */
+.dw-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background-primary);
+}
+
+.dw-loading {
+  padding: var(--size-4-8);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.dw-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2-1);
+  padding: var(--size-4-1) var(--size-4-3);
+  border-bottom: var(--border-width) solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  user-select: none;
+}
+
+.dw-toolbar .dw-btn,
+.dw-toolbar .dw-select,
+.dw-segmented button {
+  height: var(--input-height);
+  font-size: var(--font-ui-smaller);
+}
+
+.dw-btn {
+  min-width: var(--input-height);
+  padding: 0 var(--size-4-2);
+  box-shadow: none;
+}
+
+.dw-btn.bold { font-weight: var(--bold-weight); }
+.dw-btn.italic { font-style: italic; }
+.dw-btn.underline { text-decoration: underline; }
+.dw-btn.strike { text-decoration: line-through; }
+
+/* Color picker: label styled as a button, swatch shown as an underline. */
+.dw-color {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border-radius: var(--button-radius);
+  background: var(--interactive-normal);
+  font-weight: var(--bold-weight);
+  box-shadow: inset 0 -3px 0 var(--dw-swatch, currentColor);
+  cursor: var(--cursor);
+}
+
+.dw-color input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.dw-gap {
+  width: var(--border-width);
+  height: var(--size-4-5);
+  margin: 0 var(--size-2-2);
+  background: var(--background-modifier-border);
+}
+
+.dw-end {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-left: auto;
+}
+
+.dw-segmented {
+  display: inline-flex;
+  gap: var(--size-2-1);
+}
+
+.dw-segmented button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.dw-status {
+  min-width: 4em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  text-align: right;
+}
+
+/* ==========================================================================
+   WORD (DOCX) EDITOR
+   ========================================================================== */
+
+.docx-editor-host {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 1rem 3rem;
+  scrollbar-gutter: stable;
+}
+
+.docx-editor-host .ProseMirror {
+  width: 100%;
+  max-width: var(--docx-page-width, 816px);
+  min-height: 100%;
+  padding: 1.5rem 2rem;
+  box-sizing: content-box;
+  outline: none;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  tab-size: 4;
+}
+
+.docx-theme-light .docx-editor-host,
+.docx-theme-light .ProseMirror {
+  background: #ffffff;
+  color: #1a1a1a;
+  caret-color: #000000;
+}
+
+.docx-theme-dark .docx-editor-host,
+.docx-theme-dark .ProseMirror {
+  background: #1e1e1e;
+  color: #e5e7eb;
+  caret-color: #ffffff;
+}
+
+/* Obsidian themes color bold/italic; documents carry their own colors. */
+.docx-editor-host .ProseMirror :is(strong, em, u, s, sub, sup, h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+}
+
+/* Highlights and shaded cells are light colors: keep their text dark on dark paper too. */
+.docx-editor-host .ProseMirror mark,
+.docx-editor-host .ProseMirror td[style*="background"] {
+  color: #1a1a1a;
+}
+
+.docx-editor-host .ProseMirror p {
+  margin: 0 0 0.4em;
+}
+
+.docx-editor-host .ProseMirror :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0.8em 0 0.3em;
+}
+
+.docx-editor-host .ProseMirror p[data-style="Quote"] {
+  font-style: italic;
+  border-left: 3px solid var(--interactive-accent);
+  padding-left: 1em;
+}
+
+/* List markers come from numbering.xml via decorations (data-list). */
+.docx-list::before {
+  content: attr(data-list);
+  display: inline-block;
+  width: var(--docx-hanging, 18pt);
+  margin-left: calc(-1 * var(--docx-hanging, 18pt));
+}
+
+.docx-editor-host .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+}
+
+.docx-editor-host .ProseMirror td {
+  border: 1px solid #9ca3af;
+  padding: 4px 8px;
+  vertical-align: top;
+}
+
+.docx-editor-host .ProseMirror td p:last-child {
+  margin-bottom: 0;
+}
+
+.docx-editor-host .ProseMirror hr {
+  border: none;
+  border-top: 1px solid #9ca3af;
+  margin: 1em 0;
+}
+
+.docx-link {
+  color: #0563c1;
+  text-decoration: underline;
+}
+
+.docx-page-break {
+  display: block;
+  margin: 1.2em 0;
+  border-top: 1px dashed #9ca3af;
+  text-align: center;
+  line-height: 0;
+  user-select: none;
+}
+
+.docx-page-break-label {
+  background: inherit;
+  padding: 0 8px;
+  font-size: 10px;
+  color: #6b7280;
+}
+
+/* Read-only content kept verbatim (content controls, fields, symbols). */
+.docx-raw-block {
+  border-left: 3px solid #9ca3af;
+  padding: 2px 8px;
+  margin: 0.4em 0;
+  opacity: 0.75;
+  white-space: pre-wrap;
+}
+
+.docx-opaque {
+  opacity: 0.75;
+}
+
+.ProseMirror-selectednode {
+  outline: 2px solid var(--interactive-accent);
+}
+
+/* Images */
+.docx-image {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.docx-image img {
+  max-width: 100%;
+}
+
+.docx-image-handle,
+.docx-image-bar {
+  display: none;
+}
+
+.docx-image.is-selected .docx-image-handle {
+  display: block;
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  background: var(--interactive-accent);
+  border: 2px solid #ffffff;
+  border-radius: 2px;
+  cursor: nwse-resize;
+}
+
+.docx-image.is-selected .docx-image-bar {
+  display: flex;
+  gap: 2px;
+  position: absolute;
+  left: 0;
+  top: -34px;
+  padding: 2px;
+  line-height: normal;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  z-index: 5;
+}
+
+/* ==========================================================================
+   PRESENTATION (PPTX) EDITOR
+   ========================================================================== */
+
+.pptx-editor-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background-primary);
+}
+
+.pptx-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.pptx-thumbs {
+  width: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px 8px;
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pptx-thumb {
+  display: flex;
+  gap: 6px;
+  cursor: pointer;
+  align-items: flex-start;
+}
+
+.pptx-thumb-num {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 14px;
+  text-align: right;
+}
+
+.pptx-thumb-slide {
+  pointer-events: none;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pptx-thumb.is-active .pptx-thumb-slide {
+  border-color: var(--interactive-accent);
+}
+
+.pptx-thumb:hover:not(.is-active) .pptx-thumb-slide {
+  border-color: var(--background-modifier-border-hover);
+}
+
+.pptx-stage {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  /* "safe": a slide wider than the stage scrolls instead of being cut off on the left. */
+  align-items: safe center;
+  gap: 16px;
+  outline: none;
+}
+
+.pptx-theme-light .pptx-stage {
+  background: #e5e7eb;
+}
+
+.pptx-theme-dark .pptx-stage {
+  background: #1e1e1e;
+}
+
+.pptx-notes {
+  width: 100%;
+  max-width: 1400px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.pptx-notes::before {
+  content: "Speaker notes";
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-faint);
+}
+
+/* Slide content keeps the deck's own colors regardless of Obsidian theme. */
+.pptx-slide {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+.pptx-shape {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.pptx-shape.is-inherited {
+  pointer-events: none;
+}
+
+.pptx-kind-pic img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+.pptx-kind-pic,
+.pptx-kind-table,
+.pptx-kind-frame {
+  cursor: move;
+}
+
+.pptx-kind-table table {
+  width: 100%;
+  height: 100%;
+  border-collapse: collapse;
+}
+
+.pptx-kind-table td {
+  border: 1px solid #9ca3af;
+  padding: 2px 4px;
+  color: #000000;
+}
+
+.pptx-kind-frame {
+  border: 1px dashed #9ca3af;
+}
+
+.pptx-frame-label {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px;
+}
+
+.pptx-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  outline: none;
+  white-space: pre-wrap;
+  /* Chromium's contenteditable UA style breaks long words; PowerPoint wraps only at spaces here. */
+  overflow-wrap: normal;
+  word-break: normal;
+  user-select: text;
+  line-height: 1.2;
+}
+
+.pptx-text p {
+  margin: 0;
+}
+
+/* PowerPoint ignores space before the first paragraph of a text box. */
+.pptx-text p:first-child {
+  margin-top: 0 !important;
+}
+
+.pptx-text p[data-bullet]::before {
+  content: attr(data-bullet);
+  display: inline-block;
+  min-width: var(--pptx-bullet-width, 1em);
+  font-size: var(--pptx-bullet-size, inherit);
+  text-indent: 0;
+}
+
+.pptx-text:not(:focus) p[data-empty]::before {
+  content: none;
+}
+
+.pptx-text[contenteditable="true"] {
+  cursor: text;
+  caret-color: currentColor;
+}
+
+.pptx-text.is-empty[contenteditable="true"] p:first-child::after {
+  content: "Click to add text";
+  opacity: 0.45;
+}
+
+.pptx-shape.is-selected {
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.pptx-handle {
+  display: none;
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--interactive-accent);
+  border: 2px solid #ffffff;
+  border-radius: 3px;
+  z-index: 2;
+}
+
+.pptx-shape.is-selected .pptx-handle {
+  display: block;
+}
+
+.pptx-handle-move {
+  top: -9px;
+  left: -9px;
+  cursor: move;
+}
+
+.pptx-handle-resize {
+  bottom: -9px;
+  right: -9px;
+  cursor: nwse-resize;
+}
+
+.pptx-geom {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}

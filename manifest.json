@@ -1,0 +1,9 @@
+{
+  "id": "doc-works",
+  "name": "Doc Works",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "View and edit Word (.docx) and PowerPoint (.pptx) files inside Obsidian.",
+  "author": "zarnuq",
+  "isDesktopOnly": true
+}
