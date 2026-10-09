@@ -752,7 +752,7 @@ textarea.pptx-notes {
 
 /* Format panel */
 .pptx-props {
-  flex: 0 0 240px;
+  flex: 0 0 264px;
   overflow-y: auto;
   padding: var(--size-4-2) var(--size-4-3);
   border-left: var(--border-width) solid var(--background-modifier-border);
@@ -773,9 +773,12 @@ textarea.pptx-notes {
   margin-bottom: var(--size-2-2);
 }
 
-.pptx-props-row input[type="number"],
-.pptx-props-row select {
+.pptx-props-row input[type="number"] {
   width: 110px;
+}
+.pptx-props-row select {
+  flex: 0 1 160px;
+  min-width: 0;
 }
 
 .pptx-props-buttons {

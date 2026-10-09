@@ -191,21 +191,61 @@ export class PptxDocument extends OoxmlPackage {
     return plainText(this.notesBody(index));
   }
 
-  /** Notes can be edited if the slide has a notes page, or the deck has a notes master to make one from. */
-  canEditNotes(index: number): boolean {
-    return !!this.notesBody(index) || !!this.relOfType(PRESENTATION, "notesMaster");
-  }
-
-  /** Set a slide's notes as plain text, creating its notes page if needed. False if that isn't possible. */
+  /** Set a slide's notes as plain text, creating its notes page (and the deck's notes master) if needed. */
   setNotes(index: number, text: string): boolean {
     let body = this.notesBody(index);
     if (!body) {
       if (!text) return true;
-      if (!this.canEditNotes(index)) return false;
       body = this.createNotes(this.slides()[index].path);
     }
     writePlainParagraphs(body, text);
     return true;
+  }
+
+  /** The deck's notes master, created with a copy of the deck theme if it has none (new decks, decks never given notes). */
+  private ensureNotesMaster(): string {
+    const existing = this.relOfType(PRESENTATION, "notesMaster");
+    if (existing) return existing;
+    const pres = this.parts.get(PRESENTATION)!;
+    const sz = pres.getElementsByTagNameNS(NS.p, "notesSz")[0];
+    const cx = Number(sz?.getAttribute("cx")) || 6858000;
+    const cy = Number(sz?.getAttribute("cy")) || 9144000;
+    const box = (x: number, y: number, w: number, h: number) =>
+      `<a:xfrm><a:off x="${Math.round(cx * x)}" y="${Math.round(cy * y)}"/><a:ext cx="${Math.round(cx * w)}" cy="${Math.round(cy * h)}"/></a:xfrm>`;
+    const clrMap = ["bg1=lt1", "tx1=dk1", "bg2=lt2", "tx2=dk2", ...[1, 2, 3, 4, 5, 6].map((i) => `accent${i}=accent${i}`), "hlink=hlink", "folHlink=folHlink"]
+      .map((kv) => kv.replace(/(\w+)=(\w+)/, '$1="$2"'))
+      .join(" ");
+    const path = this.nextPartPath("ppt/notesMasters/notesMaster", ".xml");
+    this.parts.set(
+      path,
+      parseXml(
+        `<p:notesMaster xmlns:a="${NS.a}" xmlns:r="${NS.r}" xmlns:p="${NS.p}"><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>` +
+          `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>` +
+          `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/><p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr><p:nvPr><p:ph type="sldImg" idx="2"/></p:nvPr></p:nvSpPr>` +
+          `<p:spPr>${box(0.1, 0.125, 0.8, 0.3375)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln w="12700"><a:solidFill><a:prstClr val="black"/></a:solidFill></a:ln></p:spPr></p:sp>` +
+          `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Placeholder 2"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" sz="quarter" idx="3"/></p:nvPr></p:nvSpPr>` +
+          `<p:spPr>${box(0.1, 0.48125, 0.8, 0.39375)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>` +
+          `<p:txBody><a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"/><a:lstStyle/><a:p><a:pPr lvl="0"/><a:r><a:rPr lang="en-US"/><a:t>Click to edit Master text styles</a:t></a:r></a:p></p:txBody></p:sp>` +
+          `</p:spTree></p:cSld><p:clrMap ${clrMap}/>` +
+          `<p:notesStyle><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200">` +
+          `<a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:notesStyle></p:notesMaster>`
+      )!
+    );
+    this.addOverride(path, "application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml");
+    // PowerPoint wants each master to have its own theme part.
+    const deckTheme = this.xml(this.relOfType(PRESENTATION, "theme") ?? "");
+    if (deckTheme) {
+      const theme = this.nextPartPath("ppt/theme/theme", ".xml");
+      this.parts.set(theme, deckTheme.cloneNode(true) as Document);
+      this.addOverride(theme, "application/vnd.openxmlformats-officedocument.theme+xml");
+      this.addRel(path, "theme", theme);
+    }
+    const rId = this.addRel(PRESENTATION, "notesMaster", path);
+    const list = pres.createElementNS(NS.p, "p:notesMasterIdLst");
+    list.appendChild(pres.createElementNS(NS.p, "p:notesMasterId")).setAttributeNS(NS.r, "r:id", rId);
+    const masters = pres.getElementsByTagNameNS(NS.p, "sldMasterIdLst")[0];
+    pres.documentElement.insertBefore(list, masters ? masters.nextSibling : pres.documentElement.firstChild);
+    return path;
   }
 
   private createNotes(slidePath: string): Element {
@@ -224,7 +264,7 @@ export class PptxDocument extends OoxmlPackage {
       )!
     );
     this.addOverride(path, NOTES_CT);
-    this.addRel(path, "notesMaster", this.relOfType(PRESENTATION, "notesMaster")!);
+    this.addRel(path, "notesMaster", this.ensureNotesMaster());
     this.addRel(path, "slide", slidePath);
     this.addRel(slidePath, "notesSlide", path);
     return Array.from(this.parts.get(path)!.getElementsByTagNameNS(NS.p, "txBody"))[0];

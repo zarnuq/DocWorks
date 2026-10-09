@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
+import { blankPptx } from "../src/infrastructure/blank";
 import { loadSample, roundTrip, texts } from "./helpers";
 import { NS } from "../src/core/utils/xml";
 
@@ -253,14 +254,26 @@ describe("speaker notes", () => {
     expect(doc.notesOf(doc.slides()[1].path)).toBeNull();
   });
 
-  it("refuses to create notes without a notes master", async () => {
-    const doc = await loadSample();
-    // Drop the notes master relationship, as in decks that never had notes.
-    const rels = doc.xml("ppt/_rels/presentation.xml.rels")!;
-    Array.from(rels.documentElement.children).find((r) => r.getAttribute("Type")!.endsWith("/notesMaster"))!.remove();
-    expect(doc.canEditNotes(1)).toBe(false);
-    expect(doc.setNotes(1, "x")).toBe(false);
-    expect(doc.canEditNotes(0)).toBe(true);
+  it("adds a notes master to a deck that has none, so new decks can have notes", async () => {
+    const doc = await PptxDocument.load(await blankPptx());
+    expect(doc.relOfType("ppt/presentation.xml", "notesMaster")).toBeNull();
+    expect(doc.setNotes(0, "Say hello")).toBe(true);
+    const zip = await JSZip.loadAsync(await doc.save());
+    const back = await PptxDocument.load(await zip.generateAsync({ type: "uint8array" }));
+    expect(back.notesText(0)).toBe("Say hello");
+    const master = back.relOfType("ppt/presentation.xml", "notesMaster")!;
+    expect(back.relOfType(back.notesOf(back.slides()[0].path)!, "notesMaster")).toBe(master);
+    // PowerPoint needs the master listed in presentation.xml (after sldMasterIdLst) with its own theme.
+    const pres = back.xml("ppt/presentation.xml")!.documentElement;
+    expect(Array.from(pres.children).map((c) => c.localName).slice(0, 3)).toEqual(["sldMasterIdLst", "notesMasterIdLst", "sldIdLst"]);
+    const theme = back.relOfType(master, "theme")!;
+    expect(theme).not.toBe(back.relOfType("ppt/presentation.xml", "theme"));
+    const types = await zip.file("[Content_Types].xml")!.async("text");
+    expect(types).toContain(`/${master}`);
+    expect(types).toContain(`/${theme}`);
+    // A second slide reuses the same master.
+    back.setNotes(0, "Again");
+    expect(back.relOfType("ppt/presentation.xml", "notesMaster")).toBe(master);
   });
 });
 

@@ -51,7 +51,7 @@ Lossless by design: unedited paragraphs and tables are copied back unchanged. Ed
 
 ### PowerPoint (.pptx)
 
-- Slide thumbnails, a main slide canvas and editable speaker notes (a notes page is created when a slide has none)
+- Slide thumbnails, a main slide canvas and editable speaker notes (the notes page, and the notes master, are created when missing)
 - Slideshow (▶ Present, F5 from the start, Shift+F5 from the current slide): arrow keys / space / click to advance, type a number + Enter to jump, Esc to exit
 - Presenter view (press P in the slideshow): current and next slide, notes, slide counter, timer and clock
 - Hide slides from the slideshow

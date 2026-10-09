@@ -219,7 +219,7 @@ export class PptxView extends FileView {
     this.propsEl = body.createDiv({ cls: "pptx-props" });
     this.propsEl.hide();
     this.slideHostEl.addEventListener("pointerdown", (e) => this.drawing && this.startDraw(e), { capture: true });
-    this.notesEl = this.stageEl.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes" } });
+    this.notesEl = this.stageEl.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes", placeholder: "Click to add speaker notes" } });
     this.notesEl.addEventListener("input", () => {
       if (this.notesTimer) window.clearTimeout(this.notesTimer);
       this.notesTimer = window.setTimeout(() => this.flushNotes(), 400);
@@ -453,10 +453,7 @@ export class PptxView extends FileView {
     this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: true, imageUrl: this.imageUrl, slideNumber: this.index + 1 });
     this.rendered.forEach((rs) => this.wireShape(rs));
 
-    const canEdit = this.doc.canEditNotes(this.index);
     this.notesEl.value = this.doc.notesText(this.index);
-    this.notesEl.disabled = !canEdit;
-    this.notesEl.placeholder = canEdit ? "Click to add speaker notes" : "This presentation has no notes master, so notes can't be added.";
     // Keep the selection across redraws of the same slide (resizes, edits).
     const xml = this.currentSlideXml();
     const keep = this.items.filter((i) => xml?.contains(i));
@@ -1305,7 +1302,7 @@ export class PptxView extends FileView {
   private flushNotes(): void {
     if (this.notesTimer) window.clearTimeout(this.notesTimer);
     this.notesTimer = null;
-    if (!this.doc || this.notesEl.disabled || this.notesEl.value === this.doc.notesText(this.index)) return;
+    if (!this.doc || this.notesEl.value === this.doc.notesText(this.index)) return;
     this.pushHistory();
     this.doc.setNotes(this.index, this.notesEl.value);
     this.markDirty();
