@@ -10,7 +10,7 @@ import { writeBody } from "../src/domain/docx/docx-writer";
 import { paragraphProps, readDocx } from "../src/domain/docx/docx-reader";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { readSample, W } from "./helpers";
-import { pageSetup, paginate } from "../src/domain/docx/pages";
+import { pageFills, pageSetup, paginate } from "../src/domain/docx/pages";
 import { acceptRevisions, rejectRevisions, revisions } from "../src/domain/docx/revisions";
 import { countWords, findKey, findRanges, replaceAllCmd, replaceRangeCmd, setFind } from "../src/presentation/docx/docx-find";
 
@@ -187,6 +187,18 @@ describe("pages", () => {
     // A block taller than a page still gets its own page, never an empty one.
     expect(paginate([{ height: 900, breakAfter: false }, { height: 10, breakAfter: false }], 500)).toEqual([1]);
   });
+
+  it("knows how much of each page is left blank, so pages keep their full height", () => {
+    const blocks = [100, 300, 250, 50, 400, 10].map((height) => ({ height, breakAfter: false }));
+    expect(pageFills(blocks, [2, 4], 500)).toEqual([100, 200, 90]);
+    expect(pageFills([{ height: 900 }], [], 500)).toEqual([0]);
+  });
+
+  it("can keep every page at Letter size whatever the document says", () => {
+    const a4 = body(`<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="720" w:bottom="1080" w:left="720" w:header="708" w:footer="708"/></w:sectPr>`);
+    expect(pageSetup(a4, "letter")).toEqual({ width: 816, height: 1056, top: 96, right: 48, bottom: 72, left: 48, header: 47, footer: 47 });
+    expect(pageSetup(a4, "document").width).toBe(794);
+  });
 });
 
 describe("page view", () => {
@@ -218,6 +230,9 @@ describe("page view", () => {
     expect(host.querySelector(".docx-page-first")!.textContent).toContain("Header 1");
     expect(host.querySelector(".docx-page-last")!.textContent).toContain("Footer 2");
     expect(pagesKey.getState(view.state)!.pages).toBe(2);
+    // Each page is padded to its full height (nothing has height under jsdom, so the whole text area).
+    const fills = Array.from(host.querySelectorAll<HTMLElement>(".docx-page-fill")).map((f) => f.style.getPropertyValue("--docx-fill"));
+    expect(fills).toEqual(["864px", "864px"]);
     view.destroy();
   });
 });

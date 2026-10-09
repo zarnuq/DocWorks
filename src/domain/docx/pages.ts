@@ -15,16 +15,18 @@ export interface PageSetup {
   footer: number;
 }
 
-/** Page size and margins from the body's final w:sectPr (Letter, 1" margins by default). */
-export function pageSetup(body: Element): PageSetup {
+export type PageSize = "document" | "letter";
+
+/** Page size and margins from the body's final w:sectPr (Letter, 1" margins by default); `letter` forces 8.5 x 11 in pages. */
+export function pageSetup(body: Element, size: PageSize = "document"): PageSetup {
   const sectPr = Array.from(body.children).filter((c) => c.localName === "sectPr").pop();
   const get = (local: string, name: string, fallback: number) => {
     const v = sectPr?.getElementsByTagNameNS(NS_W, local)[0]?.getAttributeNS(NS_W, name);
     return Math.round(Number(v ?? fallback) / 15);
   };
   return {
-    width: get("pgSz", "w", 12240),
-    height: get("pgSz", "h", 15840),
+    width: size === "letter" ? 816 : get("pgSz", "w", 12240),
+    height: size === "letter" ? 1056 : get("pgSz", "h", 15840),
     top: Math.abs(get("pgMar", "top", 1440)),
     right: get("pgMar", "right", 1440),
     bottom: Math.abs(get("pgMar", "bottom", 1440)),
@@ -46,4 +48,15 @@ export function paginate(blocks: { height: number; breakAfter: boolean }[], page
     used += b.height;
   });
   return starts;
+}
+
+/** Blank space left at the bottom of each page (never negative), given the page starts from `paginate`. */
+export function pageFills(blocks: { height: number }[], starts: number[], pageHeight: number): number[] {
+  const used = new Array<number>(starts.length + 1).fill(0);
+  let page = 0;
+  blocks.forEach((b, i) => {
+    if (starts[page] === i) page++;
+    used[page] += b.height;
+  });
+  return used.map((u) => Math.max(0, pageHeight - u));
 }

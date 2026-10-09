@@ -1,6 +1,6 @@
-import { Notice, Plugin, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFolder, WorkspaceLeaf } from "obsidian";
 import { blankDocx, blankPptx } from "./infrastructure/blank";
-import { DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
+import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
 import { PptxView, VIEW_TYPE_PPTX } from "./presentation/pptx/pptx-view";
 
 const NEW_FILES = [
@@ -9,8 +9,12 @@ const NEW_FILES = [
 ] as const;
 
 export default class DocWorksPlugin extends Plugin {
+  settings: DocWorksSettings = { ...DEFAULT_SETTINGS };
+
   async onload() {
-    this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf));
+    this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<DocWorksSettings> | null) };
+    this.addSettingTab(new DocWorksSettingTab(this.app, this));
+    this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf, this.settings));
     this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf));
     this.claimExtension("docx", VIEW_TYPE_DOCX);
     this.claimExtension("pptx", VIEW_TYPE_PPTX);
@@ -61,6 +65,11 @@ export default class DocWorksPlugin extends Plugin {
     );
   }
 
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DOCX)) (leaf.view as DocxView).applyPageSize();
+  }
+
   /** Create "Untitled.<ext>" (or "Untitled 1"...) in `folder` from a blank template and open it. */
   private async createFile(ext: string, make: () => Promise<Uint8Array>, folder: TFolder): Promise<void> {
     const dir = folder.isRoot() ? "" : `${folder.path}/`;
@@ -79,5 +88,44 @@ export default class DocWorksPlugin extends Plugin {
       console.warn(`[doc-works] .${ext} is already handled by another plugin`, err);
       new Notice(`Doc Works: .${ext} is already handled by another plugin; disable it to use this editor.`);
     }
+  }
+}
+
+const PAGE_SIZE = {
+  name: "Word page size",
+  desc: "Page view uses each document's own page size, or always US Letter (8.5 × 11 in).",
+  options: { document: "From the document", letter: "Always Letter" },
+};
+
+class DocWorksSettingTab extends PluginSettingTab {
+  constructor(
+    app: App,
+    private plugin: DocWorksPlugin
+  ) {
+    super(app, plugin);
+  }
+
+  // Obsidian 1.13+: rendered declaratively and searchable.
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [{ name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } }];
+  }
+
+  async setControlValue(key: string, value: unknown): Promise<void> {
+    if (key === "pageSize") this.plugin.settings.pageSize = value === "letter" ? "letter" : "document";
+    await this.plugin.saveSettings();
+  }
+
+  // Older Obsidian versions.
+  display(): void {
+    this.containerEl.empty();
+    new Setting(this.containerEl)
+      .setName(PAGE_SIZE.name)
+      .setDesc(PAGE_SIZE.desc)
+      .addDropdown((d) =>
+        d
+          .addOptions(PAGE_SIZE.options)
+          .setValue(this.plugin.settings.pageSize)
+          .onChange((v) => void this.setControlValue("pageSize", v))
+      );
   }
 }

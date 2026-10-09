@@ -362,6 +362,11 @@ class SlideParser {
 
     const clrMap = this.master?.getElementsByTagNameNS(NS.p, "clrMap")[0];
     for (const a of Array.from(clrMap?.attributes ?? [])) this.colors.map[a.name] = a.value;
+    // A slide (or else its layout) can remap tx1/bg1..., e.g. light text on a dark slide.
+    const override = [doc.xml(slidePath), this.layout]
+      .map((d) => d?.getElementsByTagNameNS(NS.a, "overrideClrMapping")[0])
+      .find((o) => o);
+    for (const a of Array.from(override?.attributes ?? [])) this.colors.map[a.name] = a.value;
     const theme = themePath ? doc.xml(themePath) : null;
     const scheme = theme?.getElementsByTagNameNS(NS.a, "clrScheme")[0];
     for (const slot of Array.from(scheme?.children ?? [])) {

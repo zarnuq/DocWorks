@@ -5,7 +5,7 @@
 import { Attrs, MarkType, Node as PMNode, ResolvedPos } from "prosemirror-model";
 import { Command, EditorState, Plugin, PluginKey, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
-import { PageSetup, paginate } from "../../domain/docx/pages";
+import { PageSetup, pageFills, paginate } from "../../domain/docx/pages";
 import { baseKeymap, chainCommands, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
@@ -671,6 +671,8 @@ interface PagesState {
   starts: number[];
   pages: number;
   decorations: DecorationSet;
+  /** Header / footer band heights the layout assumed. */
+  bands: [number, number];
 }
 
 export const pagesKey = new PluginKey<PagesState>("docx-pages");
@@ -693,11 +695,18 @@ function hasPageBreak(node: PMNode): boolean {
 /** Bumped on every measure so header / footer widgets are rebuilt with fresh content. */
 let pageGeneration = 0;
 
+/** Heights of the drawn header and footer bands: a header or footer taller than its margin pushes the text in, as in Word. */
+function bandHeights(view: EditorView, setup: PageSetup): [number, number] {
+  const head = view.dom.querySelector<HTMLElement>(".docx-page-first")?.offsetHeight ?? 0;
+  const foot = view.dom.querySelector<HTMLElement>(".docx-page-last .docx-page-foot")?.offsetHeight ?? 0;
+  return [Math.max(setup.top, head), Math.max(setup.bottom, foot)];
+}
+
 function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   const gen = ++pageGeneration;
   const setup = opts.setup();
   const doc = view.state.doc;
-  if (!setup) return { starts: [], pages: 1, decorations: DecorationSet.empty };
+  if (!setup) return { starts: [], pages: 1, decorations: DecorationSet.empty, bands: [0, 0] };
   const blocks: { height: number; breakAfter: boolean }[] = [];
   const offsets: number[] = [];
   doc.forEach((node, offset) => {
@@ -707,11 +716,20 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
     blocks.push({ height, breakAfter: hasPageBreak(node) });
     offsets.push(offset);
   });
-  const starts = paginate(blocks, setup.height - setup.top - setup.bottom);
+  const bands = bandHeights(view, setup);
+  const textHeight = setup.height - bands[0] - bands[1];
+  const starts = paginate(blocks, textHeight);
+  const fills = pageFills(blocks, starts, textHeight);
   const pages = starts.length + 1;
   const part = (cls: string, content: Node | null) => {
     const el = createDiv({ cls, attr: { contenteditable: "false" } });
     if (content) el.appendChild(content);
+    return el;
+  };
+  // Blank space that pads a page to its full height.
+  const fill = (page: number) => {
+    const el = createDiv({ cls: "docx-page-fill" });
+    el.setCssProps({ "--docx-fill": `${fills[page]}px` });
     return el;
   };
   const decos = [
@@ -721,6 +739,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
         offsets[i],
         () => {
           const gap = createDiv({ cls: "docx-page-gap", attr: { contenteditable: "false" } });
+          gap.appendChild(fill(k));
           gap.appendChild(part("docx-page-foot", opts.footer(k + 1, pages)));
           gap.createDiv({ cls: "docx-page-space" });
           gap.appendChild(part("docx-page-head", opts.header(k + 2, pages)));
@@ -729,9 +748,18 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
         { side: -1, key: `gap-${gen}-${k}`, ignoreSelection: true }
       )
     ),
-    Decoration.widget(doc.content.size, () => part("docx-page-last", opts.footer(pages, pages)), { side: 1, key: `last-${gen}`, ignoreSelection: true }),
+    Decoration.widget(
+      doc.content.size,
+      () => {
+        const last = createDiv({ cls: "docx-page-last", attr: { contenteditable: "false" } });
+        last.appendChild(fill(pages - 1));
+        last.appendChild(part("docx-page-foot", opts.footer(pages, pages)));
+        return last;
+      },
+      { side: 1, key: `last-${gen}`, ignoreSelection: true }
+    ),
   ];
-  return { starts, pages, decorations: DecorationSet.create(doc, decos) };
+  return { starts, pages, decorations: DecorationSet.create(doc, decos), bands };
 }
 
 /** Lays the document out on pages: gaps with footers and headers where a page fills up (blocks never split). */
@@ -739,7 +767,7 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
   return new Plugin<PagesState>({
     key: pagesKey,
     state: {
-      init: () => ({ starts: [], pages: 1, decorations: DecorationSet.empty }),
+      init: () => ({ starts: [], pages: 1, decorations: DecorationSet.empty, bands: [0, 0] }),
       apply(tr, old) {
         const meta = tr.getMeta(pagesKey) as PagesState | undefined;
         return meta ?? { ...old, decorations: old.decorations.map(tr.mapping, tr.doc) };
@@ -753,7 +781,11 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
       const measure = () => {
         frame = 0;
         if (!view.dom.isConnected) return;
-        view.dispatch(view.state.tr.setMeta(pagesKey, pageDecorations(view, opts)).setMeta("addToHistory", false));
+        const next = pageDecorations(view, opts);
+        view.dispatch(view.state.tr.setMeta(pagesKey, next).setMeta("addToHistory", false));
+        // The header / footer just drawn may be taller than the margins assumed: lay out again once with their real size.
+        const setup = opts.setup();
+        if (setup && bandHeights(view, setup).some((h, i) => h !== next.bands[i])) schedule();
       };
       // A timer rather than requestAnimationFrame: frames stop while the window is in the background.
       const schedule = () => {

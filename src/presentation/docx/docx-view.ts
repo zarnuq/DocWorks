@@ -14,9 +14,15 @@ import { pickImage } from "../common/images";
 import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, pagesPlugin, repaginate } from "./docx-editor";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
-import { pageSetup, PageSetup } from "../../domain/docx/pages";
+import { pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
 import { attrsOf, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView } from "./docx-image-view";
+
+export interface DocWorksSettings {
+  /** "document": pages use the document's own size; "letter": always 8.5 x 11 in. */
+  pageSize: PageSize;
+}
+export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document" };
 
 export const VIEW_TYPE_DOCX = "doc-works-docx-view";
 
@@ -80,7 +86,10 @@ export class DocxView extends FileView {
   private reviewOpen = window.localStorage.getItem(REVIEW_KEY) === "on";
   private reviewTimer: number | null = null;
 
-  constructor(leaf: WorkspaceLeaf) {
+  constructor(
+    leaf: WorkspaceLeaf,
+    private settings: DocWorksSettings = DEFAULT_SETTINGS
+  ) {
     super(leaf);
     this.scope = new Scope(this.app.scope);
     this.scope.register(["Mod"], "f", () => {
@@ -128,8 +137,6 @@ export class DocxView extends FileView {
       hyperlinkHref: (id) => docx.hyperlinkHref(id),
     });
     this.origins = origins;
-    this.setup = pageSetup(docx.body);
-    this.pageWidth = this.setup.width - this.setup.left - this.setup.right;
     this.hf = { header: this.readHF("header"), footer: this.readHF("footer") };
 
     const ctx: EditorContext = {
@@ -151,19 +158,14 @@ export class DocxView extends FileView {
     const host = (this.hostEl = body.createDiv({ cls: "docx-editor-host" }));
     this.reviewEl = body.createDiv({ cls: "docx-review" });
     this.reviewEl.toggle(this.reviewOpen);
-    const st = this.setup;
-    host.setCssProps({
-      "--docx-page-width": `${this.pageWidth}px`,
-      "--docx-m-top": `${st.top}px`,
-      "--docx-m-right": `${st.right}px`,
-      "--docx-m-bottom": `${st.bottom}px`,
-      "--docx-m-left": `${st.left}px`,
-      "--docx-hf-header": `${st.header}px`,
-      "--docx-hf-footer": `${st.footer}px`,
-    });
+    this.applyPageSize();
     host.toggleClass("is-paged", this.pageView);
     this.ctx = ctx;
 
+    // Double-click a page's header or footer to edit it, as in Word.
+    host.addEventListener("dblclick", (e) => {
+      if ((e.target as HTMLElement).closest(".docx-page-first, .docx-page-head, .docx-page-foot, .docx-page-last")) this.headerFooterDialog();
+    });
     this.editor = new EditorView(host, {
       state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin()] }),
       nodeViews: {
@@ -226,6 +228,23 @@ export class DocxView extends FileView {
     this.editor?.destroy();
     this.editor = null;
     this.docx = null;
+  }
+
+  /** Page geometry from the document, or Letter when the page size setting says so; re-lays out open pages. */
+  applyPageSize(): void {
+    if (!this.docx || !this.hostEl) return;
+    const st = (this.setup = pageSetup(this.docx.body, this.settings.pageSize));
+    this.pageWidth = st.width - st.left - st.right;
+    this.hostEl.setCssProps({
+      "--docx-page-width": `${this.pageWidth}px`,
+      "--docx-m-top": `${st.top}px`,
+      "--docx-m-right": `${st.right}px`,
+      "--docx-m-bottom": `${st.bottom}px`,
+      "--docx-m-left": `${st.left}px`,
+      "--docx-hf-header": `${st.header}px`,
+      "--docx-hf-footer": `${st.footer}px`,
+    });
+    if (this.editor) repaginate(this.editor);
   }
 
   /** Force an immediate save, e.g. before Obsidian quits. */
@@ -322,7 +341,7 @@ export class DocxView extends FileView {
     for (const [icon, align] of [["align-left", "left"], ["align-center", "center"], ["align-right", "right"], ["align-justify", "justify"]] as [string, Align][]) {
       tb.icon(icon, `Align ${align}`, () => run(cmd.setAlign(align)));
     }
-    tb.select("Line spacing", "Spacing", [["1.0", "1"], ["1.15", "1.15"], ["1.5", "1.5"], ["2.0", "2"]], (v) => run(cmd.setLineSpacing(v)));
+    tb.iconSelect("unfold-vertical", "Line spacing", [["1.0", "1"], ["1.15", "1.15"], ["1.5", "1.5"], ["2.0", "2"]], (v) => run(cmd.setLineSpacing(v)));
     tb.icon("list", "Bulleted list", () => run(cmd.toggleList(ctx, "bullet")));
     tb.icon("list-ordered", "Numbered list", () => run(cmd.toggleList(ctx, "ordered")));
     tb.icon("outdent", "Decrease indent / list level (Shift+Tab)", () => run(cmd.shiftLevel(-1)));

@@ -17,7 +17,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--size-2-1);
+  gap: var(--size-4-2);
   padding: var(--size-4-1) var(--size-4-3);
   border-bottom: var(--border-width) solid var(--background-modifier-border);
   background: var(--background-secondary);
@@ -57,6 +57,53 @@
   cursor: var(--cursor);
 }
 
+/* Icon dropdown: a native select stretched invisibly over an icon. */
+.dw-icon-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  position: relative;
+  border-radius: var(--button-radius);
+  background: var(--interactive-normal);
+  --icon-size: var(--icon-s);
+  cursor: var(--cursor);
+}
+
+.dw-icon-select:hover {
+  background: var(--interactive-hover);
+}
+
+.dw-icon-select .dw-caret {
+  font-size: 0.7em;
+  color: var(--text-muted);
+}
+
+.dw-icon-select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: var(--cursor);
+}
+
+/* "+" under the last thumbnail adds a slide at the end. */
+.pptx-thumb-add {
+  align-self: center;
+  width: 100%;
+  height: 48px;
+  border: var(--border-width) dashed var(--background-modifier-border);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  --icon-size: var(--icon-l);
+}
+
+.pptx-thumb-add:hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
 .dw-color input {
   position: absolute;
   inset: 0;
@@ -64,11 +111,23 @@
   cursor: inherit;
 }
 
-.dw-gap {
-  width: var(--border-width);
-  height: var(--size-4-5);
-  margin: 0 var(--size-2-2);
-  background: var(--background-modifier-border);
+/* Related controls sit together in a box; boxes wrap to the next row as a unit. */
+.dw-group {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  padding: var(--size-2-1);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+}
+
+.dw-group:empty {
+  display: none;
+}
+
+.dw-group .dw-btn:not(.is-active):not(:hover) {
+  background: transparent;
 }
 
 .dw-end {
@@ -164,42 +223,44 @@
 .docx-list::before {
   content: attr(data-list);
   display: inline-block;
+  /* "11)" must stay on one line even when wider than the hanging indent. */
+  white-space: nowrap;
   width: var(--docx-hanging, 18pt);
   margin-left: calc(-1 * var(--docx-hanging, 18pt));
 }
 
-.docx-editor-host .ProseMirror table {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table {
   border-collapse: collapse;
   width: 100%;
   margin: 0.8em 0;
 }
 
-.docx-editor-host .ProseMirror td {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror td {
   border: 1px solid #9ca3af;
   padding: 4px 8px;
   vertical-align: top;
 }
 
 /* Cells covered by a vertical merge; the first cell spans them. */
-.docx-editor-host .ProseMirror td.docx-merged {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror td.docx-merged {
   display: none;
 }
 
-.docx-editor-host .ProseMirror table.docx-borders-none td {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-none td {
   border-color: transparent;
   outline: 1px dashed rgba(156, 163, 175, 0.4);
   outline-offset: -1px;
 }
 
-.docx-editor-host .ProseMirror table.docx-borders-outer {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-outer {
   border: 1px solid #9ca3af;
 }
 
-.docx-editor-host .ProseMirror table.docx-borders-outer td {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-outer td {
   border-color: transparent;
 }
 
-.docx-editor-host .ProseMirror td p:last-child {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror td p:last-child {
   margin-bottom: 0;
 }
 
@@ -387,7 +448,6 @@
 
 .pptx-notes {
   width: 100%;
-  max-width: 1400px;
   white-space: pre-wrap;
   font-size: 13px;
   color: var(--text-muted);
@@ -517,9 +577,15 @@
   caret-color: currentColor;
 }
 
-.pptx-text.is-empty[contenteditable="true"] p:first-child::after {
+/* Prompt text in an empty placeholder: it takes the place of the empty line's <br> (so it sits where the caret will),
+   and goes away while editing, as in PowerPoint. */
+.pptx-text.is-empty[contenteditable="true"]:not(:focus) p:first-child::after {
   content: "Click to add text";
   opacity: 0.45;
+}
+
+.pptx-text.is-empty[contenteditable="true"]:not(:focus) p:first-child br {
+  display: none;
 }
 
 .pptx-shape.is-selected {
@@ -530,8 +596,8 @@
 .pptx-handle {
   display: none;
   position: absolute;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   background: var(--interactive-accent);
   border: 2px solid #ffffff;
   border-radius: 3px;
@@ -542,15 +608,22 @@
   display: block;
 }
 
+/* A grab area well beyond the visible handle. */
+.pptx-handle::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
 .pptx-handle-move {
-  top: -9px;
-  left: -9px;
+  top: -10px;
+  left: -10px;
   cursor: move;
 }
 
 .pptx-handle-resize {
-  bottom: -9px;
-  right: -9px;
+  bottom: -10px;
+  right: -10px;
   cursor: nwse-resize;
 }
 
@@ -559,16 +632,26 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  /* A zero-size SVG isn't painted at all: keep vertical / horizontal lines (0 wide or 0 tall) visible. */
+  min-width: 1px;
+  min-height: 1px;
   overflow: visible;
   pointer-events: none;
 }
 
 /* Speaker notes, hidden slides */
 textarea.pptx-notes {
-  align-self: stretch;
   display: block;
-  width: 100%;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: min(var(--pptx-slide-width, 100%), 100%);
+  /* Centered under the slide even if app styles override the stage's align-items. */
+  align-self: auto;
+  margin: 0 auto;
   min-height: 5em;
+  /* Grow with the notes instead of scrolling inside a small box. */
+  field-sizing: content;
+  max-height: 70vh;
   resize: vertical;
   font-family: var(--font-text);
   font-size: var(--font-ui-small);
@@ -659,16 +742,16 @@ textarea.pptx-notes {
 
 /* Shape handles: rotate (above), adjust (yellow) */
 .pptx-handle-rotate {
-  top: -28px;
-  left: calc(50% - 6px);
+  top: -30px;
+  left: calc(50% - 9px);
   border-radius: 50%;
   cursor: grab;
 }
 
 .pptx-handle-adjust {
-  width: 10px;
-  height: 10px;
-  margin: -5px 0 0 -5px;
+  width: 12px;
+  height: 12px;
+  margin: -7px 0 0 -7px;
   background: #ffd400;
   border: 1px solid #806a00;
   border-radius: 0;
@@ -968,19 +1051,20 @@ textarea.pptx-notes {
   margin-right: calc(-1 * var(--docx-m-right));
 }
 
+/* Header / footer bands use min-height: one taller than its margin pushes the text in, as in Word. */
 .is-paged .docx-page-first {
   margin-top: calc(-1 * var(--docx-m-top));
-  height: var(--docx-m-top);
+  min-height: var(--docx-m-top);
   padding: var(--docx-hf-header) var(--docx-m-right) 0 var(--docx-m-left);
 }
 
 .is-paged .docx-page-last {
   margin-bottom: calc(-1 * var(--docx-m-bottom));
-  height: var(--docx-m-bottom);
-  padding: 0 var(--docx-m-right) var(--docx-hf-footer) var(--docx-m-left);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  padding: 0;
+}
+
+.docx-page-fill {
+  height: var(--docx-fill, 0);
 }
 
 .docx-page-foot,
@@ -992,13 +1076,13 @@ textarea.pptx-notes {
 }
 
 .docx-page-foot {
-  height: var(--docx-m-bottom);
+  min-height: var(--docx-m-bottom);
   justify-content: flex-end;
   padding-bottom: var(--docx-hf-footer);
 }
 
 .docx-page-head {
-  height: var(--docx-m-top);
+  min-height: var(--docx-m-top);
   padding-top: var(--docx-hf-header);
 }
 
@@ -1028,6 +1112,21 @@ textarea.pptx-notes {
 
 .docx-words {
   margin-right: var(--size-4-2);
+}
+
+/* Wide enough for a header laid out as a table. */
+.modal.docx-hf-modal {
+  width: min(900px, 92vw);
+}
+
+/* Double-click a page's header or footer band to edit it. */
+.is-paged :is(.docx-page-first, .docx-page-head, .docx-page-foot, .docx-page-last) {
+  cursor: pointer;
+}
+
+.is-paged :is(.docx-page-first, .docx-page-head, .docx-page-foot, .docx-page-last):hover {
+  outline: 1px dashed var(--background-modifier-border);
+  outline-offset: -4px;
 }
 
 .docx-hf-editor .ProseMirror {

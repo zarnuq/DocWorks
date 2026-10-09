@@ -4,12 +4,16 @@ export const FONTS = ["Aptos", "Calibri", "Cambria", "Arial", "Times New Roman",
 
 export type PaperTheme = "light" | "dark";
 
-/** Thin helpers for the editor toolbars; all controls are plain buttons, selects and color inputs. */
+/** Thin helpers for the editor toolbars; all controls are plain buttons, selects and color inputs, boxed in groups split by gap(). */
 export class Toolbar {
-  constructor(readonly el: HTMLElement) {}
+  private group: HTMLElement;
+
+  constructor(readonly el: HTMLElement) {
+    this.group = el.createDiv({ cls: "dw-group" });
+  }
 
   button(label: string, title: string, onClick: () => void, cls = ""): HTMLButtonElement {
-    const b = this.el.createEl("button", { text: label, cls: `dw-btn ${cls}`.trim(), attr: { "aria-label": title } });
+    const b = this.group.createEl("button", { text: label, cls: `dw-btn ${cls}`.trim(), attr: { "aria-label": title } });
     b.addEventListener("click", (e) => {
       e.preventDefault();
       onClick();
@@ -26,15 +30,22 @@ export class Toolbar {
 
   /** A select whose first option is a placeholder; `onChange` only fires for real values. */
   select(title: string, placeholder: string, options: [label: string, value: string][], onChange: (value: string) => void): HTMLSelectElement {
-    const s = this.el.createEl("select", { cls: "dropdown dw-select", attr: { "aria-label": title } });
-    for (const [text, value] of [[placeholder, ""], ...options]) s.createEl("option", { text, value });
-    s.addEventListener("change", () => s.value && onChange(s.value));
-    return s;
+    return fillSelect(this.group.createEl("select", { cls: "dropdown dw-select", attr: { "aria-label": title } }), placeholder, options, onChange);
+  }
+
+  /** A select drawn as an icon button; clicking it opens the native menu. */
+  iconSelect(icon: string, title: string, options: [label: string, value: string][], onChange: (value: string) => void): HTMLSelectElement {
+    const wrap = this.group.createEl("label", { cls: "dw-btn dw-icon-select", attr: { "aria-label": title } });
+    const glyph = wrap.createSpan();
+    setIcon(glyph, icon);
+    if (!glyph.querySelector("svg")) glyph.setText(title);
+    wrap.createSpan({ cls: "dw-caret", text: "▾" });
+    return fillSelect(wrap.createEl("select", { attr: { "aria-label": title } }), title, options, onChange);
   }
 
   /** A button-like label over a hidden color input; the last color picked shows as an underline. */
   color(label: string, title: string, initial: string, onChange: (hex: string) => void): void {
-    const wrap = this.el.createEl("label", { text: label, cls: "dw-btn dw-color", attr: { "aria-label": title } });
+    const wrap = this.group.createEl("label", { text: label, cls: "dw-btn dw-color", attr: { "aria-label": title } });
     wrap.setCssProps({ "--dw-swatch": initial });
     const input = wrap.createEl("input", { type: "color", value: initial });
     input.addEventListener("change", () => {
@@ -43,8 +54,9 @@ export class Toolbar {
     });
   }
 
+  /** Start the next group. */
   gap(): void {
-    this.el.createDiv({ cls: "dw-gap" });
+    this.group = this.el.createDiv({ cls: "dw-group" });
   }
 
   /** Light/dark switch plus save status, pushed to the end of the bar. Returns the theme syncer and status element. */
@@ -60,6 +72,14 @@ export class Toolbar {
     syncTheme(theme);
     return { syncTheme, status: end.createSpan({ cls: "dw-status", text: "Saved" }) };
   }
+}
+
+function fillSelect(s: HTMLSelectElement, placeholder: string, options: [label: string, value: string][], onChange: (value: string) => void): HTMLSelectElement {
+  // The placeholder labels the closed control only; macOS would otherwise list it with a check mark and anchor the menu on it.
+  s.createEl("option", { text: placeholder, value: "" }).hidden = true;
+  for (const [text, value] of options) s.createEl("option", { text, value });
+  s.addEventListener("change", () => s.value && onChange(s.value));
+  return s;
 }
 
 /** Ask for one line of text; resolves null when cancelled. */

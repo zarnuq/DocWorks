@@ -37,6 +37,19 @@ describe("parseSlide: placeholders inherit from layout and master", () => {
     expect(title.text!.anchor).toBe("ctr");
   });
 
+  it("uses the slide's color map override (light text on a dark slide)", async () => {
+    const doc = await loadSample();
+    const path = doc.slides()[0].path;
+    const P = "http://schemas.openxmlformats.org/presentationml/2006/main";
+    const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const ovr = doc.xml(path)!.getElementsByTagNameNS(P, "clrMapOvr")[0];
+    ovr.replaceChildren();
+    const map = ovr.appendChild(ovr.ownerDocument.createElementNS(A, "a:overrideClrMapping"));
+    for (const [k, v] of Object.entries({ bg1: "dk1", tx1: "lt1", bg2: "dk2", tx2: "lt2" })) map.setAttribute(k, v);
+    const run = byName(parseSlide(doc, path), "Title 1").text!.paras[0].runs[0];
+    expect(run.color).toBe("#FFFFFF");
+  });
+
   it("layers layout lstStyle over master bodyStyle", async () => {
     const sub = byName(await slide(0), "Subtitle 2");
     const p = sub.text!.paras[0];

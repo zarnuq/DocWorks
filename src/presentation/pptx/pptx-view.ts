@@ -1,4 +1,4 @@
-import { FileView, Menu, Modifier, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, Menu, Modifier, Notice, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel } from "../../domain/pptx/slide-model";
 import {
@@ -85,13 +85,26 @@ function rangeAt(root: HTMLElement, [start, end]: [number, number]): Range {
   return range;
 }
 
+/**
+ * In an empty text box the caret can end up on the box itself (the prompt text it was clicked on is gone) or
+ * outside it (a click that first selects the shape), so it's drawn in the wrong place; put it in the empty first line.
+ */
+function caretIntoEmptyLine(textEl: HTMLElement): void {
+  const sel = getSelection();
+  const p = textEl.querySelector("p");
+  if (!sel || !p || !textEl.classList.contains("is-empty")) return;
+  // Already inside the line: leave it.
+  if (sel.anchorNode && sel.anchorNode !== textEl && textEl.contains(sel.anchorNode)) return;
+  sel.collapse(p, 0);
+}
+
 /** Copied slide items, shared by every open presentation. */
 let clipboard: { clip: Clip; slidePath: string; pastes: number } | null = null;
 const extOf = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowerCase();
 
 export class PptxView extends FileView {
   allowNoFile = false;
-  paperTheme: "light" | "dark" = "light";
+  paperTheme: "light" | "dark" = "dark";
 
   private doc: PptxDocument | null = null;
   private index = 0;
@@ -343,6 +356,9 @@ export class PptxView extends FileView {
     });
     // Empty sections at the end have no slide to sit on.
     sections.forEach((sec, k) => sec.start >= slides.length && header(this.thumbsEl, k));
+    const add = this.thumbsEl.createEl("button", { cls: "pptx-thumb-add", attr: { "aria-label": "New slide" } });
+    setIcon(add, "plus");
+    add.addEventListener("click", () => this.mutate((d) => (this.index = d.addSlide(d.slides().length - 1))));
   }
 
   /** Drag a thumbnail above or below another to move the slide. */
@@ -450,6 +466,8 @@ export class PptxView extends FileView {
     this.lastStageWidth = this.stageEl.clientWidth;
     const width = Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400)) * this.zoom;
     this.scale = width / this.doc.slideSize.cx;
+    // The notes box lines up with the slide.
+    this.stageEl.setCssProps({ "--pptx-slide-width": `${width}px` });
     this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: true, imageUrl: this.imageUrl, slideNumber: this.index + 1 });
     this.rendered.forEach((rs) => this.wireShape(rs));
 
@@ -545,6 +563,7 @@ export class PptxView extends FileView {
 
     if (textEl) {
       textEl.addEventListener("click", (e) => {
+        caretIntoEmptyLine(textEl);
         // Ctrl / Cmd + click follows a link.
         const link = (e.target as HTMLElement).closest<HTMLElement>("[data-link]")?.dataset.link;
         if (link && isMod(e)) window.open(link);
@@ -556,6 +575,7 @@ export class PptxView extends FileView {
       });
       textEl.addEventListener("focus", () => {
         this.activeText = rs;
+        window.setTimeout(() => caretIntoEmptyLine(textEl));
         if (shape.kind === "cell" && shape.cell) {
           const frame = topLevel(shape.el);
           if (!this.extendingRange) this.tableCell = { frame, range: [shape.cell.r, shape.cell.c, shape.cell.r, shape.cell.c] };
@@ -1778,10 +1798,10 @@ export class PptxView extends FileView {
     tb.icon("list-ordered", "Toggle numbering", () => this.updateParas((p) => ({ ...p, bullet: p.bullet?.startsWith("#") ? null : "#arabicPeriod" })));
     tb.icon("outdent", "Decrease list level (Shift+Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })));
     tb.icon("indent", "Increase list level (Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })));
-    tb.select("Line spacing", "Line spacing", ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"].map((v) => [v, v]), (v) =>
+    tb.iconSelect("unfold-vertical", "Line spacing", ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"].map((v) => [v, v]), (v) =>
       this.updateParas((p) => ({ ...p, lnSpc: { pct: Number(v) } }))
     );
-    tb.select("Character spacing", "Character spacing", [["Very tight", "-3"], ["Tight", "-1.5"], ["Normal", "0"], ["Loose", "3"], ["Very loose", "6"]], (v) =>
+    tb.iconSelect("unfold-horizontal", "Character spacing", [["Very tight", "-3"], ["Tight", "-1.5"], ["Normal", "0"], ["Loose", "3"], ["Very loose", "6"]], (v) =>
       this.setRunStyle({ spc: Number(v) })
     );
     btn("Link", "Add, change or remove a link (Ctrl+click follows it)", () => void this.editLink());

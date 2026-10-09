@@ -43,3 +43,8 @@ obsidian plugin:reload id=doc-works && obsidian dev:errors
 ```
 
 `obsidian dev:screenshot` output can lag a command behind; re-run it if the image looks stale. The user works in the same vault: open test files in a new tab and check `view.file.path` inside the same `obsidian eval` before any scripted edit.
+
+## Generated files and releasing
+
+- `tests/fixtures/sample.{pptx,docx}` come from `tests/fixtures/make_*_fixture.py` (python-pptx / python-docx). `src/presentation/pptx/font-metrics.ts` comes from `scripts/make_font_metrics.py` (fonttools), `src/domain/pptx/preset-shapes.ts` from `scripts/make_preset_shapes.py` (ECMA-376 presets).
+- Release: bump `version` in `manifest.json`, `package.json` and `versions.json`, push a tag with exactly that version (no `v`). The workflow tests, builds and drafts a GitHub release; publish the draft so Obsidian sees it.
