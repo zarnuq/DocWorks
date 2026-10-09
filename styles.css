@@ -232,12 +232,14 @@
 :is(.docx-editor-host, .docx-hf-editor) .ProseMirror table {
   border-collapse: collapse;
   width: 100%;
-  margin: 0.8em 0;
+  /* Word puts no space around a table; paragraphs before and after set it. */
+  margin: 0;
 }
 
 :is(.docx-editor-host, .docx-hf-editor) .ProseMirror td {
   border: 1px solid #9ca3af;
-  padding: 4px 8px;
+  /* Word's default cell margins: none above and below, 0.08" at the sides. */
+  padding: 0 0.075in;
   vertical-align: top;
 }
 
@@ -259,6 +261,16 @@
 :is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-outer td {
   border-color: transparent;
 }
+
+/* A cell's own borders (w:tcBorders) beat the table's, e.g. only an underline under a form field. */
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-t-none { border-top-style: none; outline: none; }
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-b-none { border-bottom-style: none; outline: none; }
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-l-none { border-left-style: none; outline: none; }
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-r-none { border-right-style: none; outline: none; }
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-t-line { border-top: 1px solid currentColor; }
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-b-line { border-bottom: 1px solid currentColor; }
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-l-line { border-left: 1px solid currentColor; }
+:is(.docx-editor-host, .docx-hf-editor, .docx-hf) table td.docx-e-r-line { border-right: 1px solid currentColor; }
 
 :is(.docx-editor-host, .docx-hf-editor) .ProseMirror td p:last-child {
   margin-bottom: 0;
@@ -1093,9 +1105,14 @@ textarea.pptx-notes {
   box-shadow: inset 0 4px 4px -4px rgba(0, 0, 0, 0.25), inset 0 -4px 4px -4px rgba(0, 0, 0, 0.25);
 }
 
+/* Headers and footers draw in the document's own styles, like the body. */
 .docx-hf {
-  font-size: 0.85em;
-  color: var(--text-muted);
+  color: inherit;
+}
+
+.docx-math {
+  font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", serif;
+  font-style: italic;
 }
 
 .docx-hf p {
@@ -1120,11 +1137,11 @@ textarea.pptx-notes {
 }
 
 /* Double-click a page's header or footer band to edit it. */
-.is-paged :is(.docx-page-first, .docx-page-head, .docx-page-foot, .docx-page-last) {
+.is-paged :is(.docx-page-first, .docx-page-head, .docx-page-foot) {
   cursor: pointer;
 }
 
-.is-paged :is(.docx-page-first, .docx-page-head, .docx-page-foot, .docx-page-last):hover {
+.is-paged :is(.docx-page-first, .docx-page-head, .docx-page-foot):hover {
   outline: 1px dashed var(--background-modifier-border);
   outline-offset: -4px;
 }

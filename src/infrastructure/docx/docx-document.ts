@@ -124,6 +124,12 @@ export class DocxDocument extends OoxmlPackage {
     return path ? this.xml(path) : null;
   }
 
+  /** The theme part (fonts that styles refer to by theme name). */
+  themeXml(): Document | null {
+    const path = this.relOfType(this.mainPath, "theme");
+    return path ? this.xml(path) : null;
+  }
+
   /** Add definitions for built-in paragraph styles the document uses but doesn't define (Word would fall back to Normal). */
   ensureParagraphStyles(ids: Iterable<string>): void {
     const styles = this.stylesXml();

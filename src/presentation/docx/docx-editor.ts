@@ -5,13 +5,13 @@
 import { Attrs, MarkType, Node as PMNode, ResolvedPos } from "prosemirror-model";
 import { Command, EditorState, Plugin, PluginKey, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
-import { PageSetup, pageFills, paginate } from "../../domain/docx/pages";
+import { layoutPages, PageBlock, PageSetup } from "../../domain/docx/pages";
 import { baseKeymap, chainCommands, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { InputRule, inputRules } from "prosemirror-inputrules";
 import { attrsOf, docxSchema as schema, HEADING_LEVEL, Align, CellAttrs, ParagraphAttrs, TableAttrs, TableBorders } from "../../domain/docx/schema";
-import { DocxStyles } from "../../domain/docx/docx-styles";
+import { DocxStyles, lineHeight } from "../../domain/docx/docx-styles";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
 
@@ -541,6 +541,33 @@ function paragraphRule(re: RegExp, attrs: (m: RegExpMatchArray, ctx: EditorConte
   });
 }
 
+/** Display CSS for a paragraph: its style (inside a table, layered over the table style), then its direct formatting. */
+function paragraphCss(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number): string {
+  const a = attrsOf<ParagraphAttrs>(node);
+  const $p = doc.resolve(pos);
+  let tableStyle: string | null = null;
+  for (let d = $p.depth; d > 0 && !tableStyle; d--) if ($p.node(d).type === schema.nodes.table) tableStyle = attrsOf<TableAttrs>($p.node(d)).style;
+  const css = [styles.paragraphCss(a.style, tableStyle)];
+  // Direct paragraph formatting must win over the style, so it goes last.
+  if (a.align) css.push(`text-align: ${a.align}`);
+  if (a.lineSpacing) css.push(`line-height: ${lineHeight(Number(a.lineSpacing), styles.fontFor(a.style, tableStyle))}`);
+  if (a.spaceBefore !== null) css.push(`margin-top: ${a.spaceBefore}pt`);
+  if (a.spaceAfter !== null) css.push(`margin-bottom: ${a.spaceAfter}pt`);
+  if (a.firstLine) css.push(`text-indent: ${a.firstLine}pt`);
+  return css.filter(Boolean).join("; ");
+}
+
+/** Give rendered paragraphs (header / footer bands, outside any editor) their document styling. */
+export function styleRenderedParagraphs(root: HTMLElement, doc: PMNode, styles: DocxStyles): void {
+  const els = Array.from(root.querySelectorAll<HTMLElement>("p, h1, h2, h3, h4, h5, h6"));
+  let i = 0;
+  doc.descendants((node, pos) => {
+    if (node.type !== schema.nodes.paragraph) return true;
+    els[i++]?.setAttribute("style", paragraphCss(styles, doc, node, pos));
+    return false;
+  });
+}
+
 function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
   const marks = styles.listMarks(doc);
   const decos: Decoration[] = [];
@@ -558,14 +585,7 @@ function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
       return true;
     }
     if (node.type !== schema.nodes.paragraph) return true;
-    const a = attrsOf<ParagraphAttrs>(node);
-    const css = [styles.paragraphCss(a.style)];
-    // Direct paragraph formatting must win over the style, so it goes last.
-    if (a.align) css.push(`text-align: ${a.align}`);
-    if (node.attrs.lineSpacing) css.push(`line-height: ${node.attrs.lineSpacing}`);
-    if (a.spaceBefore !== null) css.push(`margin-top: ${a.spaceBefore}pt`);
-    if (a.spaceAfter !== null) css.push(`margin-bottom: ${a.spaceAfter}pt`);
-    if (a.firstLine) css.push(`text-indent: ${a.firstLine}pt`);
+    const css = [paragraphCss(styles, doc, node, pos)];
     const attrs: Record<string, string> = {};
     const mark = marks.get(pos);
     if (mark) {
@@ -585,7 +605,6 @@ function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
 /** Row spans for vertical merges, hidden covered cells, column widths and border presets. */
 function tableDecorations(table: PMNode, tablePos: number, decos: Decoration[]): void {
   const t = attrsOf<TableAttrs>(table);
-  if (t.borders) decos.push(Decoration.node(tablePos, tablePos + table.nodeSize, { class: `docx-borders-${t.borders}` }));
   const rows = rowsOf(table);
   let rowPos = tablePos + 1;
   rows.forEach((cells, r) => {
@@ -707,20 +726,20 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   const setup = opts.setup();
   const doc = view.state.doc;
   if (!setup) return { starts: [], pages: 1, decorations: DecorationSet.empty, bands: [0, 0] };
-  const blocks: { height: number; breakAfter: boolean }[] = [];
+  const blocks: PageBlock[] = [];
   const offsets: number[] = [];
   doc.forEach((node, offset) => {
     const dom = view.nodeDOM(offset) as HTMLElement | null;
     const cs = dom instanceof HTMLElement ? getComputedStyle(dom) : null;
     const height = dom instanceof HTMLElement ? dom.offsetHeight + (parseFloat(cs!.marginTop) || 0) + (parseFloat(cs!.marginBottom) || 0) : 0;
-    blocks.push({ height, breakAfter: hasPageBreak(node) });
+    blocks.push({ height, breakAfter: hasPageBreak(node), splittable: node.type === schema.nodes.table });
     offsets.push(offset);
   });
   const bands = bandHeights(view, setup);
   const textHeight = setup.height - bands[0] - bands[1];
-  const starts = paginate(blocks, textHeight);
-  const fills = pageFills(blocks, starts, textHeight);
-  const pages = starts.length + 1;
+  const { starts, pageNumbers, fills, pages } = layoutPages(blocks, textHeight);
+  // A drawn page can hold several real pages (a table running on); its footer shows the last of them.
+  const lastOf = (k: number) => (k + 1 < pageNumbers.length ? pageNumbers[k + 1] - 1 : pages);
   const part = (cls: string, content: Node | null) => {
     const el = createDiv({ cls, attr: { contenteditable: "false" } });
     if (content) el.appendChild(content);
@@ -740,9 +759,9 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
         () => {
           const gap = createDiv({ cls: "docx-page-gap", attr: { contenteditable: "false" } });
           gap.appendChild(fill(k));
-          gap.appendChild(part("docx-page-foot", opts.footer(k + 1, pages)));
+          gap.appendChild(part("docx-page-foot", opts.footer(lastOf(k), pages)));
           gap.createDiv({ cls: "docx-page-space" });
-          gap.appendChild(part("docx-page-head", opts.header(k + 2, pages)));
+          gap.appendChild(part("docx-page-head", opts.header(pageNumbers[k + 1], pages)));
           return gap;
         },
         { side: -1, key: `gap-${gen}-${k}`, ignoreSelection: true }
@@ -752,7 +771,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
       doc.content.size,
       () => {
         const last = createDiv({ cls: "docx-page-last", attr: { contenteditable: "false" } });
-        last.appendChild(fill(pages - 1));
+        last.appendChild(fill(fills.length - 1));
         last.appendChild(part("docx-page-foot", opts.footer(pages, pages)));
         return last;
       },

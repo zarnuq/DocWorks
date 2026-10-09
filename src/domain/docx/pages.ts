@@ -36,27 +36,46 @@ export function pageSetup(body: Element, size: PageSize = "document"): PageSetup
   };
 }
 
-/** Indices of the blocks that start a new page, given each block's height and whether a page break ends it. */
-export function paginate(blocks: { height: number; breakAfter: boolean }[], pageHeight: number): number[] {
+export interface PageBlock {
+  height: number;
+  /** A manual page break ends the block. */
+  breakAfter: boolean;
+  /** Word can split it across pages (a table's rows); it starts where it is and runs on instead of jumping. */
+  splittable?: boolean;
+}
+
+export interface PageLayout {
+  /** Indices of the blocks that start a new drawn page. */
+  starts: number[];
+  /** Page number of each drawn page (a table running on past a page bottom skips numbers). */
+  pageNumbers: number[];
+  /** Blank space left at the bottom of each drawn page. */
+  fills: number[];
+  pages: number;
+}
+
+/** Lay blocks out on pages (an estimate: only splittable blocks cross a page bottom, and no page break is drawn inside them). */
+export function layoutPages(blocks: PageBlock[], pageHeight: number): PageLayout {
   const starts: number[] = [];
+  const pageNumbers = [1];
+  const fills: number[] = [];
   let used = 0;
+  let page = 1;
   blocks.forEach((b, i) => {
-    if (i > 0 && (blocks[i - 1].breakAfter || (used > 0 && used + b.height > pageHeight))) {
+    if (i > 0 && (blocks[i - 1].breakAfter || (used > 0 && used + b.height > pageHeight && !b.splittable))) {
+      fills.push(Math.max(0, pageHeight - used));
       starts.push(i);
+      pageNumbers.push(++page);
       used = 0;
     }
     used += b.height;
+    if (b.splittable) {
+      while (used > pageHeight) {
+        used -= pageHeight;
+        page++;
+      }
+    }
   });
-  return starts;
-}
-
-/** Blank space left at the bottom of each page (never negative), given the page starts from `paginate`. */
-export function pageFills(blocks: { height: number }[], starts: number[], pageHeight: number): number[] {
-  const used = new Array<number>(starts.length + 1).fill(0);
-  let page = 0;
-  blocks.forEach((b, i) => {
-    if (starts[page] === i) page++;
-    used[page] += b.height;
-  });
-  return used.map((u) => Math.max(0, pageHeight - u));
+  fills.push(Math.max(0, pageHeight - used));
+  return { starts, pageNumbers, fills, pages: page };
 }

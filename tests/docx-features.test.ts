@@ -10,7 +10,7 @@ import { writeBody } from "../src/domain/docx/docx-writer";
 import { paragraphProps, readDocx } from "../src/domain/docx/docx-reader";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { readSample, W } from "./helpers";
-import { pageFills, pageSetup, paginate } from "../src/domain/docx/pages";
+import { layoutPages, pageSetup } from "../src/domain/docx/pages";
 import { acceptRevisions, rejectRevisions, revisions } from "../src/domain/docx/revisions";
 import { countWords, findKey, findRanges, replaceAllCmd, replaceRangeCmd, setFind } from "../src/presentation/docx/docx-find";
 
@@ -181,17 +181,32 @@ describe("pages", () => {
 
   it("starts a new page before the block that doesn't fit, and after manual page breaks", () => {
     const blocks = [100, 300, 250, 50, 400, 10].map((height) => ({ height, breakAfter: false }));
-    expect(paginate(blocks, 500)).toEqual([2, 4]);
+    expect(layoutPages(blocks, 500).starts).toEqual([2, 4]);
     blocks[0].breakAfter = true;
-    expect(paginate(blocks, 500)).toEqual([1, 2, 4]);
+    expect(layoutPages(blocks, 500).starts).toEqual([1, 2, 4]);
     // A block taller than a page still gets its own page, never an empty one.
-    expect(paginate([{ height: 900, breakAfter: false }, { height: 10, breakAfter: false }], 500)).toEqual([1]);
+    expect(layoutPages([{ height: 900, breakAfter: false }, { height: 10, breakAfter: false }], 500).starts).toEqual([1]);
   });
 
   it("knows how much of each page is left blank, so pages keep their full height", () => {
     const blocks = [100, 300, 250, 50, 400, 10].map((height) => ({ height, breakAfter: false }));
-    expect(pageFills(blocks, [2, 4], 500)).toEqual([100, 200, 90]);
-    expect(pageFills([{ height: 900 }], [], 500)).toEqual([0]);
+    expect(layoutPages(blocks, 500).fills).toEqual([100, 200, 90]);
+    expect(layoutPages([{ height: 900, breakAfter: false }], 500).fills).toEqual([0]);
+  });
+
+  it("lets a table that doesn't fit start where it is and run on to the next page, as Word splits its rows", () => {
+    const blocks = [
+      { height: 200, breakAfter: false },
+      { height: 700, breakAfter: false, splittable: true }, // 300 on page 1, 400 on page 2
+      { height: 50, breakAfter: false }, // still fits on page 2
+      { height: 100, breakAfter: false }, // page 3
+    ];
+    const l = layoutPages(blocks, 500);
+    expect(l.starts).toEqual([3]);
+    // The page that starts after the table is page 3: page 2 is the table's second half.
+    expect(l.pageNumbers).toEqual([1, 3]);
+    expect(l.pages).toBe(3);
+    expect(l.fills).toEqual([50, 400]);
   });
 
   it("can keep every page at Letter size whatever the document says", () => {
@@ -273,6 +288,30 @@ describe("headers and footers", () => {
 });
 
 describe("word tables", () => {
+  it("lays out paragraphs in a table with the table style's spacing (Table Grid: no space after)", () => {
+    const body = new DOMParser().parseFromString(
+      `<w:body xmlns:w="${W}"><w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/></w:tblPr><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid>` +
+        `<w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/></w:body>`,
+      "application/xml"
+    ).documentElement;
+    const { doc } = readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null });
+    expect(doc.child(0).attrs.style).toBe("TableGrid");
+    const styles = new DocxStyles(
+      new DOMParser().parseFromString(
+        `<w:styles xmlns:w="${W}"><w:docDefaults><w:pPrDefault><w:pPr><w:spacing w:after="160"/></w:pPr></w:pPrDefault></w:docDefaults>` +
+          `<w:style w:type="table" w:styleId="TableGrid"><w:pPr><w:spacing w:after="0"/></w:pPr></w:style></w:styles>`,
+        "application/xml"
+      ),
+      null
+    );
+    const host = document.body.appendChild(document.createElement("div"));
+    const view = new EditorView(host, { state: EditorState.create({ doc, plugins: docxPlugins({ ...ctx, styles }) }) });
+    expect(host.querySelector("td p")!.getAttribute("style")).toContain("margin-bottom: 0pt");
+    expect(host.querySelector(":scope .ProseMirror > p")!.getAttribute("style")).toContain("margin-bottom: 8pt");
+    view.destroy();
+  });
+
+
   const cell = (text: string, attrs: Record<string, unknown> = {}) => s.table_cell.create(attrs, s.paragraph.create(null, text ? schema.text(text) : null));
   const grid = (rows: string[][], attrs: Record<string, unknown> = {}) =>
     s.table.create(attrs, rows.map((r) => s.table_row.create(null, r.map((t) => cell(t)))));
@@ -540,5 +579,45 @@ describe("track changes", () => {
     const ins = holder.getElementsByTagNameNS(W, "ins")[0];
     expect(ins.getAttributeNS(W, "author")).toBe("Ada");
     expect(ins.textContent).toBe("added");
+  });
+});
+
+describe("display fidelity", () => {
+  const ser = (n: Parameters<DOMSerializer["serializeNode"]>[0]) => DOMSerializer.fromSchema(schema).serializeNode(n) as HTMLElement;
+  const read = (body: string) =>
+    readDocx(new DOMParser().parseFromString(`<w:body xmlns:w="${W}" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">${body}</w:body>`, "application/xml").documentElement, {
+      imageSrc: () => null,
+      hyperlinkHref: () => null,
+    }).doc;
+
+  it("uses the theme's fonts, with a matching generic fallback", () => {
+    const xml = (s: string) => new DOMParser().parseFromString(s, "application/xml");
+    const styles = new DocxStyles(
+      xml(`<w:styles xmlns:w="${W}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:asciiTheme="minorHAnsi"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"/></w:styles>`),
+      null,
+      xml(`<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:fontScheme><a:majorFont><a:latin typeface="Calibri Light"/></a:majorFont><a:minorFont><a:latin typeface="Garamond"/></a:minorFont></a:fontScheme></a:themeElements></a:theme>`)
+    );
+    expect(styles.paragraphCss(null)).toContain(`font-family: "Garamond", serif`);
+  });
+
+  it("draws cell borders a cell switches off or on (an underline under a form field)", () => {
+    const doc = read(
+      `<w:tbl><w:tblPr><w:tblBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid>` +
+        `<w:tr><w:tc><w:tcPr><w:tcBorders><w:top w:val="nil"/><w:bottom w:val="single" w:sz="4"/></w:tcBorders></w:tcPr><w:p/></w:tc></w:tr></w:tbl>`
+    );
+    const table = ser(doc.child(0));
+    expect(table.classList.contains("docx-borders-none")).toBe(true);
+    const td = table.querySelector("td")!;
+    expect(td.classList.contains("docx-e-t-none")).toBe(true);
+    expect(td.classList.contains("docx-e-b-line")).toBe(true);
+  });
+
+  it("shows equations instead of dropping them", () => {
+    const doc = read(`<w:p><w:r><w:t xml:space="preserve">tree of </w:t></w:r><m:oMath><m:sSub><m:e><m:r><m:t>K</m:t></m:r></m:e><m:sub><m:r><m:t>5</m:t></m:r></m:sub></m:sSub></m:oMath></w:p>`);
+    const math = doc.child(0).child(1);
+    expect(math.attrs.text).toBe("K5");
+    const dom = ser(math);
+    expect(dom.textContent).toBe("K5");
+    expect(dom.querySelector("sub")?.textContent).toBe("5");
   });
 });

@@ -219,6 +219,9 @@ describe("DocxView header and footer", () => {
     band.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     expect(dialog).toHaveBeenCalledTimes(1);
     host.querySelector(".ProseMirror p")?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    // The blank rest of the last page isn't the footer.
+    const last = host.querySelector(".ProseMirror")!.appendChild(createDiv({ cls: "docx-page-last" }));
+    last.createDiv({ cls: "docx-page-fill" }).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     expect(dialog).toHaveBeenCalledTimes(1);
   });
 });

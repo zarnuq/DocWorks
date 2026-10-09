@@ -11,7 +11,7 @@ import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
 import { FONTS, PaperTheme, promptText, Toolbar } from "../common/toolbar";
 import { pickImage } from "../common/images";
-import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, pagesPlugin, repaginate } from "./docx-editor";
+import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, pagesPlugin, repaginate, styleRenderedParagraphs } from "./docx-editor";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
 import { pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
@@ -140,11 +140,11 @@ export class DocxView extends FileView {
     this.hf = { header: this.readHF("header"), footer: this.readHF("footer") };
 
     const ctx: EditorContext = {
-      styles: new DocxStyles(docx.stylesXml(), docx.numberingXml()),
+      styles: new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml()),
       // A new list may create numbering.xml, so refresh the display styles afterwards.
       ensureList: (kind) => {
         const numId = docx.ensureList(kind);
-        ctx.styles = new DocxStyles(docx.stylesXml(), docx.numberingXml());
+        ctx.styles = new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml());
         return numId;
       },
       listKind: (numId) => {
@@ -164,7 +164,7 @@ export class DocxView extends FileView {
 
     // Double-click a page's header or footer to edit it, as in Word.
     host.addEventListener("dblclick", (e) => {
-      if ((e.target as HTMLElement).closest(".docx-page-first, .docx-page-head, .docx-page-foot, .docx-page-last")) this.headerFooterDialog();
+      if ((e.target as HTMLElement).closest(".docx-page-first, .docx-page-head, .docx-page-foot")) this.headerFooterDialog();
     });
     this.editor = new EditorView(host, {
       state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin()] }),
@@ -715,6 +715,7 @@ export class DocxView extends FileView {
     const frag = DOMSerializer.fromSchema(schema).serializeFragment(doc.content);
     const wrap = createDiv({ cls: `docx-hf docx-hf-${kind}` });
     wrap.appendChild(frag);
+    if (this.ctx) styleRenderedParagraphs(wrap, doc, this.ctx.styles);
     wrap.querySelectorAll<HTMLElement>("[data-field]").forEach((f) => f.setText(String(f.dataset.field === "NUMPAGES" ? total : page)));
     return wrap;
   }

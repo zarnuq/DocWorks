@@ -44,18 +44,58 @@ export function numberingLevel(numbering: Document | null, numId: string, ilvl: 
   return Array.from(abs?.getElementsByTagNameNS(NS.w, "lvl") ?? []).find((l) => wVal(l, "ilvl") === String(ilvl)) ?? null;
 }
 
+/**
+ * Word's "single" line height as a multiple of the font size. It comes from each font's own metrics, so CSS's
+ * line-height: 1 draws Word text too tight (Garamond by a quarter).
+ */
+// ponytail: hand-measured table for common fonts; generate from font files (like font-metrics.ts) if more fonts matter.
+const SINGLE_LINE: Record<string, number> = {
+  calibri: 1.22, "calibri light": 1.22, cambria: 1.17, garamond: 1.33, "times new roman": 1.15, arial: 1.15, aptos: 1.2,
+  georgia: 1.14, verdana: 1.22, "segoe ui": 1.33, tahoma: 1.21, "century gothic": 1.23, "book antiqua": 1.17,
+  "palatino linotype": 1.14, "trebuchet ms": 1.16, "courier new": 1.13,
+};
+export const singleLine = (font: string | null): number => SINGLE_LINE[font?.toLowerCase() ?? ""] ?? 1.17;
+
+/** Generic CSS family to fall back on when a document font isn't installed. */
+export function genericFamily(font: string): string {
+  if (/mono|courier|consolas|menlo/i.test(font)) return "monospace";
+  return /garamond|times|cambria|georgia|palatino|book|baskerville|bodoni|didot|century|minion|serif|roman/i.test(font) && !/sans/i.test(font) ? "serif" : "sans-serif";
+}
+
+/** CSS line-height for `lines` of Word line spacing in `font`. */
+export const lineHeight = (lines: number, font: string | null): number => Math.round(lines * singleLine(font) * 100) / 100;
+
 export class DocxStyles {
   private styles = new Map<string, Element>();
   private defaultStyle: string | null = null;
-  private cssCache = new Map<string | null, string>();
+  private cssCache = new Map<string, string>();
 
-  constructor(private stylesXml: Document | null, private numbering: Document | null) {
+  /** Theme fonts that w:rFonts asciiTheme names refer to. */
+  private themeFonts = { major: "", minor: "" };
+
+  constructor(private stylesXml: Document | null, private numbering: Document | null, theme: Document | null = null) {
+    const latin = (tag: string) => theme?.getElementsByTagNameNS(NS.a, tag)[0]?.getElementsByTagNameNS(NS.a, "latin")[0]?.getAttribute("typeface") ?? "";
+    this.themeFonts = { major: latin("majorFont"), minor: latin("minorFont") };
     for (const s of Array.from(stylesXml?.getElementsByTagNameNS(NS.w, "style") ?? [])) {
       const id = wVal(s, "styleId");
       if (!id) continue;
       this.styles.set(id, s);
       if (wVal(s, "type") === "paragraph" && wVal(s, "default") === "1") this.defaultStyle = id;
     }
+  }
+
+  /** The Latin font a paragraph style resolves to (through the table style and defaults), or null. */
+  fontFor(styleId: string | null, tableStyleId: string | null = null): string | null {
+    const defaults = this.stylesXml?.getElementsByTagNameNS(NS.w, "docDefaults")[0];
+    const sources = [...this.chain(styleId), ...(tableStyleId ? this.chain(tableStyleId) : []), defaults].filter(Boolean) as Element[];
+    return sources.map((s) => this.fontOf(w(w(s, "rPr") ?? w(w(s, "rPrDefault"), "rPr"), "rFonts"))).find(Boolean) ?? null;
+  }
+
+  /** A w:rFonts' Latin font, resolving theme references (asciiTheme="minorHAnsi" and the like). */
+  private fontOf(rFonts: Element | null): string | null {
+    const theme = wVal(rFonts, "asciiTheme");
+    if (theme) return (theme.startsWith("major") ? this.themeFonts.major : this.themeFonts.minor) || null;
+    return wVal(rFonts, "ascii");
   }
 
   /** The style and its basedOn ancestors, most specific first. */
@@ -70,12 +110,14 @@ export class DocxStyles {
     return out;
   }
 
-  paragraphCss(styleId: string | null): string {
-    const cached = this.cssCache.get(styleId);
+  /** Display CSS for a paragraph style; inside a table, the table style's paragraph settings sit between the defaults and the paragraph style, as in Word. */
+  paragraphCss(styleId: string | null, tableStyleId: string | null = null): string {
+    const cacheKey = `${styleId}|${tableStyleId}`;
+    const cached = this.cssCache.get(cacheKey);
     if (cached !== undefined) return cached;
 
     const defaults = this.stylesXml?.getElementsByTagNameNS(NS.w, "docDefaults")[0];
-    const sources = [...this.chain(styleId), defaults].filter(Boolean) as Element[];
+    const sources = [...this.chain(styleId), ...(tableStyleId ? this.chain(tableStyleId) : []), defaults].filter(Boolean) as Element[];
     const rPrs = sources.map((s) => w(s, "rPr") ?? w(w(s, "rPrDefault"), "rPr"));
     const pPrs = sources.map((s) => w(s, "pPr") ?? w(w(s, "pPrDefault"), "pPr"));
     const first = (props: (Element | null)[], local: string) => props.map((p) => w(p, local)).find(Boolean) ?? null;
@@ -89,8 +131,8 @@ export class DocxStyles {
     if (i) css.push(`font-style: ${isOn(i) ? "italic" : "normal"}`);
     const color = wVal(first(rPrs, "color"));
     if (color && /^[0-9a-f]{6}$/i.test(color)) css.push(`color: #${color.toUpperCase()}`);
-    const font = rPrs.map((r) => wVal(w(r, "rFonts"), "ascii")).find(Boolean);
-    if (font) css.push(`font-family: "${font}"`);
+    const font = rPrs.map((r) => this.fontOf(w(r, "rFonts"))).find(Boolean) ?? null;
+    if (font) css.push(`font-family: "${font}", ${genericFamily(font)}`);
     if (isOn(first(rPrs, "caps"))) css.push("text-transform: uppercase");
 
     const jc = wVal(first(pPrs, "jc"));
@@ -103,10 +145,11 @@ export class DocxStyles {
     if (after) css.push(`margin-bottom: ${Number(after) / 20}pt`);
     const line = spacing("line");
     const rule = spacing("lineRule");
-    if (line && (!rule || rule === "auto")) css.push(`line-height: ${Math.round((Number(line) / 240) * 100) / 100}`);
+    if (line && rule === "exact") css.push(`line-height: ${Number(line) / 20}pt`);
+    else css.push(`line-height: ${lineHeight(line && rule !== "atLeast" ? Number(line) / 240 : 1, font)}`);
 
     const out = css.join("; ");
-    this.cssCache.set(styleId, out);
+    this.cssCache.set(cacheKey, out);
     return out;
   }
 

@@ -1,4 +1,5 @@
 import { Schema, Node as PMNode, DOMOutputSpec } from "prosemirror-model";
+import { mathSpec } from "./math";
 
 /**
  * ProseMirror schema mirroring WordprocessingML closely enough to round-trip:
@@ -41,6 +42,8 @@ export interface CellAttrs {
   background: string | null;
   /** Vertical merge: first cell of the merge, or a cell it covers. */
   vMerge: "restart" | "continue" | null;
+  /** The cell's own border overrides, e.g. "t:none b:line" (display only; the XML keeps the details). */
+  edges: string | null;
 }
 export type TableBorders = "all" | "outer" | "none";
 export interface TableAttrs {
@@ -49,6 +52,8 @@ export interface TableAttrs {
   borders: TableBorders | null;
   /** Column widths in twips (w:tblGrid), or null for a new table. */
   widths: number[] | null;
+  /** Table style id (w:tblStyle), for display only: its paragraph settings apply to the text in the table. */
+  style: string | null;
 }
 export interface ImageAttrs {
   xml: string;
@@ -113,9 +118,9 @@ export const docxSchema = new Schema({
       group: "block",
       content: "table_row+",
       isolating: true,
-      attrs: { key: { default: null }, borders: { default: null }, widths: { default: null } },
+      attrs: { key: { default: null }, borders: { default: null }, widths: { default: null }, style: { default: null } },
       parseDOM: [{ tag: "table" }],
-      toDOM: () => ["table", ["tbody", 0]],
+      toDOM: (node) => ["table", node.attrs.borders ? { class: `docx-borders-${node.attrs.borders as string}` } : {}, ["tbody", 0]],
     },
     table_row: {
       content: "table_cell+",
@@ -127,10 +132,12 @@ export const docxSchema = new Schema({
     table_cell: {
       content: "block+",
       isolating: true,
-      attrs: { key: { default: null }, colspan: { default: 1 }, background: { default: null }, vMerge: { default: null } },
+      attrs: { key: { default: null }, colspan: { default: 1 }, background: { default: null }, vMerge: { default: null }, edges: { default: null } },
       parseDOM: [{ tag: "td" }, { tag: "th" }],
       toDOM(node): DOMOutputSpec {
         const attrs: Record<string, string> = {};
+        const edges = node.attrs.edges as string | null;
+        if (edges) attrs.class = edges.split(" ").map((e) => `docx-e-${e.replace(":", "-")}`).join(" ");
         if (node.attrs.colspan > 1) attrs.colspan = String(node.attrs.colspan);
         if (node.attrs.background) attrs.style = `background-color: ${node.attrs.background}`;
         return ["td", attrs, 0];
@@ -208,6 +215,7 @@ export const docxSchema = new Schema({
         // Page number fields are filled in by the page view.
         const field = /w:instr="\s*(PAGE|NUMPAGES)\b/.exec(node.attrs.xml as string)?.[1];
         if (field) attrs["data-field"] = field;
+        if (/^<m:oMath/.test(xml)) return ["span", attrs, mathSpec(xml)];
         return ["span", attrs, node.attrs.text];
       },
     },

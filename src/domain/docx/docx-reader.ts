@@ -120,6 +120,17 @@ export function vMergeOf(tcPr: Element | null): "restart" | "continue" | null {
 
 const NO_LINE = new Set(["nil", "none"]);
 
+/** A cell's own border overrides (w:tcBorders), as "t:none b:line"; null when it has none. Display only. */
+export function edgesOf(tcPr: Element | null): string | null {
+  const b = w(tcPr, "tcBorders");
+  if (!b) return null;
+  const side: Record<string, string> = { top: "t", left: "l", start: "l", bottom: "b", right: "r", end: "r" };
+  const out = Array.from(b.children)
+    .filter((c) => side[c.localName])
+    .map((c) => `${side[c.localName]}:${NO_LINE.has(wVal(c) ?? "") ? "none" : "line"}`);
+  return out.length ? out.join(" ") : null;
+}
+
 /** The border preset a table's own w:tblBorders matches, or null (style borders or something custom). */
 export function bordersOf(tblPr: Element | null): "all" | "outer" | "none" | null {
   const b = w(tblPr, "tblBorders");
@@ -211,7 +222,7 @@ class Reader {
         // ponytail: wrapper (tracked insertion, smart tag...) is dropped if the paragraph is edited.
         this.inline(el, marks, out);
       } else {
-        out.push(this.opaque(el, ["del", "moveFrom", "fldSimple"].includes(el.localName) ? (el.textContent ?? "") : "", marks));
+        out.push(this.opaque(el, ["del", "moveFrom", "fldSimple", "oMath", "oMathPara"].includes(el.localName) ? (el.textContent ?? "") : "", marks));
       }
     }
   }
@@ -292,6 +303,7 @@ class Reader {
                     colspan: Number(wVal(w(tcPr, "gridSpan")) ?? 1),
                     background: hex(wVal(w(tcPr, "shd"), "fill")),
                     vMerge: vMergeOf(tcPr),
+                    edges: edgesOf(tcPr),
                   },
                   content.length ? content : schema.nodes.paragraph.create()
                 );
@@ -303,7 +315,7 @@ class Reader {
     // A table without rows can't exist in the editor; keep it verbatim instead.
     if (!rows.length || rows.some((r) => !r.childCount)) return this.raw(tbl);
     const widths = Array.from(w(tbl, "tblGrid")?.children ?? []).map((g) => Number(wVal(g, "w")) || 0);
-    return this.keyed(tbl, (key) => schema.nodes.table.create({ key, borders: bordersOf(w(tbl, "tblPr")), widths: widths.length ? widths : null }, rows));
+    return this.keyed(tbl, (key) => schema.nodes.table.create({ key, borders: bordersOf(w(tbl, "tblPr")), widths: widths.length ? widths : null, style: wVal(w(w(tbl, "tblPr"), "tblStyle")) }, rows));
   }
 }
 
