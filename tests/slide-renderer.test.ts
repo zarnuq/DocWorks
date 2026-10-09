@@ -20,6 +20,22 @@ async function render(i: number, editable = true, mutate?: (m: SlideModel) => vo
 }
 
 describe("renderSlide", () => {
+  it("sizes arrowheads like PowerPoint: thin lines count as about 2 pt wide, so heads stay readable", async () => {
+    const marker = async (width: number) => {
+      host.innerHTML = "";
+      await render(2, false, (m) => {
+        const s = m.shapes.find((x) => x.paths?.length)!;
+        s.line = { color: "#FF0000", width, dash: "solid", cap: "flat", head: null, tail: { type: "triangle", w: "med", len: "med" } };
+      });
+      const mk = host.querySelector("marker")!;
+      return [mk.getAttribute("markerUnits"), Number(mk.getAttribute("markerWidth")).toFixed(2), Number(mk.getAttribute("markerHeight")).toFixed(2)];
+    };
+    // 0.75 pt line: medium head is 3 x 0.7 mm (25200 EMU), 1 px = 9525 EMU here.
+    expect(await marker(9525)).toEqual(["userSpaceOnUse", (75600 / 9525).toFixed(2), (75600 / 9525).toFixed(2)]);
+    // A 4 pt line: 3 x its own width.
+    expect(await marker(50800)).toEqual(["userSpaceOnUse", (152400 / 9525).toFixed(2), (152400 / 9525).toFixed(2)]);
+  });
+
   it("sizes the slide to the requested width keeping aspect ratio", async () => {
     await render(0);
     const slide = host.querySelector<HTMLElement>(".pptx-slide")!;
@@ -146,7 +162,7 @@ describe("renderSlide", () => {
 
   it("only prompts on empty placeholders", async () => {
     const { byName } = await render(2);
-    expect(byName("Oval 3").textEl!.classList.contains("is-empty")).toBe(false);
+    expect(byName("Oval 3").textEl!.hasAttribute("data-prompt")).toBe(false);
   });
 
   it("paints background-filled shapes with the slide background", async () => {

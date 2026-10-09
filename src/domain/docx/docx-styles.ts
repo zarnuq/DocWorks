@@ -91,6 +91,14 @@ export class DocxStyles {
     return sources.map((s) => this.fontOf(w(w(s, "rPr") ?? w(w(s, "rPrDefault"), "rPr"), "rFonts"))).find(Boolean) ?? null;
   }
 
+  /** The font size (pt) a paragraph style resolves to, or null. */
+  sizeFor(styleId: string | null, tableStyleId: string | null = null): number | null {
+    const defaults = this.stylesXml?.getElementsByTagNameNS(NS.w, "docDefaults")[0];
+    const sources = [...this.chain(styleId), ...(tableStyleId ? this.chain(tableStyleId) : []), defaults].filter(Boolean) as Element[];
+    const sz = sources.map((s) => wVal(w(w(s, "rPr") ?? w(w(s, "rPrDefault"), "rPr"), "sz"))).find(Boolean);
+    return sz ? Number(sz) / 2 : null;
+  }
+
   /** A w:rFonts' Latin font, resolving theme references (asciiTheme="minorHAnsi" and the like). */
   private fontOf(rFonts: Element | null): string | null {
     const theme = wVal(rFonts, "asciiTheme");

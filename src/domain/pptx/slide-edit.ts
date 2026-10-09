@@ -9,7 +9,7 @@ import { fitTable } from "./table";
 export type ParaInput = Pick<Para, "runs" | "align" | "lvl" | "bullet"> & Partial<Pick<Para, "lnSpc" | "spcBef" | "spcAft">>;
 
 const RUN_TAGS = new Set(["r", "br", "fld"]);
-const RUN_KEYS: (keyof Run)[] = ["text", "b", "i", "u", "strike", "sz", "color", "font", "spc", "link", "field"];
+const RUN_KEYS: (keyof Run)[] = ["text", "b", "i", "u", "strike", "sz", "color", "font", "spc", "cap", "link", "field"];
 const sameRun = (a: Run, b: Run) => RUN_KEYS.every((k) => String(a[k] ?? "").toUpperCase() === String(b[k] ?? "").toUpperCase());
 const BULLET_TAGS = new Set(["buNone", "buAutoNum", "buChar", "buBlip"]);
 /** a:pPr children in schema order (bullet color/size/font and the bullet itself share slots). */
@@ -51,6 +51,7 @@ function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>
     if (run.spc) rPr.setAttribute("spc", String(Math.round(run.spc * 100)));
     else rPr.removeAttribute("spc");
   }
+  if (run.cap !== base.cap) rPr.setAttribute("cap", run.cap);
   if (run.link !== base.link) {
     childNS(rPr, NS.a, "hlinkClick")?.remove();
     if (run.link && style.links) {

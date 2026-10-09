@@ -3,7 +3,7 @@ import { renderParagraphs, refreshMarks, insertPlainText, readParagraphs, applyR
 import type { Para, RunProps } from "../src/domain/pptx/slide-model";
 
 const PX_PER_PT = 2;
-const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri", spc: 0, link: null };
+const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri", spc: 0, cap: "none", link: null };
 const defaultsFor = (lvl: number): RunProps => ({ ...defaults, sz: 18 - lvl * 2 });
 const run = (text: string, extra: Partial<RunProps> = {}) => ({ ...defaults, text, ...extra });
 const para = (runs: Para["runs"], extra: Partial<Para> = {}): Para => ({

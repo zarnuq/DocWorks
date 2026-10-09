@@ -18,7 +18,7 @@ const CSS_ALIGN: Record<Align, string> = { l: "left", ctr: "center", r: "right",
 const FROM_CSS_ALIGN: Record<string, Align> = { left: "l", start: "l", center: "ctr", right: "r", end: "r", justify: "just" };
 const BLOCK = new Set(["P", "DIV", "LI", "H1", "H2", "H3", "H4", "H5", "H6"]);
 const EMU_PER_PT = 12700;
-const PROP_KEYS: (keyof RunProps)[] = ["b", "i", "u", "strike", "sz", "color", "font", "spc", "link"];
+const PROP_KEYS: (keyof RunProps)[] = ["b", "i", "u", "strike", "sz", "color", "font", "spc", "cap", "link"];
 
 export type DefaultsFor = (lvl: number) => RunProps;
 
@@ -37,6 +37,11 @@ function styleRun(el: HTMLElement, props: Partial<RunProps>, pxPerPt: number, de
   if (props.spc !== undefined) {
     el.dataset.spc = String(props.spc);
     el.style.letterSpacing = `${props.spc * pxPerPt}px`;
+  }
+  if (props.cap !== undefined) {
+    el.dataset.cap = props.cap;
+    el.style.textTransform = props.cap === "all" ? "uppercase" : "none";
+    el.style.fontVariantCaps = props.cap === "small" ? "small-caps" : "normal";
   }
   if (props.link !== undefined) {
     el.dataset.link = props.link ?? "";
@@ -110,7 +115,8 @@ export function renderParagraphs(
         span.textContent = segment;
         styleRun(span, diff(run, para.defaults), pxPerPt);
         // Match PowerPoint's widths (font fitting) plus the run's own character spacing.
-        const ls = (letterSpacing(segment, run, run.sz * pxPerPt) ?? 0) + run.spc * pxPerPt;
+        // All-caps text is drawn (so measured) in capitals.
+        const ls = (letterSpacing(run.cap === "all" ? segment.toUpperCase() : segment, run, run.sz * pxPerPt) ?? 0) + run.spc * pxPerPt;
         if (Math.abs(ls) > 0.01) span.style.letterSpacing = `${ls}px`;
       });
     }
@@ -198,6 +204,7 @@ function explicitProps(el: Element | null, stop: Element, pxPerPt: number): Part
     const data = (el as HTMLElement).dataset;
     if (data) {
       if (data.spc !== undefined) set("spc", Number(data.spc));
+      if (data.cap === "none" || data.cap === "all" || data.cap === "small") set("cap", data.cap);
       if (data.link !== undefined && !("link" in out)) out.link = data.link || null;
     }
     const size = style.fontSize;

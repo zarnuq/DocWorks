@@ -44,7 +44,7 @@ describe("numbered lists", () => {
 
   it("labels numbered paragraphs per level, skipping empty ones", () => {
     const host = document.createElement("div");
-    const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri", spc: 0, link: null };
+    const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri", spc: 0, cap: "none", link: null };
     const para = (text: string, lvl: number, bullet: string | null): Para => ({
       runs: text ? [{ ...defaults, text }] : [],
       align: "l",
@@ -184,7 +184,7 @@ describe("fields", () => {
     getSelection()!.removeAllRanges();
     getSelection()!.addRange(r);
     insertField(host, "slidenum", "4");
-    const runs = readParagraphs(host, 2, () => ({ b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri", spc: 0, link: null }))[0].runs;
+    const runs = readParagraphs(host, 2, () => ({ b: false, i: false, u: false, strike: false, sz: 18, color: "#000000", font: "Calibri", spc: 0, cap: "none", link: null }))[0].runs;
     expect(runs.map((x) => [x.text, x.field ?? null])).toEqual([["a", null], ["4", "slidenum"], ["b", null]]);
   });
 });

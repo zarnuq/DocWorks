@@ -22,6 +22,8 @@ export interface RunProps {
   font: string;
   /** Character spacing in points (a:rPr spc). */
   spc: number;
+  /** Capitals (a:rPr cap): "all" shows the text in capitals, "small" in small capitals. */
+  cap: "none" | "all" | "small";
   /** Hyperlink address (a:hlinkClick). */
   link: string | null;
 }
@@ -137,6 +139,8 @@ export interface TextStyle {
 }
 
 const DEFAULT_INSETS = { l: 91440, t: 45720, r: 91440, b: 45720 };
+const NS_SVG = "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
+
 /** Number of chain entries that outrank the shape's p:style fontRef color. */
 const OWN_STYLE_DEPTH = 3;
 
@@ -167,6 +171,7 @@ function mergeRunProps(props: Partial<RunProps>, rPr: Element | null, style: Tex
   if (props.strike === undefined && rPr.hasAttribute("strike")) props.strike = rPr.getAttribute("strike") !== "noStrike";
   if (props.sz === undefined && rPr.hasAttribute("sz")) props.sz = Number(rPr.getAttribute("sz")) / 100;
   if (props.spc === undefined && rPr.hasAttribute("spc")) props.spc = Number(rPr.getAttribute("spc")) / 100;
+  if (props.cap === undefined && rPr.hasAttribute("cap")) props.cap = (["all", "small"] as const).find((c) => c === rPr.getAttribute("cap")) ?? "none";
   const link = kid(rPr, NS.a, "hlinkClick")?.getAttributeNS(NS.r, "id");
   if (props.link === undefined && link) props.link = style.links?.target(link) ?? null;
   if (props.color === undefined) {
@@ -236,6 +241,7 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
       color: props.color ?? "#000000",
       font: props.font ?? style.fonts.minor,
       spc: props.spc ?? 0,
+      cap: props.cap ?? "none",
       // Links belong to runs, never to level defaults.
       link: null,
     },
@@ -409,6 +415,13 @@ class SlideParser {
     };
   }
 
+  /** A blip's image: its SVG version when it has one (Office 2016+, sometimes with no bitmap at all), else the bitmap. */
+  private blipImage(part: string, blip: Element | null): string | null {
+    if (!blip) return null;
+    const svg = blip.getElementsByTagNameNS(NS_SVG, "svgBlip")[0]?.getAttributeNS(NS.r, "embed");
+    return (svg && this.doc.relTarget(part, svg)) || this.doc.relTarget(part, blip.getAttributeNS(NS.r, "embed") ?? "") || null;
+  }
+
   private background(parts: [Document | null, string | null][]): SlideModel["background"] {
     for (const [part, path] of parts) {
       const bg = part && kid(part.getElementsByTagNameNS(NS.p, "cSld")[0], NS.p, "bg");
@@ -416,7 +429,7 @@ class SlideParser {
       const bgPr = kid(bg, NS.p, "bgPr");
       const blip = bgPr && kid(kid(bgPr, NS.a, "blipFill"), NS.a, "blip");
       if (blip) {
-        const target = this.doc.relTarget(path, blip.getAttributeNS(NS.r, "embed") ?? "");
+        const target = this.blipImage(path, blip);
         if (target) return { color: null, image: target };
       }
       const bgRef = kid(bg, NS.p, "bgRef");
@@ -606,11 +619,17 @@ class SlideParser {
 
     if (el.localName === "pic") {
       model.kind = "pic";
-      const blip = kid(kid(el, ns, "blipFill"), NS.a, "blip");
-      model.image = this.doc.relTarget(part, blip?.getAttributeNS(NS.r, "embed") ?? "");
+      model.image = this.blipImage(part, kid(kid(el, ns, "blipFill"), NS.a, "blip"));
       model.crop = readCrop(el);
       model.fill = null;
       return model;
+    }
+
+    // A shape filled with a picture (SmartArt icons, pictures cropped to shapes).
+    const pictureFill = kid(kid(spPr, NS.a, "blipFill"), NS.a, "blip");
+    if (pictureFill) {
+      model.image = this.blipImage(part, pictureFill);
+      if (model.image) model.fill = null;
     }
 
     if (el.localName === "graphicFrame") {

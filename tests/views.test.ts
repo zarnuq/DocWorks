@@ -98,6 +98,26 @@ describe("PptxView empty text boxes", () => {
     textEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(getSelection()!.anchorNode).toBe(textEl.querySelector("p"));
   });
+
+  it("does the same for an empty shape that isn't a placeholder (a new rectangle)", async () => {
+    const { blankPptx } = await import("../src/infrastructure/blank");
+    const { PptxDocument } = await import("../src/infrastructure/pptx/pptx-document");
+    const { addShape } = await import("../src/domain/pptx/slide-edit");
+    const deck = await PptxDocument.load(await blankPptx());
+    addShape(deck.xml(deck.slides()[0].path)!, "rect", { x: 100000, y: 100000, w: 2000000, h: 1000000 });
+    const bytes = await deck.save();
+    const app = new App();
+    app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const view = new PptxView(new WorkspaceLeaf(app) as unknown as RealLeaf);
+    document.body.appendChild(view.containerEl);
+    await open(view, "rect.pptx");
+    const rect = (view as any).rendered.find((r: any) => r.shape.name.startsWith("Shape "));
+    const textEl = rect.textEl as HTMLElement;
+    expect(textEl.textContent).toBe("");
+    getSelection()!.collapse(document.body, 0);
+    textEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(getSelection()!.anchorNode).toBe(textEl.querySelector("p"));
+  });
 });
 
 describe("PptxView notes", () => {
@@ -156,7 +176,7 @@ describe("DocxView page size setting", () => {
     pgSz.setAttributeNS(W, "w:w", "11906");
     pgSz.setAttributeNS(W, "w:h", "16838");
     const bytes = await docx.save();
-    const settings: DocWorksSettings = { pageSize: "letter" };
+    const settings: DocWorksSettings = { pageSize: "letter", author: "" };
     const app = new App();
     app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, settings);
@@ -199,6 +219,18 @@ describe("Toolbar groups", () => {
     expect(picked).toEqual(["1.5"]);
   });
 
+  it("shows the current value: ticks a matching option, or names a value that isn't listed", async () => {
+    const { Toolbar, showValue } = await import("../src/presentation/common/toolbar");
+    const tb = new Toolbar(document.body.createDiv());
+    const s = tb.select("Font", "Font", [["Arial", "Arial"], ["Calibri", "Calibri"]], () => {});
+    showValue(s, "Calibri");
+    expect(s.value).toBe("Calibri");
+    showValue(s, "Garamond");
+    expect([s.value, s.options[s.selectedIndex].text]).toEqual(["", "Garamond"]);
+    showValue(s, null);
+    expect([s.value, s.options[s.selectedIndex].text]).toEqual(["", "Font"]);
+  });
+
   it("shows a select's placeholder only on the closed control, not as a pickable option", async () => {
     const { Toolbar } = await import("../src/presentation/common/toolbar");
     const tb = new Toolbar(document.body.createDiv());
@@ -223,5 +255,76 @@ describe("DocxView header and footer", () => {
     const last = host.querySelector(".ProseMirror")!.appendChild(createDiv({ cls: "docx-page-last" }));
     last.createDiv({ cls: "docx-page-fill" }).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     expect(dialog).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("DocxView comment author", () => {
+  it("signs comments with the author name from settings", async () => {
+    const settings: DocWorksSettings = { pageSize: "document", author: "Ada Lovelace" };
+    const app = new App();
+    app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, settings);
+    document.body.appendChild(view.containerEl);
+    await open(view, "a.docx");
+    expect(await (view as any).author()).toBe("Ada Lovelace");
+  });
+});
+
+describe("DocxView header pictures", () => {
+  it("shows a picture that lives in the header part (a logo), from the header's own relationships", async () => {
+    const { blankDocx } = await import("../src/infrastructure/blank");
+    const { writeBody } = await import("../src/domain/docx/docx-writer");
+    const { docxSchema: schema } = await import("../src/domain/docx/schema");
+    const docx = await DocxDocument.load(await blankDocx());
+    const root = docx.ensureHeaderFooter("header");
+    const path = docx.headerFooterPath("header")!;
+    const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const rId = docx.addImage(PNG, "png", path);
+    expect(docx.rels(docx.mainPath).some((r) => r.id === rId && r.type === "image")).toBe(false);
+    const logo = schema.nodes.image.create({ rId, width: 40, height: 20, alt: "Logo" });
+    writeBody(root, schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, logo)), new Map(), docx);
+    const bytes = await docx.save();
+
+    const app = new App();
+    app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf);
+    document.body.appendChild(view.containerEl);
+    await open(view, "logo.docx");
+    const band = (view as any).renderHF("header", 1, 1) as HTMLElement;
+    expect(band.querySelector("img")?.getAttribute("src")).toMatch(/^data:image\/png;base64,/);
+  });
+});
+
+describe("current font and size in the toolbar", () => {
+  it("Word: shows the font and size at the cursor, from the text's own formatting or its style", async () => {
+    const view = mount(DocxView, "sample.docx");
+    await open(view, "a.docx");
+    const v = view as any;
+    const { docxSchema: schema } = await import("../src/domain/docx/schema");
+    const { TextSelection } = await import("prosemirror-state");
+    const editor = v.editor;
+    const marked = schema.text("Hi", [schema.marks.font.create({ font: "Georgia" }), schema.marks.size.create({ pt: 18 })]);
+    editor.dispatch(editor.state.tr.insert(1, marked));
+    editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 2)));
+    v.updateFormatControls();
+    const [font, size] = ["Font", "Font size"].map((t) => view.contentEl.querySelector<HTMLSelectElement>(`select[aria-label="${t}"]`)!);
+    expect(font.value).toBe("Georgia");
+    expect(size.value).toBe("18");
+    // The style select follows the paragraph (the sample's first paragraph is a styled one).
+    const style = view.contentEl.querySelector<HTMLSelectElement>('select[aria-label="Paragraph style"]')!;
+    expect(style.options[style.selectedIndex].text).not.toBe("Style");
+  });
+
+  it("Slides: shows the font and size of the text at the cursor", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    await open(view, "a.pptx");
+    const v = view as any;
+    const title = v.rendered.find((r: any) => r.shape.name === "Title 1");
+    const textNode = title.textEl.querySelector("span")?.firstChild ?? title.textEl.querySelector("p").firstChild;
+    getSelection()!.collapse(textNode, 1);
+    v.onSelectionChange();
+    const [font, size] = ["Font", "Font size"].map((t) => view.contentEl.querySelector<HTMLSelectElement>(`select[aria-label="${t}"]`)!);
+    expect(font.value).toBe("Calibri");
+    expect(size.value).toBe("44");
   });
 });

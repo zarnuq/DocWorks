@@ -291,3 +291,33 @@ describe("hidden slides", () => {
     expect(back.xml(back.slides()[1].path)!.documentElement.hasAttribute("show")).toBe(false);
   });
 });
+
+describe("embedded fonts", () => {
+  it("lists the fonts a deck carries (p:embeddedFontLst), with their style and data", async () => {
+    const doc = await PptxDocument.load(await blankPptx());
+    const zip = await JSZip.loadAsync(await doc.save());
+    const pres = await zip.file("ppt/presentation.xml")!.async("text");
+    const rels = await zip.file("ppt/_rels/presentation.xml.rels")!.async("text");
+    const font = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font";
+    zip.file("ppt/fonts/Oswald-regular.fntdata", new Uint8Array([1, 2, 3]));
+    zip.file("ppt/fonts/Oswald-bold.fntdata", new Uint8Array([4, 5]));
+    zip.file(
+      "ppt/_rels/presentation.xml.rels",
+      rels.replace("</Relationships>", `<Relationship Id="rIdF1" Type="${font}" Target="fonts/Oswald-regular.fntdata"/><Relationship Id="rIdF2" Type="${font}" Target="fonts/Oswald-bold.fntdata"/></Relationships>`)
+    );
+    zip.file(
+      "ppt/presentation.xml",
+      pres.replace("<p:notesSz", `<p:embeddedFontLst><p:embeddedFont><p:font typeface="Oswald"/><p:regular r:id="rIdF1"/><p:bold r:id="rIdF2"/></p:embeddedFont></p:embeddedFontLst><p:notesSz`)
+    );
+    const back = await PptxDocument.load(await zip.generateAsync({ type: "uint8array" }));
+    const fonts = await back.embeddedFonts();
+    expect(fonts.map((f) => [f.family, f.bold, f.italic, Array.from(f.data)])).toEqual([
+      ["Oswald", false, false, [1, 2, 3]],
+      ["Oswald", true, false, [4, 5]],
+    ]);
+  });
+
+  it("has none for an ordinary deck", async () => {
+    expect(await (await PptxDocument.load(await blankPptx())).embeddedFonts()).toEqual([]);
+  });
+});

@@ -22,6 +22,8 @@ export interface RenderedShape {
 }
 
 const EMU_PER_PT = 12700;
+/** Placeholders PowerPoint leaves blank when empty, even while editing. */
+const NO_PROMPT = new Set(["sldNum", "dt", "ftr", "hdr"]);
 const JUSTIFY = { t: "flex-start", ctr: "center", b: "flex-end" } as const;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -96,13 +98,15 @@ function drawGeometry(el: HTMLElement, shape: ShapeModel, scale: number, withFil
   }
 
   const strokeWidth = line ? Math.max(1, line.width * scale) : 0;
+  // Office sizes arrowheads from the line width, but counts lines thinner than 0.7 mm (25200 EMU) as that wide.
+  const arrowBase = line ? Math.max(line.width, 25200) * scale : 0;
   const marker = (end: "head" | "tail") => {
     const arrow = line?.[end];
     if (!arrow || !line) return null;
     const id = `dw-arrow-${++uid}`;
     const m = svgEl(defs, "marker", {
       id, viewBox: "0 0 10 10", refX: arrow.type === "arrow" || arrow.type === "triangle" || arrow.type === "stealth" ? 9 : 5, refY: 5,
-      markerUnits: "strokeWidth", markerWidth: ARROW_SIZE[arrow.len], markerHeight: ARROW_SIZE[arrow.w], orient: "auto-start-reverse",
+      markerUnits: "userSpaceOnUse", markerWidth: ARROW_SIZE[arrow.len] * arrowBase, markerHeight: ARROW_SIZE[arrow.w] * arrowBase, orient: "auto-start-reverse",
     });
     const [c, o] = paint(line.color);
     const open = arrow.type === "arrow";
@@ -163,7 +167,10 @@ function textBox(parent: HTMLElement, shape: ShapeModel, pxPerPt: number, scale:
   const hlink = t.style.colors.scheme.hlink;
   if (hlink) textEl.style.setProperty("--pptx-hlink", hlink);
   textEl.classList.toggle("is-nowrap", !t.wrap);
-  textEl.classList.toggle("is-empty", shape.placeholder && t.paras.every((p) => p.runs.length === 0));
+  // "Click to add text" shows in empty placeholders, as in PowerPoint; never in slide number, date or footer ones.
+  const phType = shape.placeholder ? (shape.el.getElementsByTagNameNS(shape.el.namespaceURI, "ph")[0]?.getAttribute("type") ?? "body") : null;
+  if (phType && !NO_PROMPT.has(phType)) textEl.dataset.prompt = "";
+  textEl.classList.toggle("is-empty", t.paras.every((p) => p.runs.length === 0));
   if (opts.editable && !shape.inherited) {
     textEl.contentEditable = "true";
     textEl.spellcheck = true;

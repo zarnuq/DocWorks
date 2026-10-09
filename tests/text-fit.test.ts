@@ -60,7 +60,7 @@ describe("letterSpacing", () => {
 });
 
 describe("renderParagraphs width fitting", () => {
-  const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 20, color: "#000000", font: "Calibri", spc: 0, link: null };
+  const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 20, color: "#000000", font: "Calibri", spc: 0, cap: "none", link: null };
   const para = (font: string): Para => ({
     runs: [{ ...defaults, font, text: "Assumptions" }],
     align: "l",
@@ -84,5 +84,19 @@ describe("renderParagraphs width fitting", () => {
     const host = document.createElement("div");
     renderParagraphs(host, [para("Wingdings")], 2);
     expect(host.querySelector("span")!.style.letterSpacing).toBe("");
+  });
+});
+
+describe("letter spacing for capitals", () => {
+  it("measures all-caps text in capitals, as it is drawn", () => {
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    const host = document.createElement("div");
+    const run = { text: "Contingent", b: true, i: false, u: false, strike: false, sz: 20, color: "#000000", font: "Calibri", spc: 0, cap: "all" as const, link: null };
+    renderParagraphs(host, [{ runs: [run], align: "l", lvl: 0, bullet: null, defaults: { ...run, text: undefined } as never } as never], 1, 1, 0, {});
+    const span = host.querySelector("span")!;
+    const caps = letterSpacing("CONTINGENT", run, 20)!;
+    const lower = letterSpacing("Contingent", run, 20)!;
+    expect(caps).not.toBeCloseTo(lower, 3);
+    expect(parseFloat(span.style.letterSpacing)).toBeCloseTo(caps, 3);
   });
 });

@@ -74,7 +74,15 @@ export class Toolbar {
   }
 }
 
+/** Show a select's current value: tick the matching option, or name a value that isn't listed in its placeholder. */
+export function showValue(s: HTMLSelectElement, value: string | null): void {
+  const listed = value !== null && Array.from(s.options).some((o) => o.value === value && o.value !== "");
+  s.options[0].text = listed || value === null ? (s.dataset.placeholder ?? "") : value;
+  s.value = listed ? value : "";
+}
+
 function fillSelect(s: HTMLSelectElement, placeholder: string, options: [label: string, value: string][], onChange: (value: string) => void): HTMLSelectElement {
+  s.dataset.placeholder = placeholder;
   // The placeholder labels the closed control only; macOS would otherwise list it with a check mark and anchor the menu on it.
   s.createEl("option", { text: placeholder, value: "" }).hidden = true;
   for (const [text, value] of options) s.createEl("option", { text, value });

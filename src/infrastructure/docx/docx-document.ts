@@ -153,9 +153,10 @@ export class DocxDocument extends OoxmlPackage {
   }
 
   /** Every image relationship of the main part as a data URL, keyed by rId. */
-  async imageUrls(): Promise<Map<string, string>> {
+  /** rId -> data URL for the images a part (the body by default, or a header / footer) refers to. */
+  async imageUrls(part = this.mainPath): Promise<Map<string, string>> {
     const out = new Map<string, string>();
-    for (const rel of this.rels(this.mainPath)) {
+    for (const rel of this.rels(part)) {
       const mime = IMAGE_MIME[rel.target.split(".").pop()?.toLowerCase() ?? ""];
       if (rel.type !== "image" || rel.external || !mime || !this.zip.file(rel.target)) continue;
       out.set(rel.id, `data:${mime};base64,${bytesToBase64(await this.media(rel.target))}`);
@@ -163,8 +164,8 @@ export class DocxDocument extends OoxmlPackage {
     return out;
   }
 
-  hyperlinkHref(rId: string): string | null {
-    const rel = this.rels(this.mainPath).find((r) => r.id === rId && r.type === "hyperlink");
+  hyperlinkHref(rId: string, part = this.mainPath): string | null {
+    const rel = this.rels(part).find((r) => r.id === rId && r.type === "hyperlink");
     return rel ? rel.target : null;
   }
 
@@ -179,11 +180,16 @@ export class DocxDocument extends OoxmlPackage {
   }
 
   /** Root (w:hdr / w:ftr) of the default header or footer, if the document has one. */
-  headerFooter(kind: "header" | "footer"): Element | null {
+  /** Part path of the default header or footer, if there is one. */
+  headerFooterPath(kind: "header" | "footer"): string | null {
     const ref = Array.from(this.finalSectPr(false)?.children ?? []).find(
       (c) => c.localName === `${kind}Reference` && (wVal(c, "type") ?? "default") === "default"
     );
-    const path = ref && this.relTarget(this.mainPath, ref.getAttributeNS(NS.r, "id") ?? "");
+    return (ref && this.relTarget(this.mainPath, ref.getAttributeNS(NS.r, "id") ?? "")) || null;
+  }
+
+  headerFooter(kind: "header" | "footer"): Element | null {
+    const path = this.headerFooterPath(kind);
     return (path && this.xml(path)?.documentElement) || null;
   }
 
@@ -314,8 +320,8 @@ export class DocxDocument extends OoxmlPackage {
   }
 
   /** Store an image and relate it to the document. Returns the rId. */
-  addImage(bytes: Uint8Array, ext: string): string {
-    return this.addRel(this.mainPath, "image", this.storeImage("word", bytes, ext));
+  addImage(bytes: Uint8Array, ext: string, part = this.mainPath): string {
+    return this.addRel(part, "image", this.storeImage("word", bytes, ext));
   }
 
   /** wp:docPr ids must be unique across the document. */

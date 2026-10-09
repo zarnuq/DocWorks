@@ -9,9 +9,10 @@ import { Origins, readDocx } from "../../domain/docx/docx-reader";
 import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
-import { FONTS, PaperTheme, promptText, Toolbar } from "../common/toolbar";
+import { FONTS, PaperTheme, promptText, showValue, Toolbar } from "../common/toolbar";
 import { pickImage } from "../common/images";
-import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, pagesPlugin, repaginate, styleRenderedParagraphs } from "./docx-editor";
+import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, styleRenderedParagraphs } from "./docx-editor";
+import { pagesPlugin, repaginate } from "./docx-pages";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
 import { pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
@@ -21,8 +22,10 @@ import { DocxImageView } from "./docx-image-view";
 export interface DocWorksSettings {
   /** "document": pages use the document's own size; "letter": always 8.5 x 11 in. */
   pageSize: PageSize;
+  /** Name shown on new comments; asked for on the first comment when empty. */
+  author: string;
 }
-export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document" };
+export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document", author: "" };
 
 export const VIEW_TYPE_DOCX = "doc-works-docx-view";
 
@@ -40,7 +43,6 @@ const STYLES: [string, string][] = [
 
 const PAGE_VIEW_KEY = "doc-works-page-view";
 const REVIEW_KEY = "doc-works-review-panel";
-const AUTHOR_KEY = "doc-works-author";
 type HF = "header" | "footer";
 
 const dataUrl = (file: Blob) =>
@@ -82,13 +84,19 @@ export class DocxView extends FileView {
   private resizeObserver: ResizeObserver | null = null;
   /** Header and footer content, for drawing them in the page view. */
   private hf: Record<HF, PMNode | null> = { header: null, footer: null };
+  private styleSelect: HTMLSelectElement | null = null;
+  private fontSelect: HTMLSelectElement | null = null;
+  private sizeSelect: HTMLSelectElement | null = null;
+  /** rId -> data URL for pictures in the header and footer parts. */
+  private hfUrls: Record<HF, Map<string, string>> = { header: new Map(), footer: new Map() };
   private reviewEl: HTMLElement | null = null;
   private reviewOpen = window.localStorage.getItem(REVIEW_KEY) === "on";
   private reviewTimer: number | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
-    private settings: DocWorksSettings = DEFAULT_SETTINGS
+    private settings: DocWorksSettings = { ...DEFAULT_SETTINGS },
+    private saveSettings: () => Promise<void> = async () => {}
   ) {
     super(leaf);
     this.scope = new Scope(this.app.scope);
@@ -124,6 +132,10 @@ export class DocxView extends FileView {
     try {
       docx = await DocxDocument.load(await this.app.vault.readBinary(file));
       urls = await docx.imageUrls();
+      for (const kind of ["header", "footer"] as const) {
+        const path = docx.headerFooterPath(kind);
+        this.hfUrls[kind] = path ? await docx.imageUrls(path) : new Map<string, string>();
+      }
     } catch (err) {
       status.setText(`Could not open this .docx file: ${(err as Error).message}`);
       console.error(err);
@@ -183,7 +195,10 @@ export class DocxView extends FileView {
         if (!this.editor) return;
         this.editor.updateState(this.editor.state.apply(tr));
         if (tr.docChanged) this.markDirty();
-        if (tr.docChanged || tr.selectionSet) this.scheduleWordCount();
+        if (tr.docChanged || tr.selectionSet) {
+          this.scheduleWordCount();
+          this.updateFormatControls();
+        }
         if (tr.docChanged) this.scheduleReview();
       },
       handleDOMEvents: {
@@ -323,9 +338,9 @@ export class DocxView extends FileView {
     btn("↶", "Undo (Ctrl+Z)", undo);
     btn("↷", "Redo (Ctrl+Y)", redo);
     sep();
-    tb.select("Paragraph style", "Style", STYLES, (v) => run(cmd.setStyle(v === "Normal" ? null : v)));
-    tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => run(cmd.setMark(m.font, { font })));
-    tb.select("Font size", "Size", FONT_SIZES.map((s) => [`${s} pt`, String(s)]), (v) => run(cmd.setMark(m.size, { pt: Number(v) })));
+    this.styleSelect = tb.select("Paragraph style", "Style", STYLES, (v) => run(cmd.setStyle(v === "Normal" ? null : v)));
+    this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => run(cmd.setMark(m.font, { font })));
+    this.sizeSelect = tb.select("Font size", "Size", FONT_SIZES.map((s) => [`${s} pt`, String(s)]), (v) => run(cmd.setMark(m.size, { pt: Number(v) })));
     sep();
     btn("B", "Bold (Ctrl+B)", toggleMark(m.bold), "bold");
     btn("I", "Italic (Ctrl+I)", toggleMark(m.italic), "italic");
@@ -394,6 +409,23 @@ export class DocxView extends FileView {
   // ---------------------------------------------------------------------------
   // Word count, links, paragraph dialog
   // ---------------------------------------------------------------------------
+
+  /** Font and Size show what's at the cursor: the text's own formatting, else its paragraph (and table) style. */
+  private updateFormatControls(): void {
+    const editor = this.editor;
+    if (!editor || !this.ctx || !this.fontSelect || !this.sizeSelect) return;
+    const { $from } = editor.state.selection;
+    const marks = editor.state.storedMarks ?? $from.marks();
+    const m = schema.marks;
+    let tableStyle: string | null = null;
+    for (let d = $from.depth; d > 0 && !tableStyle; d--) if ($from.node(d).type === schema.nodes.table) tableStyle = ($from.node(d).attrs.style as string | null) ?? null;
+    const paraStyle = ($from.parent.attrs.style as string | null) ?? null;
+    const font = (marks.find((x) => x.type === m.font)?.attrs.font as string | undefined) ?? this.ctx.styles.fontFor(paraStyle, tableStyle);
+    const size = (marks.find((x) => x.type === m.size)?.attrs.pt as number | undefined) ?? this.ctx.styles.sizeFor(paraStyle, tableStyle);
+    if (this.styleSelect) showValue(this.styleSelect, paraStyle ?? "Normal");
+    showValue(this.fontSelect, font);
+    showValue(this.sizeSelect, size === null ? null : String(size));
+  }
 
   private scheduleWordCount(): void {
     if (this.wordsTimer) window.clearTimeout(this.wordsTimer);
@@ -472,13 +504,14 @@ export class DocxView extends FileView {
     this.reviewTimer = window.setTimeout(() => this.renderReview(), 400);
   }
 
+  /** The comment author from settings, asked for (and saved) the first time. */
   private async author(): Promise<string | null> {
-    const saved = window.localStorage.getItem(AUTHOR_KEY);
-    if (saved) return saved;
-    const name = await promptText(this.app, "Your name (shown on comments)", "");
+    if (this.settings.author.trim()) return this.settings.author.trim();
+    const name = await promptText(this.app, "Your name (shown on comments; change it in settings)", "");
     if (!name?.trim()) return null;
-    window.localStorage.setItem(AUTHOR_KEY, name.trim());
-    return name.trim();
+    this.settings.author = name.trim();
+    await this.saveSettings();
+    return this.settings.author;
   }
 
   private async addComment(): Promise<void> {
@@ -705,7 +738,14 @@ export class DocxView extends FileView {
 
   private readHF(kind: HF): PMNode | null {
     const root = this.docx?.headerFooter(kind);
-    return root ? readDocx(root, { imageSrc: () => null, hyperlinkHref: () => null }).doc : null;
+    return root ? readDocx(root, this.hfReadContext(kind)).doc : null;
+  }
+
+  /** Images and links in a header / footer resolve through that part's own relationships. */
+  private hfReadContext(kind: HF) {
+    const docx = this.docx;
+    const part = docx?.headerFooterPath(kind) ?? undefined;
+    return { imageSrc: (id: string) => this.hfUrls[kind].get(id) ?? null, hyperlinkHref: (id: string) => docx?.hyperlinkHref(id, part) ?? null };
   }
 
   /** Header / footer content for the page view, with page number fields filled in. */
@@ -731,7 +771,7 @@ export class DocxView extends FileView {
   private headerFooterDialog(): void {
     const docx = this.docx;
     if (!docx || !this.ctx) return;
-    const modal = new HeaderFooterModal(this.app, this.ctx, docx, () => {
+    const modal = new HeaderFooterModal(this.app, this.ctx, docx, (kind) => this.hfReadContext(kind), () => {
       this.hf = { header: this.readHF("header"), footer: this.readHF("footer") };
       this.dirty = true;
       void this.saveNow();
@@ -829,7 +869,13 @@ class HeaderFooterModal extends Modal {
   private editors: { kind: HF; view: EditorView; origins: Origins }[] = [];
   private changed = false;
 
-  constructor(app: App, private ctx: EditorContext, private docx: DocxDocument, private onDone: () => void) {
+  constructor(
+    app: App,
+    private ctx: EditorContext,
+    private docx: DocxDocument,
+    private readContext: (kind: HF) => { imageSrc: (id: string) => string | null; hyperlinkHref: (id: string) => string | null },
+    private onDone: () => void
+  ) {
     super(app);
   }
 
@@ -839,7 +885,7 @@ class HeaderFooterModal extends Modal {
     for (const kind of ["header", "footer"] as const) {
       new Setting(this.contentEl).setName(kind === "header" ? "Header" : "Footer").setHeading();
       const root = this.docx.headerFooter(kind);
-      const { doc, origins } = root ? readDocx(root, { imageSrc: () => null, hyperlinkHref: (id) => this.docx.hyperlinkHref(id) }) : { doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create()), origins: new Map() as Origins };
+      const { doc, origins } = root ? readDocx(root, this.readContext(kind)) : { doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create()), origins: new Map() as Origins };
       const bar = this.contentEl.createDiv({ cls: "docx-hf-tools" });
       const host = this.contentEl.createDiv({ cls: "docx-hf-editor" });
       const view: EditorView = new EditorView(host, {

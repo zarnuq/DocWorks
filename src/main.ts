@@ -14,7 +14,7 @@ export default class DocWorksPlugin extends Plugin {
   async onload() {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<DocWorksSettings> | null) };
     this.addSettingTab(new DocWorksSettingTab(this.app, this));
-    this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf, this.settings));
+    this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf, this.settings, () => this.saveSettings()));
     this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf));
     this.claimExtension("docx", VIEW_TYPE_DOCX);
     this.claimExtension("pptx", VIEW_TYPE_PPTX);
@@ -91,6 +91,8 @@ export default class DocWorksPlugin extends Plugin {
   }
 }
 
+const AUTHOR = { name: "Comment author", desc: "Your name on comments you add to Word documents." };
+
 const PAGE_SIZE = {
   name: "Word page size",
   desc: "Page view uses each document's own page size, or always US Letter (8.5 × 11 in).",
@@ -107,11 +109,15 @@ class DocWorksSettingTab extends PluginSettingTab {
 
   // Obsidian 1.13+: rendered declaratively and searchable.
   getSettingDefinitions(): SettingDefinitionItem[] {
-    return [{ name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } }];
+    return [
+      { name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } },
+      { name: AUTHOR.name, desc: AUTHOR.desc, control: { type: "text", key: "author", defaultValue: "" } },
+    ];
   }
 
   async setControlValue(key: string, value: unknown): Promise<void> {
     if (key === "pageSize") this.plugin.settings.pageSize = value === "letter" ? "letter" : "document";
+    if (key === "author") this.plugin.settings.author = typeof value === "string" ? value.trim() : "";
     await this.plugin.saveSettings();
   }
 
@@ -127,5 +133,9 @@ class DocWorksSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.pageSize)
           .onChange((v) => void this.setControlValue("pageSize", v))
       );
+    new Setting(this.containerEl)
+      .setName(AUTHOR.name)
+      .setDesc(AUTHOR.desc)
+      .addText((t) => t.setValue(this.plugin.settings.author).onChange((v) => void this.setControlValue("author", v)));
   }
 }

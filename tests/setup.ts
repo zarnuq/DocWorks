@@ -84,3 +84,9 @@ g.ResizeObserver ??= class {
 };
 g.CSS ??= {};
 Element.prototype.scrollIntoView ??= () => {};
+
+// jsdom does no layout: ranges have no boxes.
+if (!Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+}

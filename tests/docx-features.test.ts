@@ -3,14 +3,15 @@ import { EditorState, TextSelection, Command } from "prosemirror-state";
 import { DecorationSet, EditorView } from "prosemirror-view";
 import { docxSchema as schema } from "../src/domain/docx/schema";
 import { DocxStyles } from "../src/domain/docx/docx-styles";
-import { cmd, commentRanges, footnoteIds, docxPlugins, EditorContext, linkHref, pageNumberNode, pagesKey, pagesPlugin } from "../src/presentation/docx/docx-editor";
+import { cmd, commentRanges, footnoteIds, docxPlugins, EditorContext, linkHref, pageNumberNode } from "../src/presentation/docx/docx-editor";
+import { pagesKey, pagesPlugin } from "../src/presentation/docx/docx-pages";
 import { DOMSerializer, Fragment, Slice } from "prosemirror-model";
 import { blankDocx } from "../src/infrastructure/blank";
 import { writeBody } from "../src/domain/docx/docx-writer";
 import { paragraphProps, readDocx } from "../src/domain/docx/docx-reader";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { readSample, W } from "./helpers";
-import { layoutPages, pageSetup } from "../src/domain/docx/pages";
+import { layoutPages, pageSetup, TopBlock, Unit } from "../src/domain/docx/pages";
 import { acceptRevisions, rejectRevisions, revisions } from "../src/domain/docx/revisions";
 import { countWords, findKey, findRanges, replaceAllCmd, replaceRangeCmd, setFind } from "../src/presentation/docx/docx-find";
 
@@ -179,34 +180,64 @@ describe("pages", () => {
     expect(pageSetup(body(""))).toMatchObject({ width: 816, height: 1056, top: 96, left: 96 });
   });
 
-  it("starts a new page before the block that doesn't fit, and after manual page breaks", () => {
-    const blocks = [100, 300, 250, 50, 400, 10].map((height) => ({ height, breakAfter: false }));
-    expect(layoutPages(blocks, 500).starts).toEqual([2, 4]);
+  const block = (height: number, breakAfter = false): TopBlock => ({ unit: { kind: "block", height, pos: 0 }, breakAfter });
+  /** A paragraph of `n` lines of `lh` px; line k starts at text position 100 * (k + 1). */
+  const text = (n: number, lh: number, pos = 0): Unit => ({
+    kind: "text",
+    height: n * lh,
+    pos,
+    left: 96,
+    lines: Array.from({ length: n }, (_, k) => ({ top: k * lh, bottom: (k + 1) * lh, pos: pos + 100 * (k + 1) })),
+  });
+  const GAP = 30;
+
+  it("starts a new page before a block that doesn't fit, and after manual page breaks", () => {
+    const blocks = [100, 300, 250, 50, 400, 10].map((h) => block(h));
+    expect(layoutPages(blocks, 500, GAP).starts).toEqual([2, 4]);
+    expect(layoutPages(blocks, 500, GAP).fills).toEqual([100, 200, 90]);
     blocks[0].breakAfter = true;
-    expect(layoutPages(blocks, 500).starts).toEqual([1, 2, 4]);
+    expect(layoutPages(blocks, 500, GAP).starts).toEqual([1, 2, 4]);
     // A block taller than a page still gets its own page, never an empty one.
-    expect(layoutPages([{ height: 900, breakAfter: false }, { height: 10, breakAfter: false }], 500).starts).toEqual([1]);
+    expect(layoutPages([block(900), block(10)], 500, GAP).starts).toEqual([1]);
   });
 
-  it("knows how much of each page is left blank, so pages keep their full height", () => {
-    const blocks = [100, 300, 250, 50, 400, 10].map((height) => ({ height, breakAfter: false }));
-    expect(layoutPages(blocks, 500).fills).toEqual([100, 200, 90]);
-    expect(layoutPages([{ height: 900, breakAfter: false }], 500).fills).toEqual([0]);
+  it("splits a long paragraph between lines, with a spacer that carries the page gap", () => {
+    const l = layoutPages([block(300), { unit: text(10, 40, 1000), breakAfter: false }], 500, GAP);
+    expect(l.starts).toEqual([]);
+    // Lines 1-5 fit (300 + 200 = 500); line 6 starts page 2.
+    expect(l.spacers).toEqual([{ pos: 1600, height: GAP, gapAt: 0, left: 96, page: 1 }]);
+    expect(l.pages).toBe(2);
+    expect(l.fills).toEqual([300]);
   });
 
-  it("lets a table that doesn't fit start where it is and run on to the next page, as Word splits its rows", () => {
-    const blocks = [
-      { height: 200, breakAfter: false },
-      { height: 700, breakAfter: false, splittable: true }, // 300 on page 1, 400 on page 2
-      { height: 50, breakAfter: false }, // still fits on page 2
-      { height: 100, breakAfter: false }, // page 3
-    ];
-    const l = layoutPages(blocks, 500);
-    expect(l.starts).toEqual([3]);
-    // The page that starts after the table is page 3: page 2 is the table's second half.
-    expect(l.pageNumbers).toEqual([1, 3]);
-    expect(l.pages).toBe(3);
-    expect(l.fills).toEqual([50, 400]);
+  it("keeps at least two lines on each side of a break, else moves the paragraph", () => {
+    expect(layoutPages([block(420), { unit: text(3, 40), breakAfter: false }], 500, GAP).starts).toEqual([1]);
+    // 4 lines with only one fitting: the whole paragraph moves too.
+    expect(layoutPages([block(450), { unit: text(4, 40), breakAfter: false }], 500, GAP).starts).toEqual([1]);
+  });
+
+  it("splits a table row inside each cell, so the row continues at the top of the next page", () => {
+    const tall = text(10, 50, 2000);
+    const short = text(2, 50, 3000);
+    const table: Unit = { kind: "table", height: 500, pos: 0, rows: [{ height: 500, cells: [{ padTop: 0, padBottom: 0, left: 100, children: [tall] }, { padTop: 0, padBottom: 0, left: 400, children: [short] }] }] };
+    const l = layoutPages([block(100), { unit: table, breakAfter: false }, block(50)], 500, GAP);
+    // Cell 1: lines 1-8 fit (100 + 400); lines 9-10 continue on page 2. Cell 2 fits.
+    expect(l.spacers).toEqual([{ pos: 2900, height: GAP, gapAt: 0, left: 96, page: 1 }]);
+    expect(l.pages).toBe(2);
+    expect(l.fills).toEqual([500 - 100 - 50]);
+  });
+
+  it("moves a row to the next page when none of its cells can put anything before the break", () => {
+    const row = (h: number, a: number, b: number) => ({ height: h, cells: [{ padTop: 0, padBottom: 0, left: 100, children: [text(1, h, a)] }, { padTop: 0, padBottom: 0, left: 400, children: [text(1, h, b)] }] });
+    const table: Unit = { kind: "table", height: 230, pos: 0, rows: [row(30, 1000, 1500), row(200, 2000, 3000)] };
+    const l = layoutPages([block(450), { unit: table, breakAfter: false }], 500, GAP);
+    expect(l.spacers).toEqual([
+      { pos: 2000, height: 20 + GAP, gapAt: 20, left: 100, page: 1 },
+      { pos: 3000, height: 20 + GAP, gapAt: null, left: 400, page: 1 },
+    ]);
+    expect(l.pages).toBe(2);
+    // A table whose first row can't start on the page moves whole, like any block.
+    expect(layoutPages([block(450), { unit: { ...table, rows: [row(200, 2000, 3000)], height: 200 }, breakAfter: false }], 500, GAP).starts).toEqual([1]);
   });
 
   it("can keep every page at Letter size whatever the document says", () => {

@@ -19,9 +19,9 @@ If it saves you a trip to Office, please ⭐ the repo.
 
 ## Features
 
-**Word:** styles, fonts and formatting, lists, links, tables (merge, borders, header rows), images, page view with headers, footers and page numbers, comments, footnotes, table of contents, tracked changes (accept / reject), find and replace, word count.
+**Word:** styles, fonts and formatting, lists, links, tables (merge, borders, header rows), images, page view (true page size, breaks inside tables and paragraphs, headers and footers with pictures and page numbers), comments, footnotes, table of contents, tracked changes (accept / reject), find and replace, word count.
 
-**PowerPoint:** text editing on the slide, all 187 preset shapes, connectors, group / align / distribute with snapping, tables with table styles, picture crop, layouts, backgrounds, slide size, sections, speaker notes, slideshow with presenter view, find and replace, zoom.
+**PowerPoint:** text editing on the slide, all 187 preset shapes, connectors, group / align / distribute with snapping, tables with table styles, picture crop, layouts, backgrounds, slide size, sections, speaker notes, slideshow with presenter view, find and replace, zoom, fonts embedded in the deck (e.g. from Google Slides).
 
 **Both:** New presentation / New document commands, undo / redo, autosave, light and dark themes.
 

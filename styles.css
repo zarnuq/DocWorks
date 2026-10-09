@@ -248,7 +248,7 @@
   display: none;
 }
 
-:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-none td {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-none > tbody > tr > td {
   border-color: transparent;
   outline: 1px dashed rgba(156, 163, 175, 0.4);
   outline-offset: -1px;
@@ -258,7 +258,7 @@
   border: 1px solid #9ca3af;
 }
 
-:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-outer td {
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-outer > tbody > tr > td {
   border-color: transparent;
 }
 
@@ -591,12 +591,12 @@
 
 /* Prompt text in an empty placeholder: it takes the place of the empty line's <br> (so it sits where the caret will),
    and goes away while editing, as in PowerPoint. */
-.pptx-text.is-empty[contenteditable="true"]:not(:focus) p:first-child::after {
+.pptx-text.is-empty[data-prompt][contenteditable="true"]:not(:focus) p:first-child::after {
   content: "Click to add text";
   opacity: 0.45;
 }
 
-.pptx-text.is-empty[contenteditable="true"]:not(:focus) p:first-child br {
+.pptx-text.is-empty[data-prompt][contenteditable="true"]:not(:focus) p:first-child br {
   display: none;
 }
 
@@ -1077,6 +1077,42 @@ textarea.pptx-notes {
 
 .docx-page-fill {
   height: var(--docx-fill, 0);
+}
+
+/* A page break inside a paragraph or table cell: blank space, with the page gap drawn across the whole page. */
+.docx-page-spacer {
+  display: none;
+  user-select: none;
+}
+
+.is-paged .docx-page-spacer {
+  display: block;
+  position: relative;
+  height: var(--docx-spacer, 0);
+}
+
+.is-paged .docx-page-gap-float {
+  position: absolute;
+  z-index: 1;
+  top: var(--docx-gap-top, 0);
+  left: var(--docx-gap-left, 0);
+  width: calc(var(--docx-page-width) + var(--docx-m-left) + var(--docx-m-right));
+  margin: 0;
+  text-align: start;
+}
+
+/* The gap covers the table borders it crosses. */
+.docx-theme-light .docx-page-gap-float :is(.docx-page-foot, .docx-page-head) {
+  background: #ffffff;
+}
+
+.docx-theme-dark .docx-page-gap-float :is(.docx-page-foot, .docx-page-head) {
+  background: #1e1e1e;
+}
+
+/* Measuring the text flow: page decorations out of the way. */
+.docx-measuring :is(.docx-page-gap, .docx-page-first, .docx-page-last, .docx-page-spacer) {
+  display: none;
 }
 
 .docx-page-foot,

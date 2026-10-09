@@ -30,7 +30,9 @@ import { IMAGE_MIME } from "../../core/utils/images";
 import { pickImage } from "../common/images";
 import { findAll, Match, replaceAll, replaceMatch } from "../../domain/pptx/find";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
-import { FONTS, PaperTheme, Toolbar } from "../common/toolbar";
+import { FONTS, PaperTheme, showValue, Toolbar } from "../common/toolbar";
+import { loadEmbeddedFonts } from "./embedded-fonts";
+import { eotToTtf } from "../../infrastructure/fonts/eot";
 import { nextVisible, Slideshow } from "./slideshow";
 import { RenderedShape, renderSlide } from "./slide-renderer";
 import { rangeInParagraph } from "./text-html";
@@ -92,7 +94,7 @@ function rangeAt(root: HTMLElement, [start, end]: [number, number]): Range {
 function caretIntoEmptyLine(textEl: HTMLElement): void {
   const sel = getSelection();
   const p = textEl.querySelector("p");
-  if (!sel || !p || !textEl.classList.contains("is-empty")) return;
+  if (!sel || !p || textEl.textContent) return;
   // Already inside the line: leave it.
   if (sel.anchorNode && sel.anchorNode !== textEl && textEl.contains(sel.anchorNode)) return;
   sel.collapse(p, 0);
@@ -138,6 +140,8 @@ export class PptxView extends FileView {
   private propsEl!: HTMLElement;
   private showProps = window.localStorage.getItem(PROPS_KEY) !== "hidden";
   private galleryEl: HTMLElement | null = null;
+  private fontSelect: HTMLSelectElement | null = null;
+  private sizeSelect: HTMLSelectElement | null = null;
   /** Shape picked in the gallery, waiting to be drawn on the slide. */
   private drawing: ShapeChoice | null = null;
   private lockAspect = false;
@@ -265,9 +269,25 @@ export class PptxView extends FileView {
     this.index = 0;
     this.setPaperTheme(this.paperTheme);
     this.renderAll();
+    void this.loadFonts();
+  }
+
+  /** Removes the deck's embedded fonts from the page. */
+  private unloadFonts: (() => void) | null = null;
+
+  /** Load the fonts the deck carries, then redraw with them (after the first render, so opening isn't held up). */
+  private async loadFonts(): Promise<void> {
+    const doc = this.doc;
+    if (!doc) return;
+    const { loaded, unload } = await loadEmbeddedFonts(await doc.embeddedFonts(), eotToTtf);
+    if (this.doc !== doc) return unload(); // another file was opened meanwhile
+    this.unloadFonts = unload;
+    if (loaded) this.renderAll();
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
+    this.unloadFonts?.();
+    this.unloadFonts = null;
     document.removeEventListener("selectionchange", this.onSelectionChange);
     window.removeEventListener("blur", this.onWindowBlur);
     this.resizeObserver?.disconnect();
@@ -1307,8 +1327,25 @@ export class PptxView extends FileView {
     if (rs) {
       this.savedRange = range.cloneRange();
       this.activeText = rs;
+      this.updateFormatControls(rs, range);
     }
   };
+
+  /** Font and Size show the run at the cursor (from the model: the DOM only carries what differs from defaults). */
+  private updateFormatControls(rs: RenderedShape, range: Range): void {
+    const text = rs.shape.text;
+    if (!text || !rs.textEl || !this.fontSelect || !this.sizeSelect) return;
+    const ps = Array.from(rs.textEl.querySelectorAll(":scope > p"));
+    const p = ps.find((el) => el.contains(range.startContainer));
+    const para = p ? text.paras[ps.indexOf(p)] : undefined;
+    if (!p || !para) return;
+    const [offset] = textOffsets(p as HTMLElement, range);
+    let seen = 0;
+    const run = para.runs.find((r) => (seen += r.text.length) >= offset) ?? para.runs[para.runs.length - 1];
+    const props = run ?? para.defaults;
+    showValue(this.fontSelect, props.font || null);
+    showValue(this.sizeSelect, props.sz ? String(Math.round(props.sz * 10) / 10) : null);
+  }
 
   private scheduleCommit(rs: RenderedShape): void {
     if (this.pendingCommit && this.pendingCommit !== rs) this.flushCommit();
@@ -1774,8 +1811,8 @@ export class PptxView extends FileView {
     btn("↷", "Redo (Ctrl+Y)", () => this.redo());
     sep();
 
-    tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => this.setRunStyle({ font }));
-    tb.select("Font size", "Size", FONT_SIZES.map((sz) => [`${sz} pt`, String(sz)]), (sz) => this.setRunStyle({ sz: Number(sz) }));
+    this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => this.setRunStyle({ font }));
+    this.sizeSelect = tb.select("Font size", "Size", FONT_SIZES.map((sz) => [`${sz} pt`, String(sz)]), (sz) => this.setRunStyle({ sz: Number(sz) }));
     sep();
 
     btn("B", "Bold (Ctrl+B)", () => this.toggle("b"), "bold");

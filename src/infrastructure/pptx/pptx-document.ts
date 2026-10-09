@@ -176,6 +176,24 @@ export class PptxDocument extends OoxmlPackage {
     done();
   }
 
+  // --- Embedded fonts --------------------------------------------------------
+
+  /** Fonts the deck carries (Google Slides and PowerPoint's "Embed fonts"), still in their stored form (EOT). */
+  async embeddedFonts(): Promise<{ family: string; bold: boolean; italic: boolean; data: Uint8Array }[]> {
+    const out: { family: string; bold: boolean; italic: boolean; data: Uint8Array }[] = [];
+    const list = this.parts.get(PRESENTATION)?.getElementsByTagNameNS(NS.p, "embeddedFont") ?? [];
+    for (const font of Array.from(list)) {
+      const family = font.getElementsByTagNameNS(NS.p, "font")[0]?.getAttribute("typeface");
+      if (!family) continue;
+      for (const [tag, bold, italic] of [["regular", false, false], ["bold", true, false], ["italic", false, true], ["boldItalic", true, true]] as const) {
+        const rId = font.getElementsByTagNameNS(NS.p, tag)[0]?.getAttributeNS(NS.r, "id");
+        const path = rId && this.relTarget(PRESENTATION, rId);
+        if (path && this.zip.file(path)) out.push({ family, bold, italic, data: await this.media(path) });
+      }
+    }
+    return out;
+  }
+
   // --- Speaker notes -------------------------------------------------------
 
   /** The notes page's body placeholder text body, if the slide has notes. */
