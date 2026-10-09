@@ -29,11 +29,26 @@ export interface ParagraphAttrs {
   ilvl: number;
   lineSpacing: string | null;
   indent: number;
+  /** Points; null = from the style. */
+  spaceBefore: number | null;
+  spaceAfter: number | null;
+  /** First-line indent in points; negative = hanging. */
+  firstLine: number | null;
 }
 export interface CellAttrs {
   key: string | null;
   colspan: number;
   background: string | null;
+  /** Vertical merge: first cell of the merge, or a cell it covers. */
+  vMerge: "restart" | "continue" | null;
+}
+export type TableBorders = "all" | "outer" | "none";
+export interface TableAttrs {
+  key: string | null;
+  /** Border preset, or null for whatever the file defines. */
+  borders: TableBorders | null;
+  /** Column widths in twips (w:tblGrid), or null for a new table. */
+  widths: number[] | null;
 }
 export interface ImageAttrs {
   xml: string;
@@ -70,6 +85,9 @@ export const docxSchema = new Schema({
         lineSpacing: { default: null },
         /** Left indent in 0.5" steps. */
         indent: { default: 0 },
+        spaceBefore: { default: null },
+        spaceAfter: { default: null },
+        firstLine: { default: null },
       },
       parseDOM: [
         { tag: "p" },
@@ -95,20 +113,21 @@ export const docxSchema = new Schema({
       group: "block",
       content: "table_row+",
       isolating: true,
-      attrs: { key: { default: null } },
+      attrs: { key: { default: null }, borders: { default: null }, widths: { default: null } },
       parseDOM: [{ tag: "table" }],
       toDOM: () => ["table", ["tbody", 0]],
     },
     table_row: {
       content: "table_cell+",
-      attrs: { key: { default: null } },
+      /** header: repeats at the top of each page (w:tblHeader). */
+      attrs: { key: { default: null }, header: { default: false } },
       parseDOM: [{ tag: "tr" }],
       toDOM: () => ["tr", 0],
     },
     table_cell: {
       content: "block+",
       isolating: true,
-      attrs: { key: { default: null }, colspan: { default: 1 }, background: { default: null } },
+      attrs: { key: { default: null }, colspan: { default: 1 }, background: { default: null }, vMerge: { default: null } },
       parseDOM: [{ tag: "td" }, { tag: "th" }],
       toDOM(node): DOMOutputSpec {
         const attrs: Record<string, string> = {};
@@ -127,6 +146,7 @@ export const docxSchema = new Schema({
       parseDOM: [{ tag: "hr", attrs: { kind: "hr" } }],
       toDOM(node): DOMOutputSpec {
         if (node.attrs.kind === "hr") return ["hr"];
+        if (node.attrs.kind === "toc") return ["div", { class: "docx-toc", contenteditable: "false", title: "Table of contents (update it from the toolbar)" }, node.attrs.text];
         return ["div", { class: "docx-raw-block", contenteditable: "false", title: "Read-only content" }, node.attrs.text];
       },
     },
@@ -180,7 +200,16 @@ export const docxSchema = new Schema({
       inline: true,
       atom: true,
       attrs: { xml: { default: "" }, text: { default: "" } },
-      toDOM: (node) => ["span", { class: "docx-opaque", contenteditable: "false" }, node.attrs.text],
+      toDOM: (node) => {
+        const xml = node.attrs.xml as string;
+        // Tracked deletions show struck through.
+        const deleted = /^<w:(del|moveFrom)\b/.test(xml);
+        const attrs: Record<string, string> = { class: deleted ? "docx-opaque docx-del" : "docx-opaque", contenteditable: "false" };
+        // Page number fields are filled in by the page view.
+        const field = /w:instr="\s*(PAGE|NUMPAGES)\b/.exec(node.attrs.xml as string)?.[1];
+        if (field) attrs["data-field"] = field;
+        return ["span", attrs, node.attrs.text];
+      },
     },
   },
 
@@ -189,6 +218,13 @@ export const docxSchema = new Schema({
     rpr: {
       attrs: { xml: {} },
       toDOM: () => ["span", 0],
+    },
+    /** Tracked insertion (w:ins / w:moveTo); `xml` is the empty wrapper element with all its attributes. */
+    insertion: {
+      attrs: { xml: {}, author: { default: "" }, date: { default: "" } },
+      inclusive: false,
+      excludes: "",
+      toDOM: (mark) => ["ins", { class: "docx-ins", title: `Inserted${mark.attrs.author ? ` by ${String(mark.attrs.author)}` : ""}` }, 0],
     },
     link: {
       attrs: { href: { default: null }, rId: { default: null }, anchor: { default: null } },

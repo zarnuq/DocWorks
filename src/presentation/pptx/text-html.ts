@@ -10,6 +10,7 @@
  * <span data-field>; links are <span data-link> ("" = explicitly no link).
  */
 import type { Align, Para, Run, RunProps, Spacing } from "../../domain/pptx/slide-model";
+import { letterNumber, romanNumber } from "../../core/utils/numbering";
 import type { ParaInput } from "../../domain/pptx/slide-edit";
 import { fontStack, letterSpacing } from "./text-fit";
 
@@ -118,22 +119,11 @@ export function renderParagraphs(
   refreshMarks(host);
 }
 
-const ROMAN: [number, string][] = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
-const roman = (n: number) => ROMAN.reduce((out, [v, s]) => {
-  for (; n >= v; n -= v) out += s;
-  return out;
-}, "");
-const alpha = (n: number) => {
-  let out = "";
-  for (; n > 0; n = Math.floor((n - 1) / 26)) out = String.fromCharCode(97 + ((n - 1) % 26)) + out;
-  return out;
-};
-
 /** Label for number `n` in a DrawingML auto-number scheme ("arabicPeriod", "alphaUcParenR"...). */
 export function numberLabel(scheme: string, n: number): string {
   const m = /^(arabic|alphaLc|alphaUc|romanLc|romanUc)(Period|ParenR|ParenBoth|Plain)$/.exec(scheme) ?? [scheme, "arabic", "Period"];
   const kind = m[1];
-  let text = kind === "arabic" ? String(n) : kind.startsWith("alpha") ? alpha(n) : roman(n);
+  let text = kind === "arabic" ? String(n) : kind.startsWith("alpha") ? letterNumber(n) : romanNumber(n);
   if (kind.endsWith("Uc")) text = text.toUpperCase();
   return m[2] === "Period" ? `${text}.` : m[2] === "ParenR" ? `${text})` : m[2] === "ParenBoth" ? `(${text})` : text;
 }
@@ -418,4 +408,30 @@ export function insertPlainText(text: string): void {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+}
+
+/** DOM range for character offsets [start, end) of a rendered paragraph; a <br> counts as one character. */
+export function rangeInParagraph(p: HTMLElement, start: number, end: number): Range {
+  const range = document.createRange();
+  range.selectNodeContents(p);
+  const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  let seen = 0;
+  let startSet = false;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const isBr = n.nodeName === "BR";
+    if (n.nodeType !== Node.TEXT_NODE && !isBr) continue;
+    const len = isBr ? 1 : (n.textContent?.length ?? 0);
+    if (!startSet && start <= seen + len && !(isBr && start === seen + len)) {
+      if (isBr) range.setStartAfter(n);
+      else range.setStart(n, start - seen);
+      startSet = true;
+    }
+    if (end <= seen + len) {
+      if (isBr) range.setEndBefore(n);
+      else range.setEnd(n, end - seen);
+      break;
+    }
+    seen += len;
+  }
+  return range;
 }

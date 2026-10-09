@@ -5,9 +5,12 @@
  */
 import type { ShapeModel } from "../../domain/pptx/slide-model";
 import { Fill, Line, writeFill, writeLine, writeShadow } from "../../domain/pptx/shape-style";
-import { reorder, setRect, setTransform, writeBodyPr, ZOrder } from "../../domain/pptx/slide-edit";
+import { reorder, setCrop, setRect, setTransform, writeBodyPr, ZOrder } from "../../domain/pptx/slide-edit";
 import type { Alignment } from "../../domain/pptx/arrange";
 import { NS } from "../../core/utils/xml";
+import {
+  BorderMode, CellRange, deleteCol, deleteRow, insertCol, insertRow, mergeCells, setCellBorders, setCellFill, setColWidth, setRowHeight, setTableFlags, splitCell, TableFlags,
+} from "../../domain/pptx/table";
 
 export interface PanelControl {
   /** Apply a change to the shape's XML as one undoable step, then redraw. */
@@ -15,6 +18,11 @@ export interface PanelControl {
   lockAspect: boolean;
   /** Actions on the whole selection; when present, the panel shows align buttons. */
   arrange?: ArrangeControl;
+  /** Tables: the selected cell range (the caret's cell, or a Shift+click range). */
+  cells?: CellRange | null;
+  tableStyles?: { id: string; name: string }[];
+  /** Tables: switch style, writing its definition into the presentation. */
+  setTableStyle?(id: string): void;
 }
 
 export interface ArrangeControl {
@@ -80,59 +88,189 @@ const withAlpha = (c: string, a: number) =>
   (a >= 1 ? c.slice(0, 7) : c.slice(0, 7) + Math.round(a * 255).toString(16).padStart(2, "0")).toUpperCase();
 const round2 = (n: number) => String(Math.round(n * 100) / 100);
 
+function sectionIn(host: HTMLElement, title: string): HTMLElement {
+  host.createDiv({ cls: "pptx-props-title", text: title });
+  return host.createDiv({ cls: "pptx-props-section" });
+}
+
+function row(parent: HTMLElement, label: string): HTMLElement {
+  const r = parent.createEl("label", { cls: "pptx-props-row" });
+  r.createSpan({ text: label });
+  return r;
+}
+
+function select(parent: HTMLElement, label: string, options: [string, string][], value: string, onChange: (v: string) => void): HTMLSelectElement {
+  const s = row(parent, label).createEl("select", { cls: "dropdown", attr: { "data-field": label } });
+  for (const [text, v] of options) s.createEl("option", { text, value: v });
+  s.value = value;
+  s.addEventListener("change", () => onChange(s.value));
+  return s;
+}
+
+function input(parent: HTMLElement, label: string, type: string, value: string, onChange: (v: string) => void, attrs: Record<string, string> = {}): HTMLInputElement {
+  const i = row(parent, label).createEl("input", { type, value, attr: { "data-field": label, ...attrs } });
+  i.addEventListener("change", () => onChange(i.value));
+  return i;
+}
+
+const number = (parent: HTMLElement, label: string, value: number, onChange: (v: number) => void, step = "0.01") =>
+  input(parent, label, "number", round2(value), (v) => Number.isFinite(Number(v)) && v !== "" && onChange(Number(v)), { step });
+
+/** Fill type, colors, transparency and gradient angle; `none` is the label/value for "no own fill". */
+function fillControls(s: HTMLElement, fill: Fill | null, setFill: (f: Fill | null) => void, none: [string, string][], label = "Type", plain = DEFAULT_COLOR): void {
+  const type = !fill ? none[0][1] : fill.type === "solid" ? "solid" : fill.radial ? "radial" : "linear";
+  const first = !fill ? plain : fill.type === "solid" ? fill.color : fill.stops[0].color;
+  select(s, label, [...none, ["Solid", "solid"], ["Gradient", "linear"], ["Radial gradient", "radial"]], type, (v) => {
+    if (v === none[0][1]) return setFill(null);
+    if (v === "solid") return setFill({ type: "solid", color: first });
+    const stops = fill?.type === "gradient" ? fill.stops : [{ pos: 0, color: first }, { pos: 1, color: "#FFFFFF" }];
+    setFill({ type: "gradient", radial: v === "radial", angle: fill?.type === "gradient" ? fill.angle : 90, stops });
+  });
+  if (fill?.type === "solid") {
+    input(s, "Color", "color", base(fill.color), (v) => setFill({ type: "solid", color: withAlpha(v, alphaOf(fill.color)) }));
+    number(s, "Transparency %", (1 - alphaOf(fill.color)) * 100, (t) => setFill({ type: "solid", color: withAlpha(fill.color, 1 - Math.min(100, Math.max(0, t)) / 100) }), "1");
+  } else if (fill?.type === "gradient") {
+    const stop = (i: number, c: string) => fill.stops.map((st, k) => (k === i ? { ...st, color: c } : st));
+    const last = fill.stops.length - 1;
+    input(s, "Start color", "color", base(fill.stops[0].color), (v) => setFill({ ...fill, stops: stop(0, withAlpha(v, alphaOf(fill.stops[0].color))) }));
+    input(s, "End color", "color", base(fill.stops[last].color), (v) => setFill({ ...fill, stops: stop(last, withAlpha(v, alphaOf(fill.stops[last].color))) }));
+    if (!fill.radial) number(s, "Angle", fill.angle, (a) => setFill({ ...fill, angle: ((a % 360) + 360) % 360 }), "1");
+  }
+}
+
+const TABLE_FLAGS: [string, keyof TableFlags][] = [
+  ["Header row", "firstRow"], ["Total row", "lastRow"], ["Banded rows", "bandRow"],
+  ["First column", "firstCol"], ["Last column", "lastCol"], ["Banded columns", "bandCol"],
+];
+
+/** Rows and columns, merging, cell fill and borders, and style options for a table. */
+function tableControls(section: (title: string) => HTMLElement, shape: ShapeModel, ctl: PanelControl): void {
+  const t = shape.table!;
+  const tbl = (fn: (tbl: Element) => void) => ctl.edit((frame) => fn(frame.getElementsByTagNameNS(NS.a, "tbl")[0]));
+  const all: CellRange = [0, 0, t.rows.length - 1, t.cols.length - 1];
+  const range = ctl.cells ?? null;
+  const [r1, c1, r2, c2] = range ?? all;
+
+  const s = section("Table");
+  const buttons = s.createDiv({ cls: "pptx-props-buttons" });
+  const btn = (text: string, fn: (tbl: Element) => void) => buttons.createEl("button", { text }).addEventListener("click", () => tbl(fn));
+  if (range) {
+    btn("Insert row above", (x) => insertRow(x, r1, false));
+    btn("Insert row below", (x) => insertRow(x, r2, true));
+    btn("Insert column left", (x) => insertCol(x, c1, false));
+    btn("Insert column right", (x) => insertCol(x, c2, true));
+    if (t.rows.length > 1) btn("Delete row", (x) => { for (let r = r2; r >= r1; r--) deleteRow(x, r); });
+    if (t.cols.length > 1) btn("Delete column", (x) => { for (let c = c2; c >= c1; c--) deleteCol(x, c); });
+    if (r1 !== r2 || c1 !== c2) btn("Merge cells", (x) => mergeCells(x, [r1, c1, r2, c2]));
+    const here = t.cells[r1]?.[c1];
+    if (here && r1 === r2 && c1 === c2 && (here.gridSpan > 1 || here.rowSpan > 1)) btn("Split cell", (x) => splitCell(x, r1, c1));
+    number(s, "Column width (in)", t.cols[c1] / EMU_PER_INCH, (v) => tbl((x) => setColWidth(x, c1, Math.max(0.1, v) * EMU_PER_INCH)));
+    number(s, "Row height (in)", t.rows[r1] / EMU_PER_INCH, (v) => tbl((x) => setRowHeight(x, r1, Math.max(0.1, v) * EMU_PER_INCH)));
+  } else {
+    s.createDiv({ cls: "pptx-props-hint", text: "Click a cell (Shift+click for a range) to add rows, columns or merge." });
+  }
+
+  const cells: [number, number][] = [];
+  for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) cells.push([r, c]);
+  const first = t.cells[r1]?.[c1];
+  const ownFill = Array.from(kidOf(first?.el, "tcPr")?.children ?? []).some((c) => c.localName === "solidFill" || c.localName === "gradFill");
+  const own = ownFill ? (first?.fill ?? null) : null;
+  const fills = section(range ? "Cell fill" : "Table fill");
+  fillControls(fills, own, (f) => tbl((x) => setCellFill(x, cells, f)), [["Table style", "style"]], "Cell fill", "#FFFFFF");
+
+  const b = section("Borders");
+  let color = "#000000";
+  let width = 1;
+  input(b, "Border color", "color", color, (v) => (color = v.toUpperCase()));
+  number(b, "Border width (pt)", width, (v) => (width = Math.max(0.25, v)), "0.25");
+  select(b, "Borders", [["Apply…", ""], ["All borders", "all"], ["Outer borders", "outer"], ["Inside borders", "inside"], ["No borders", "none"]], "", (v) => {
+    if (!v) return;
+    tbl((x) => setCellBorders(x, [r1, c1, r2, c2], v === "none" ? "all" : (v as BorderMode), v === "none" ? null : { color, width: width * EMU_PER_PT }));
+  });
+
+  const st = section("Table style");
+  const styles = ctl.tableStyles ?? [];
+  const options: [string, string][] = styles.map((x) => [x.name, x.id]);
+  if (t.styleId && !styles.some((x) => x.id === t.styleId)) options.unshift(["Current style", t.styleId]);
+  if (!t.styleId) options.unshift(["No style", ""]);
+  select(st, "Table style", options, t.styleId ?? "", (id) => id && ctl.setTableStyle?.(id));
+  for (const [label, key] of TABLE_FLAGS) {
+    const box = row(st, label).createEl("input", { type: "checkbox", attr: { "data-field": label } });
+    box.checked = t.flags[key];
+    box.addEventListener("change", () => tbl((x) => setTableFlags(x, { [key]: box.checked })));
+  }
+}
+
+const kidOf = (el: Element | undefined, local: string) => Array.from(el?.children ?? []).find((c) => c.localName === local) ?? null;
+
+export interface SlideControl {
+  layouts: { name: string; path: string }[];
+  layout: string;
+  setLayout(path: string): void;
+  /** The slide's own background, null when it comes from the layout. */
+  background: Fill | null;
+  setBackground(fill: Fill | null): void;
+  applyBackgroundToAll(): void;
+  size: { cx: number; cy: number };
+  setSize(cx: number, cy: number): void;
+}
+
+const SIZES: [string, number, number][] = [
+  ["Widescreen 16:9", 12192000, 6858000],
+  ["Standard 4:3", 9144000, 6858000],
+  ["16:10", 10972800, 6858000],
+  ["A4", 10691813, 7559675],
+];
+
+/** Panel shown when nothing is selected: layout, background and slide size. */
+export function buildSlidePanel(host: HTMLElement, ctl: SlideControl): void {
+  host.replaceChildren();
+  host.createDiv({ cls: "pptx-props-heading", text: "Slide" });
+  const s = sectionIn(host, "Layout");
+  select(s, "Layout", ctl.layouts.map((l) => [l.name || "Untitled layout", l.path]), ctl.layout, (p) => ctl.setLayout(p));
+
+  const bg = sectionIn(host, "Background");
+  fillControls(bg, ctl.background, (f) => ctl.setBackground(f), [["From layout", "layout"]], "Background", "#FFFFFF");
+  bg.createEl("button", { text: "Apply to all slides" }).addEventListener("click", () => ctl.applyBackgroundToAll());
+
+  const size = sectionIn(host, "Slide size");
+  const current = `${ctl.size.cx}x${ctl.size.cy}`;
+  const options: [string, string][] = SIZES.map(([name, cx, cy]) => [name, `${cx}x${cy}`]);
+  if (!options.some(([, v]) => v === current)) {
+    options.push([`Custom (${round2(ctl.size.cx / EMU_PER_INCH)} × ${round2(ctl.size.cy / EMU_PER_INCH)} in)`, current]);
+  }
+  select(size, "Slide size", options, current, (v) => {
+    const [cx, cy] = v.split("x").map(Number);
+    ctl.setSize(cx, cy);
+  });
+}
+
 export function buildShapePanel(host: HTMLElement, shape: ShapeModel, ctl: PanelControl): void {
   host.replaceChildren();
   const edit = (fn: (el: Element, spPr: Element) => void) => ctl.edit((el) => fn(el, spPrOf(el)));
 
-  const section = (title: string) => {
-    host.createDiv({ cls: "pptx-props-title", text: title });
-    return host.createDiv({ cls: "pptx-props-section" });
-  };
-  const row = (parent: HTMLElement, label: string) => {
-    const r = parent.createEl("label", { cls: "pptx-props-row" });
-    r.createSpan({ text: label });
-    return r;
-  };
-  const select = (parent: HTMLElement, label: string, options: [string, string][], value: string, onChange: (v: string) => void) => {
-    const s = row(parent, label).createEl("select", { cls: "dropdown", attr: { "data-field": label } });
-    for (const [text, v] of options) s.createEl("option", { text, value: v });
-    s.value = value;
-    s.addEventListener("change", () => onChange(s.value));
-    return s;
-  };
-  const input = (parent: HTMLElement, label: string, type: string, value: string, onChange: (v: string) => void, attrs: Record<string, string> = {}) => {
-    const i = row(parent, label).createEl("input", { type, value, attr: { "data-field": label, ...attrs } });
-    i.addEventListener("change", () => onChange(i.value));
-    return i;
-  };
-  const number = (parent: HTMLElement, label: string, value: number, onChange: (v: number) => void, step = "0.01") =>
-    input(parent, label, "number", round2(value), (v) => Number.isFinite(Number(v)) && v !== "" && onChange(Number(v)), { step });
+  const section = (title: string) => sectionIn(host, title);
 
   // --- Fill ------------------------------------------------------------------
   const hasFill = shape.kind === "sp" && shape.el.localName === "sp";
   if (hasFill) {
     const fill = shape.fill;
     const s = section("Fill");
-    const type = !fill ? "none" : fill.type === "solid" ? "solid" : fill.radial ? "radial" : "linear";
-    const first = !fill ? DEFAULT_COLOR : fill.type === "solid" ? fill.color : fill.stops[0].color;
-    const setFill = (f: Fill | null) => edit((_, spPr) => writeFill(spPr, f));
-    select(s, "Type", [["No fill", "none"], ["Solid", "solid"], ["Gradient", "linear"], ["Radial gradient", "radial"]], type, (v) => {
-      if (v === "none") return setFill(null);
-      if (v === "solid") return setFill({ type: "solid", color: first });
-      const stops = fill?.type === "gradient" ? fill.stops : [{ pos: 0, color: first }, { pos: 1, color: "#FFFFFF" }];
-      setFill({ type: "gradient", radial: v === "radial", angle: fill?.type === "gradient" ? fill.angle : 90, stops });
-    });
-    if (fill?.type === "solid") {
-      input(s, "Color", "color", base(fill.color), (v) => setFill({ type: "solid", color: withAlpha(v, alphaOf(fill.color)) }));
-      number(s, "Transparency %", (1 - alphaOf(fill.color)) * 100, (t) => setFill({ type: "solid", color: withAlpha(fill.color, 1 - Math.min(100, Math.max(0, t)) / 100) }), "1");
-    } else if (fill?.type === "gradient") {
-      const stop = (i: number, c: string) => fill.stops.map((st, k) => (k === i ? { ...st, color: c } : st));
-      const last = fill.stops.length - 1;
-      input(s, "Start color", "color", base(fill.stops[0].color), (v) => setFill({ ...fill, stops: stop(0, withAlpha(v, alphaOf(fill.stops[0].color))) }));
-      input(s, "End color", "color", base(fill.stops[last].color), (v) => setFill({ ...fill, stops: stop(last, withAlpha(v, alphaOf(fill.stops[last].color))) }));
-      if (!fill.radial) number(s, "Angle", fill.angle, (a) => setFill({ ...fill, angle: ((a % 360) + 360) % 360 }), "1");
-    }
+    fillControls(s, fill, (f) => edit((_, spPr) => writeFill(spPr, f)), [["No fill", "none"]]);
   }
+
+  // --- Crop ------------------------------------------------------------------
+  if (shape.kind === "pic") {
+    const s = section("Crop");
+    const crop = shape.crop ?? { l: 0, t: 0, r: 0, b: 0 };
+    for (const [label, key] of [["Crop left %", "l"], ["Crop top %", "t"], ["Crop right %", "r"], ["Crop bottom %", "b"]] as const) {
+      number(s, label, crop[key] * 100, (v) => edit((el) => setCrop(el, { ...crop, [key]: v / 100 })), "1");
+    }
+    s.createEl("button", { text: "Reset crop" }).addEventListener("click", () => edit((el) => setCrop(el, { l: 0, t: 0, r: 0, b: 0 })));
+  }
+
+  // --- Table -----------------------------------------------------------------
+  if (shape.table) tableControls(section, shape, ctl);
 
   // --- Line ------------------------------------------------------------------
   if (shape.el.localName !== "graphicFrame") {

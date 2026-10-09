@@ -41,6 +41,8 @@
 .dw-btn.italic { font-style: italic; }
 .dw-btn.underline { text-decoration: underline; }
 .dw-btn.strike { text-decoration: line-through; }
+.dw-btn.dw-icon { padding: 0; --icon-size: var(--icon-s); }
+.dw-btn.dw-icon.is-active { color: var(--text-accent); }
 
 /* Color picker: label styled as a button, swatch shown as an underline. */
 .dw-color {
@@ -178,6 +180,25 @@
   vertical-align: top;
 }
 
+/* Cells covered by a vertical merge; the first cell spans them. */
+.docx-editor-host .ProseMirror td.docx-merged {
+  display: none;
+}
+
+.docx-editor-host .ProseMirror table.docx-borders-none td {
+  border-color: transparent;
+  outline: 1px dashed rgba(156, 163, 175, 0.4);
+  outline-offset: -1px;
+}
+
+.docx-editor-host .ProseMirror table.docx-borders-outer {
+  border: 1px solid #9ca3af;
+}
+
+.docx-editor-host .ProseMirror table.docx-borders-outer td {
+  border-color: transparent;
+}
+
 .docx-editor-host .ProseMirror td p:last-child {
   margin-bottom: 0;
 }
@@ -300,11 +321,26 @@
 }
 
 .pptx-thumb {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   gap: 6px;
   cursor: pointer;
-  align-items: flex-start;
+  align-items: start;
 }
+
+/* Section headers sit in the first slide's row and take the full width. */
+.pptx-section {
+  grid-column: 1 / -1;
+  padding: 2px 4px;
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: default;
+}
+
+.pptx-thumb.drop-before { box-shadow: 0 -3px 0 var(--interactive-accent); }
+.pptx-thumb.drop-after { box-shadow: 0 3px 0 var(--interactive-accent); }
 
 .pptx-thumb-num {
   font-size: 11px;
@@ -390,6 +426,10 @@
   pointer-events: none;
 }
 
+.pptx-shape.is-cropped {
+  overflow: hidden;
+}
+
 .pptx-kind-pic img {
   width: 100%;
   height: 100%;
@@ -406,13 +446,29 @@
 .pptx-kind-table table {
   width: 100%;
   height: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 
 .pptx-kind-table td {
-  border: 1px solid #9ca3af;
-  padding: 2px 4px;
-  color: #000000;
+  position: relative;
+  padding: 0;
+}
+
+/* Cell text flows inside the cell (rows grow with it) instead of filling an absolute box. */
+.pptx-text.pptx-cell-text {
+  position: static;
+  min-height: 100%;
+  cursor: text;
+}
+
+.pptx-kind-table td.is-cell-selected {
+  box-shadow: inset 0 0 0 9999px rgba(var(--interactive-accent-rgb), 0.25);
+}
+
+.pptx-props-hint {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
 }
 
 .pptx-kind-frame {
@@ -831,4 +887,258 @@ textarea.pptx-notes {
 .pptx-text.pptx-measure {
   visibility: hidden;
   pointer-events: none;
+}
+
+/* Find and replace bar */
+.pptx-find {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2-2);
+  padding: var(--size-2-2) var(--size-4-3);
+  border-bottom: var(--border-width) solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.pptx-find input[type="search"],
+.pptx-find input[type="text"] {
+  width: 180px;
+}
+
+.pptx-find-case {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-ui-smaller);
+}
+
+.pptx-find-count {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  min-width: 60px;
+}
+
+::highlight(dw-find) {
+  background-color: rgba(255, 200, 0, 0.6);
+}
+
+/* Word page view: white pages on the workspace background, gaps with footer / header between them. */
+.docx-theme-light .docx-editor-host.is-paged,
+.docx-theme-dark .docx-editor-host.is-paged {
+  background: var(--background-secondary);
+  /* A page wider than the pane scrolls instead of losing its left side. */
+  justify-content: safe center;
+}
+
+.docx-editor-host.is-paged .ProseMirror {
+  width: var(--docx-page-width);
+  max-width: none;
+  min-height: 0;
+  flex-shrink: 0;
+  align-self: flex-start;
+  padding: var(--docx-m-top) var(--docx-m-right) var(--docx-m-bottom) var(--docx-m-left);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.docx-theme-light .docx-editor-host.is-paged .ProseMirror {
+  background: #ffffff;
+}
+
+.docx-page-gap,
+.docx-page-first,
+.docx-page-last {
+  display: none;
+  user-select: none;
+}
+
+.is-paged .docx-page-gap {
+  display: flex;
+  flex-direction: column;
+  margin: 0 calc(-1 * var(--docx-m-right)) 0 calc(-1 * var(--docx-m-left));
+}
+
+.is-paged .docx-page-first,
+.is-paged .docx-page-last {
+  display: block;
+  box-sizing: border-box;
+  margin-left: calc(-1 * var(--docx-m-left));
+  margin-right: calc(-1 * var(--docx-m-right));
+}
+
+.is-paged .docx-page-first {
+  margin-top: calc(-1 * var(--docx-m-top));
+  height: var(--docx-m-top);
+  padding: var(--docx-hf-header) var(--docx-m-right) 0 var(--docx-m-left);
+}
+
+.is-paged .docx-page-last {
+  margin-bottom: calc(-1 * var(--docx-m-bottom));
+  height: var(--docx-m-bottom);
+  padding: 0 var(--docx-m-right) var(--docx-hf-footer) var(--docx-m-left);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.docx-page-foot,
+.docx-page-head {
+  box-sizing: border-box;
+  padding: 0 var(--docx-m-right) 0 var(--docx-m-left);
+  display: flex;
+  flex-direction: column;
+}
+
+.docx-page-foot {
+  height: var(--docx-m-bottom);
+  justify-content: flex-end;
+  padding-bottom: var(--docx-hf-footer);
+}
+
+.docx-page-head {
+  height: var(--docx-m-top);
+  padding-top: var(--docx-hf-header);
+}
+
+.docx-page-space {
+  height: 24px;
+  margin: 0 -1px;
+  background: var(--background-secondary);
+  box-shadow: inset 0 4px 4px -4px rgba(0, 0, 0, 0.25), inset 0 -4px 4px -4px rgba(0, 0, 0, 0.25);
+}
+
+.docx-hf {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.docx-hf p {
+  margin: 0;
+}
+
+.docx-find-hit {
+  background-color: rgba(255, 200, 0, 0.4);
+}
+
+.docx-find-hit.is-current {
+  background-color: rgba(255, 150, 0, 0.8);
+}
+
+.docx-words {
+  margin-right: var(--size-4-2);
+}
+
+.docx-hf-editor .ProseMirror {
+  min-height: 3em;
+  padding: var(--size-4-2);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  outline: none;
+  white-space: pre-wrap;
+}
+
+.docx-hf-editor .ProseMirror p {
+  margin: 0;
+}
+
+.docx-hf-tools {
+  display: flex;
+  gap: var(--size-2-1);
+  margin-bottom: var(--size-2-2);
+}
+
+/* Word: editor next to the review panel */
+.docx-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.docx-body .docx-editor-host {
+  min-width: 0;
+}
+
+.docx-review {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: var(--size-4-2) var(--size-4-3);
+  border-left: var(--border-width) solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.docx-review-title {
+  font-weight: var(--font-semibold);
+  margin: var(--size-4-3) 0 var(--size-2-2);
+}
+
+.docx-review-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.docx-review-card {
+  padding: var(--size-2-3);
+  margin-bottom: var(--size-2-3);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  border: var(--border-width) solid var(--background-modifier-border);
+}
+
+.docx-review-card textarea {
+  width: 100%;
+  resize: vertical;
+  font-size: var(--font-ui-small);
+}
+
+.docx-review-meta {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: var(--size-2-1);
+  overflow-wrap: anywhere;
+}
+
+.docx-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-1);
+  margin-top: var(--size-2-1);
+}
+
+.docx-change-insert .docx-review-text { color: #15803d; }
+.docx-change-delete .docx-review-text { color: #b91c1c; text-decoration: line-through; }
+
+.docx-editor-host .ProseMirror .docx-ins {
+  color: #15803d;
+  text-decoration: underline;
+}
+
+.docx-editor-host .ProseMirror .docx-del {
+  color: #b91c1c;
+  text-decoration: line-through;
+}
+
+.docx-editor-host .ProseMirror .docx-comment-range {
+  background-color: rgba(250, 204, 21, 0.35);
+  border-bottom: 2px solid rgba(234, 179, 8, 0.9);
+}
+
+/* Footnote references: the number replaces the stored "*". */
+.docx-editor-host .ProseMirror .docx-opaque[data-note] {
+  font-size: 0;
+}
+
+.docx-editor-host .ProseMirror .docx-opaque[data-note]::after {
+  content: attr(data-note);
+  font-size: 0.7rem;
+  vertical-align: super;
+  color: var(--interactive-accent);
+}
+
+.docx-editor-host .ProseMirror .docx-toc {
+  white-space: pre-wrap;
+  padding: var(--size-2-3) var(--size-4-2);
+  margin: 0.8em 0;
+  border: 1px dashed #9ca3af;
+  border-radius: var(--radius-s);
 }

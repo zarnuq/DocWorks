@@ -142,6 +142,15 @@ export function readLine(spPr: Element | null, styleEl: Element | null, ctx: Col
   const layers: [Element, ColorContext][] = [];
   if (ln) layers.push([ln, ctx]);
   if (ref) layers.push([ref.entry, ref.ctx]);
+  return lineOf(layers, ln);
+}
+
+/** A line from one a:ln-like element (a:lnL, a table style border...); null for none. */
+export function lineFrom(ln: Element, ctx: ColorContext): Line | null {
+  return lineOf([[ln, ctx]], ln);
+}
+
+function lineOf(layers: [Element, ColorContext][], ln: Element | null): Line | null {
   if (!layers.length) return null;
 
   let color: string | null | undefined;
@@ -234,11 +243,12 @@ function fillEl(doc: Document, fill: Fill | null): Element {
 }
 
 /** Set the shape's fill (null = no fill), replacing whatever fill it had. */
-export function writeFill(spPr: Element, fill: Fill | null): void {
+/** Replace the fill of `spPr` (or another fill holder, with its child `order`); undefined removes it. */
+export function writeFill(spPr: Element, fill: Fill | null | undefined, order = SPPR_ORDER): void {
   kids(spPr)
     .filter((c) => FILL_TAGS.has(c.localName))
     .forEach((c) => c.remove());
-  place(spPr, fillEl(spPr.ownerDocument, fill), SPPR_ORDER);
+  if (fill !== undefined) place(spPr, fillEl(spPr.ownerDocument, fill), order);
 }
 
 /** Change some outline properties (null = no outline), keeping everything else on a:ln. */

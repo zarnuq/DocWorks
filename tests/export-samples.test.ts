@@ -17,11 +17,15 @@ import { parseSlide } from "../src/domain/pptx/slide-model";
 import { addShape, addTextBox, connect, CONNECTORS, rerouteConnectors, reorder, setAdjust, setTransform, shapeId, writeBodyPr, writeParagraphs } from "../src/domain/pptx/slide-edit";
 import { writeFill, writeLine, writeShadow } from "../src/domain/pptx/shape-style";
 import { alignRects, copyItems, distributeRects, groupItems, itemRect, pasteItems, setItemRect, ungroupItem } from "../src/domain/pptx/arrange";
+import { addTable, insertCol, insertRow, mergeCells, setCellBorders, setCellFill, setTableFlags, TABLE_STYLES } from "../src/domain/pptx/table";
+import { replaceAll } from "../src/domain/pptx/find";
+import { setCrop } from "../src/domain/pptx/slide-edit";
 import { readDocx } from "../src/domain/docx/docx-reader";
 import { writeBody } from "../src/domain/docx/docx-writer";
 import { docxSchema as schema } from "../src/domain/docx/schema";
 import { DocxStyles } from "../src/domain/docx/docx-styles";
-import { cmd, EditorContext } from "../src/presentation/docx/docx-editor";
+import { cmd, EditorContext, pageNumberNode } from "../src/presentation/docx/docx-editor";
+import { acceptRevisions } from "../src/domain/docx/revisions";
 const fixture = (file: string) => join(__dirname, "fixtures", file);
 
 const out = process.env.DOC_WORKS_EXPORT;
@@ -98,12 +102,33 @@ async function editDeck(doc: PptxDocument): Promise<void> {
   const clip = await copyItems(doc, path, [group, box, ...Array.from(xml.getElementsByTagNameNS(P, "pic"))]);
   pasteItems(doc, doc.slides()[0].path, clip, { dx: 0, dy: 0 });
 
+  // Tables, crop, find and replace; slides: layout, background, size, sections.
+  for (const [k, style] of [TABLE_STYLES[1], TABLE_STYLES[4], TABLE_STYLES[7]].entries()) {
+    doc.ensureTableStyle(style.id);
+    const frame = addTable(xml, 3, 3, { x: cx * (0.05 + k * 0.32), y: cy * 0.4, w: cx * 0.28, h: cy * 0.15 }, style.id);
+    const tbl = frame.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "tbl")[0];
+    insertRow(tbl, 2, true);
+    insertCol(tbl, 0, false);
+    mergeCells(tbl, [1, 1, 2, 2]);
+    setCellFill(tbl, [[0, 0]], { type: "solid", color: "#FFFF00" });
+    setCellBorders(tbl, [0, 0, 3, 3], "outer", { color: "#FF0000", width: 25400 });
+    setTableFlags(tbl, { firstCol: true, bandRow: k !== 1 });
+  }
+  for (const pic of Array.from(xml.getElementsByTagNameNS(P, "pic"))) setCrop(pic, { l: 0.1, t: 0.2, r: 0, b: 0.1 });
+  replaceAll(doc, "Doc Works", "DocWorks", { matchCase: true });
+  const layouts = doc.layouts();
+  if (layouts.length > 1) doc.setLayout(0, layouts[1].path);
+  doc.setBackground(index, { type: "gradient", radial: false, angle: 90, stops: [{ pos: 0, color: "#FFFFFF" }, { pos: 1, color: "#DDEEFF" }] });
+  doc.addSection(0, "Intro");
+  doc.addSection(Math.min(2, doc.slides().length - 1), "Body");
+
   doc.setNotes(index, "Notes written by the export test\nSecond line");
   doc.setNotes(0, "Changed notes on the first slide");
   doc.setHidden(Math.min(1, doc.slides().length - 1), true);
   doc.addImage(path, PNG, "png");
   doc.duplicateSlide(0);
   doc.moveSlide(0, 1);
+  doc.setSlideSize(12192000, 6858000);
 }
 
 /** A run of Word edits through the editor's commands. */
@@ -146,7 +171,34 @@ function editDocx(docx: DocxDocument): void {
   const rId = docx.addImage(PNG, "png");
   st = st.apply(st.tr.replaceSelectionWith(schema.nodes.image.create({ rId, src: "", width: 40, height: 40, alt: "dot" })));
   run(cmd.insertRule);
+  // Word features: links, spacing, merges, borders, widths, comments, footnotes, contents, header / footer.
+  at(3, 6);
+  run(cmd.setLink("https://example.com/"));
+  run(cmd.setParagraph({ spaceBefore: 6, spaceAfter: 12, firstLine: -18 }));
+  run(cmd.addCommentAnchors(docx.addComment("Exported comment", "Doc Works")));
+  at(4);
+  run(cmd.insertFootnote(docx.addFootnote("Exported footnote.")));
+  docx.prepareToc();
+  run(cmd.insertToc);
+  let cellPos = -1;
+  st.doc.descendants((n, pos) => {
+    if (cellPos < 0 && n.type === schema.nodes.table_cell) cellPos = pos + 2;
+    return cellPos < 0;
+  });
+  at(cellPos);
+  run(cmd.mergeRight);
+  at(cellPos);
+  run(cmd.mergeDown);
+  run(cmd.setTableBorders("outer"));
+  run(cmd.setColumnWidth(2880));
+  run(cmd.toggleHeaderRow);
   writeBody(docx.body, st.doc, origins, docx);
+  const footer = docx.ensureHeaderFooter("footer");
+  const read = readDocx(footer, { imageSrc: () => null, hyperlinkHref: () => null });
+  writeBody(footer, schema.nodes.doc.create(null, schema.nodes.paragraph.create({ align: "center" }, [schema.text("Page "), pageNumberNode()])), read.origins, docx);
+  const header = docx.ensureHeaderFooter("header");
+  writeBody(header, schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, schema.text("Exported header"))), readDocx(header, { imageSrc: () => null, hyperlinkHref: () => null }).origins, docx);
+  acceptRevisions(docx.body);
 }
 
 const decks = (dir?: string) => (dir ? readdirSync(dir).filter((f) => f.endsWith(".pptx")).map((f) => join(dir, f)) : []);

@@ -1,11 +1,13 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
-import { NS, childNS, escapeXml } from "../../core/utils/xml";
-import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, XmlAttrs } from "./schema";
-import { EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, wVal } from "./docx-reader";
+import { NS, escapeXml } from "../../core/utils/xml";
+import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, TableAttrs, TableBorders, XmlAttrs } from "./schema";
+import { bordersOf, EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
 
 export interface WriteContext {
   /** Unique id for a new wp:docPr. */
   nextDocPrId(): number;
+  /** Relationship id of an external link to `href`, added if needed. */
+  hyperlinkRel?(href: string): string;
   /** Define paragraph styles that edited paragraphs now use (headings missing from the document...). */
   ensureParagraphStyles?(ids: Iterable<string>): void;
 }
@@ -19,12 +21,13 @@ const ORDER: Record<string, string[]> = {
   rPr: ["rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike", "dstrike", "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid", "vanish", "webHidden", "color", "spacing", "w", "kern", "position", "sz", "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText", "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath"],
   numPr: ["ilvl", "numId"],
   tcPr: ["cnfStyle", "tcW", "gridSpan", "hMerge", "vMerge", "tcBorders", "shd", "noWrap", "tcMar", "textDirection", "tcFitText", "vAlign", "hideMark"],
+  trPr: ["cnfStyle", "divId", "gridBefore", "gridAfter", "wBefore", "wAfter", "cantSplit", "trHeight", "tblHeader", "tblCellSpacing", "jc", "hidden", "ins", "del", "trPrChange"],
+  tblPr: ["tblStyle", "tblpPr", "tblOverlap", "bidiVisual", "tblStyleRowBandSize", "tblStyleColBandSize", "tblW", "jc", "tblCellSpacing", "tblInd", "tblBorders", "shd", "tblLayout", "tblCellMar", "tblLook", "tblCaption", "tblDescription", "tblPrChange"],
 };
 
 const HIGHLIGHT_NAMES = Object.fromEntries(Object.entries(HIGHLIGHTS).map(([name, hex]) => [hex, name]));
 const MODELED_MARKS = ["bold", "italic", "underline", "strike", "subscript", "superscript", "font", "size", "color", "highlight"] as const;
 
-const w = (el: Element | null | undefined, local: string) => (el ? childNS(el, NS.w, local) : null);
 const parse = (xml: string) => new DOMParser().parseFromString(xml, "application/xml").documentElement;
 
 class Writer {
@@ -162,6 +165,25 @@ class Writer {
       if (!ind.attributes.length) ind.remove();
     }
 
+    const twips = (v: number) => String(Math.round(v * 20));
+    for (const side of ["spaceBefore", "spaceAfter"] as const) {
+      if (a[side] === was[side]) continue;
+      const attr = side === "spaceBefore" ? "before" : "after";
+      const spacing = this.upsert(pPr, "spacing");
+      // An explicit value replaces Word's automatic spacing.
+      spacing.removeAttributeNS(NS.w, `${attr}Autospacing`);
+      if (a[side] !== null) this.set(spacing, attr, twips(a[side]));
+      else spacing.removeAttributeNS(NS.w, attr);
+      if (!spacing.attributes.length) spacing.remove();
+    }
+    if (a.firstLine !== was.firstLine) {
+      const ind = this.upsert(pPr, "ind");
+      ind.removeAttributeNS(NS.w, "firstLine");
+      ind.removeAttributeNS(NS.w, "hanging");
+      if (a.firstLine) this.set(ind, a.firstLine > 0 ? "firstLine" : "hanging", twips(Math.abs(a.firstLine)));
+      if (!ind.attributes.length) ind.remove();
+    }
+
     if (pPr.attributes.length || pPr.children.length) p.appendChild(pPr);
     this.inline(node, p);
     return p;
@@ -182,6 +204,10 @@ class Writer {
         )
     );
 
+    const ta = attrsOf<TableAttrs>(node);
+    const tblPrEl = tbl.lastElementChild!;
+    if (ta.borders && ta.borders !== bordersOf(w(c.o?.el, "tblPr"))) this.setBorders(tblPrEl, ta.borders);
+
     // ponytail: non-row children of an edited table (bookmarks between rows) are dropped.
     let cols = 0;
     node.forEach((row) => {
@@ -190,8 +216,10 @@ class Writer {
       cols = Math.max(cols, n);
     });
     const grid = (w(c.o?.el, "tblGrid")?.cloneNode(true) as Element | undefined) ?? this.el("tblGrid");
-    const widths = Array.from(grid.children).map((g) => Number(wVal(g, "w")) || 0);
-    if (widths.length !== cols) {
+    const original = Array.from(grid.children).map((g) => Number(wVal(g, "w")) || 0);
+    const widthsChanged = !!ta.widths && ta.widths.length === cols && ta.widths.some((x, i) => x !== original[i]);
+    const widths = widthsChanged ? ta.widths! : original;
+    if (widths.length !== cols || widthsChanged) {
       const avg = widths.length ? Math.round(widths.reduce((s, x) => s + x, 0) / widths.length) : Math.round(9000 / cols);
       grid.replaceChildren(
         ...Array.from({ length: cols }, (_, i) => {
@@ -203,29 +231,51 @@ class Writer {
     }
     tbl.appendChild(grid);
     const colWidths = Array.from(grid.children).map((g) => Number(wVal(g, "w")) || 0);
-    node.forEach((row) => tbl.appendChild(this.row(row, colWidths)));
+    node.forEach((row) => tbl.appendChild(this.row(row, colWidths, widthsChanged)));
     return tbl;
   }
 
-  private row(node: PMNode, colWidths: number[]): Element {
+  private setBorders(tblPr: Element, kind: TableBorders): void {
+    this.drop(tblPr, "tblBorders");
+    const borders = this.upsert(tblPr, "tblBorders");
+    for (const side of ["top", "left", "bottom", "right", "insideH", "insideV"]) {
+      const b = borders.appendChild(this.el(side));
+      const on = kind === "all" || (kind === "outer" && !side.startsWith("inside"));
+      this.set(b, "val", on ? "single" : "nil");
+      if (on) {
+        this.set(b, "sz", "4");
+        this.set(b, "space", "0");
+        this.set(b, "color", "auto");
+      }
+    }
+  }
+
+  private row(node: PMNode, colWidths: number[], widthsChanged: boolean): Element {
     const c = this.claim(node);
-    if (c.verbatim) return c.o!.el.cloneNode(true) as Element;
+    if (c.verbatim && !widthsChanged) return c.o!.el.cloneNode(true) as Element;
     const tr = this.shell("tr", c);
-    const trPr = w(c.o?.el, "trPr");
-    if (trPr) tr.appendChild(trPr.cloneNode(true));
+    const base = w(c.o?.el, "trPr");
+    const trPr = (base?.cloneNode(true) as Element | undefined) ?? this.el("trPr");
+    const header = !!node.attrs.header;
+    const wasHeader = !!w(base, "tblHeader") && !["0", "false", "off"].includes(wVal(w(base, "tblHeader")) ?? "");
+    if (header !== wasHeader) {
+      this.drop(trPr, "tblHeader");
+      if (header) this.upsert(trPr, "tblHeader");
+    }
+    if (trPr.children.length || trPr.attributes.length) tr.appendChild(trPr);
     let col = 0;
     node.forEach((cell) => {
       const span = attrsOf<CellAttrs>(cell).colspan;
       const width = colWidths.slice(col, col + span).reduce((s, x) => s + x, 0);
       col += span;
-      tr.appendChild(this.cell(cell, width));
+      tr.appendChild(this.cell(cell, width, widthsChanged));
     });
     return tr;
   }
 
-  private cell(node: PMNode, width: number): Element {
+  private cell(node: PMNode, width: number, widthsChanged = false): Element {
     const c = this.claim(node);
-    if (c.verbatim) return c.o!.el.cloneNode(true) as Element;
+    if (c.verbatim && !widthsChanged) return c.o!.el.cloneNode(true) as Element;
     const tc = this.shell("tc", c);
     const base = w(c.o?.el, "tcPr");
     const tcPr = (base?.cloneNode(true) as Element | undefined) ?? this.el("tcPr");
@@ -233,8 +283,8 @@ class Writer {
     const wasFill = wVal(w(base, "shd"), "fill");
     const wasBg = wasFill && /^[0-9a-f]{6}$/i.test(wasFill) ? `#${wasFill.toUpperCase()}` : null;
 
-    // New cells get an explicit width, as Word writes them.
-    if (!base && width) {
+    // New cells get an explicit width, as Word writes them; resized columns update theirs.
+    if ((!base || (widthsChanged && w(tcPr, "tcW"))) && width) {
       const tcW = this.upsert(tcPr, "tcW");
       this.set(tcW, "w", String(width));
       this.set(tcW, "type", "dxa");
@@ -242,6 +292,14 @@ class Writer {
     if (node.attrs.colspan !== wasSpan) {
       if (node.attrs.colspan > 1) this.set(this.upsert(tcPr, "gridSpan"), "val", String(node.attrs.colspan));
       else this.drop(tcPr, "gridSpan");
+    }
+    const vMerge = attrsOf<CellAttrs>(node).vMerge;
+    if (vMerge !== vMergeOf(base)) {
+      this.drop(tcPr, "vMerge");
+      if (vMerge) {
+        const v = this.upsert(tcPr, "vMerge");
+        if (vMerge === "restart") this.set(v, "val", "restart");
+      }
     }
     if (node.attrs.background !== wasBg) {
       this.drop(tcPr, "shd");
@@ -264,19 +322,32 @@ class Writer {
   // --- Inline content -------------------------------------------------------
 
   private inline(node: PMNode, p: Element): void {
-    let group: { link: Mark; el: Element } | null = null;
+    // Runs are grouped into w:ins wrappers (tracked insertions), and links inside them.
+    let ins: { mark: Mark; el: Element } | null = null;
+    let group: { link: Mark; el: Element; parent: Element } | null = null;
     node.forEach((child) => {
-      const link = child.marks.find((m) => m.type === schema.marks.link) ?? null;
+      const insMark = child.marks.find((m) => m.type === schema.marks.insertion) ?? null;
       let target = p;
+      if (insMark) {
+        if (!ins || !ins.mark.eq(insMark)) {
+          ins = { mark: insMark, el: p.appendChild(this.import(attrsOf<{ xml: string }>(insMark).xml)) };
+          group = null;
+        }
+        target = ins.el;
+      } else {
+        ins = null;
+      }
+      const link = child.marks.find((m) => m.type === schema.marks.link) ?? null;
       if (link) {
-        if (!group || !group.link.eq(link)) {
+        if (!group || !group.link.eq(link) || group.parent !== target) {
           const h = this.el("hyperlink");
-          const { rId, anchor } = attrsOf<LinkAttrs>(link);
-          if (rId) h.setAttributeNS(NS.r, "r:id", rId);
+          const { rId, anchor, href } = attrsOf<LinkAttrs>(link);
+          const id = rId ?? (href && !anchor ? this.ctx.hyperlinkRel?.(href) : null);
+          if (id) h.setAttributeNS(NS.r, "r:id", id);
           if (anchor) this.set(h, "anchor", anchor);
           this.set(h, "history", "1");
-          p.appendChild(h);
-          group = { link, el: h };
+          target.appendChild(h);
+          group = { link, el: h, parent: target };
         }
         target = group.el;
       } else {

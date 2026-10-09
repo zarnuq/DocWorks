@@ -1,5 +1,6 @@
 import { NS, childNS, escapeXml } from "../../core/utils/xml";
 import { Para, Rect, Run, Spacing, TextBody, TextStyle, resolveLevel, runProps } from "./slide-model";
+import { fitTable } from "./table";
 
 /**
  * What the editor hands back per paragraph; extra fields from Para are ignored.
@@ -103,8 +104,11 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
     const p = el(doc, "p");
 
     const pPr = (kids(template, "pPr")[0]?.cloneNode(true) as Element | undefined) ?? el(doc, "pPr");
-    if (para.lvl) pPr.setAttribute("lvl", String(para.lvl));
-    else pPr.removeAttribute("lvl");
+    // An explicit lvl="0" stays when the level didn't change.
+    if (para.lvl !== Number(pPr.getAttribute("lvl") ?? 0)) {
+      if (para.lvl) pPr.setAttribute("lvl", String(para.lvl));
+      else pPr.removeAttribute("lvl");
+    }
     const level = resolveLevel(style, para.lvl, pPr);
     if (para.align !== level.align) pPr.setAttribute("algn", para.align);
     if (para.bullet !== level.bullet) {
@@ -225,6 +229,9 @@ export function setRect(shape: Element, rect: Rect): void {
   let xfrm: Element;
   if (shape.localName === "graphicFrame") {
     xfrm = ensureChild(shape, NS.p, "p:xfrm", "nvGraphicFramePr");
+    // A table's grid stretches with its frame.
+    const tbl = shape.getElementsByTagNameNS(NS.a, "tbl")[0];
+    if (tbl) fitTable(tbl, rect.w, rect.h);
   } else {
     const spPr = ensureChild(shape, NS.p, "p:spPr", "nv");
     xfrm = ensureChild(spPr, NS.a, "a:xfrm", null);
@@ -244,7 +251,7 @@ export function nextShapeId(doc: Document): number {
 const xfrmXml = (r: Rect) =>
   `<a:xfrm><a:off x="${Math.round(r.x)}" y="${Math.round(r.y)}"/><a:ext cx="${Math.round(r.w)}" cy="${Math.round(r.h)}"/></a:xfrm>`;
 
-function appendShape(doc: Document, xml: string): Element {
+export function appendShape(doc: Document, xml: string): Element {
   const frag = new DOMParser().parseFromString(
     `<root xmlns:a="${NS.a}" xmlns:p="${NS.p}" xmlns:r="${NS.r}">${xml}</root>`,
     "application/xml"
@@ -480,4 +487,48 @@ export function rerouteConnectors(slide: Document, shapes: Placed[]): boolean {
     changed = true;
   }
   return changed;
+}
+
+/** Picture crop as fractions cut from each side (a:srcRect). */
+export interface Crop {
+  l: number;
+  t: number;
+  r: number;
+  b: number;
+}
+
+const SIDES = ["l", "t", "r", "b"] as const;
+
+export function readCrop(pic: Element): Crop | null {
+  const src = pic.getElementsByTagNameNS(NS.a, "srcRect")[0];
+  if (!src) return null;
+  const crop = Object.fromEntries(SIDES.map((k) => [k, (Number(src.getAttribute(k)) || 0) / 100000])) as unknown as Crop;
+  return SIDES.some((k) => crop[k]) ? crop : null;
+}
+
+/** Crop a picture like PowerPoint: the image keeps its scale and the frame shrinks or grows around it. */
+// ponytail: ignores rotation; a rotated picture's frame moves along unrotated axes.
+export function setCrop(pic: Element, next: Crop): void {
+  const blipFill = childNS(pic, NS.p, "blipFill");
+  const xfrm = childNS(childNS(pic, NS.p, "spPr") ?? pic, NS.a, "xfrm");
+  if (!blipFill || !xfrm) return;
+  const old = readCrop(pic) ?? { l: 0, t: 0, r: 0, b: 0 };
+  const clamp = (v: number) => Math.min(0.95, Math.max(0, v || 0));
+  const c = { l: clamp(next.l), t: clamp(next.t), r: clamp(next.r), b: clamp(next.b) };
+  if (c.l + c.r > 0.95) c.r = 0.95 - c.l;
+  if (c.t + c.b > 0.95) c.b = 0.95 - c.t;
+  const off = childNS(xfrm, NS.a, "off")!;
+  const ext = childNS(xfrm, NS.a, "ext")!;
+  const r = { x: Number(off.getAttribute("x")), y: Number(off.getAttribute("y")), w: Number(ext.getAttribute("cx")), h: Number(ext.getAttribute("cy")) };
+  // A file can crop away the whole image; treat that as 5% left visible.
+  const fullW = r.w / Math.max(0.05, 1 - old.l - old.r);
+  const fullH = r.h / Math.max(0.05, 1 - old.t - old.b);
+  setRect(pic, { x: r.x + fullW * (c.l - old.l), y: r.y + fullH * (c.t - old.t), w: fullW * (1 - c.l - c.r), h: fullH * (1 - c.t - c.b) });
+
+  blipFill.getElementsByTagNameNS(NS.a, "srcRect")[0]?.remove();
+  if (!SIDES.some((k) => c[k])) return;
+  const src = pic.ownerDocument.createElementNS(NS.a, "a:srcRect");
+  for (const k of SIDES) if (c[k]) src.setAttribute(k, String(Math.round(c[k] * 100000)));
+  const blip = childNS(blipFill, NS.a, "blip");
+  blipFill.insertBefore(src, blip ? blip.nextSibling : blipFill.firstChild);
 }

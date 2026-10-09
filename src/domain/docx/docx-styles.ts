@@ -1,6 +1,7 @@
 import { Node as PMNode } from "prosemirror-model";
-import { NS, childNS } from "../../core/utils/xml";
-import { wVal } from "./docx-reader";
+import { NS } from "../../core/utils/xml";
+import { letterNumber, romanNumber } from "../../core/utils/numbering";
+import { w, wVal } from "./docx-reader";
 import { attrsOf, ParagraphAttrs } from "./schema";
 
 /** Marker drawn before a list paragraph. */
@@ -10,39 +11,20 @@ export interface ListMark {
   hangingPt: number;
 }
 
-const w = (el: Element | null | undefined, local: string) => (el ? childNS(el, NS.w, local) : null);
 const isOn = (el: Element | null) => !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
 /** Symbol / Wingdings private-use bullets and their Unicode look-alikes. */
 const BULLET_GLYPHS: Record<string, string> = { "": "•", "": "▪", "": "➢", "": "✓", "": "❖", o: "◦", "": "•" };
-const ROMAN: [number, string][] = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
-
-function roman(n: number): string {
-  let out = "";
-  for (const [v, s] of ROMAN) {
-    while (n >= v) {
-      out += s;
-      n -= v;
-    }
-  }
-  return out;
-}
-
-function letters(n: number): string {
-  let out = "";
-  for (; n > 0; n = Math.floor((n - 1) / 26)) out = String.fromCharCode(97 + ((n - 1) % 26)) + out;
-  return out;
-}
 
 function formatNumber(n: number, fmt: string | null): string {
   switch (fmt) {
     case "lowerLetter":
-      return letters(n);
+      return letterNumber(n);
     case "upperLetter":
-      return letters(n).toUpperCase();
+      return letterNumber(n).toUpperCase();
     case "lowerRoman":
-      return roman(n);
+      return romanNumber(n);
     case "upperRoman":
-      return roman(n).toUpperCase();
+      return romanNumber(n).toUpperCase();
     case "decimalZero":
       return String(n).padStart(2, "0");
     default:
@@ -54,6 +36,14 @@ function formatNumber(n: number, fmt: string | null): string {
  * Display-only view of styles.xml and numbering.xml: CSS for paragraph styles
  * and list markers. Nothing here is written back.
  */
+/** The w:lvl for `ilvl` of list `numId` in numbering.xml. */
+export function numberingLevel(numbering: Document | null, numId: string, ilvl: number): Element | null {
+  const nums = Array.from(numbering?.getElementsByTagNameNS(NS.w, "num") ?? []);
+  const absId = wVal(w(nums.find((n) => wVal(n, "numId") === numId), "abstractNumId"));
+  const abs = Array.from(numbering?.getElementsByTagNameNS(NS.w, "abstractNum") ?? []).find((a) => wVal(a, "abstractNumId") === absId);
+  return Array.from(abs?.getElementsByTagNameNS(NS.w, "lvl") ?? []).find((l) => wVal(l, "ilvl") === String(ilvl)) ?? null;
+}
+
 export class DocxStyles {
   private styles = new Map<string, Element>();
   private defaultStyle: string | null = null;
@@ -130,10 +120,7 @@ export class DocxStyles {
   }
 
   private level(numId: string, ilvl: number): Element | null {
-    const nums = Array.from(this.numbering?.getElementsByTagNameNS(NS.w, "num") ?? []);
-    const absId = wVal(w(nums.find((n) => wVal(n, "numId") === numId), "abstractNumId"));
-    const abs = Array.from(this.numbering?.getElementsByTagNameNS(NS.w, "abstractNum") ?? []).find((a) => wVal(a, "abstractNumId") === absId);
-    return Array.from(abs?.getElementsByTagNameNS(NS.w, "lvl") ?? []).find((l) => wVal(l, "ilvl") === String(ilvl)) ?? null;
+    return numberingLevel(this.numbering, numId, ilvl);
   }
 
   /** List markers for every list paragraph, keyed by the paragraph's document position. */

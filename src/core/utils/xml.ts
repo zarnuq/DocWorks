@@ -28,10 +28,6 @@ export function escapeXml(str: string): string {
     .replace(/'/g, "&apos;");
 }
 
-export function childrenNS(el: Element, ns: string, local: string): Element[] {
-  return Array.from(el.children).filter((c) => c.localName === local && c.namespaceURI === ns);
-}
-
 export function childNS(el: Element, ns: string, local: string): Element | null {
   for (let i = 0; i < el.children.length; i++) {
     if (el.children[i].localName === local && el.children[i].namespaceURI === ns) {

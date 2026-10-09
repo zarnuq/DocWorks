@@ -1,4 +1,4 @@
-import { App, Modal, Setting } from "obsidian";
+import { App, Modal, setIcon, Setting } from "obsidian";
 
 export const FONTS = ["Aptos", "Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Verdana", "Segoe UI", "Trebuchet MS", "Courier New"];
 
@@ -14,6 +14,13 @@ export class Toolbar {
       e.preventDefault();
       onClick();
     });
+    return b;
+  }
+
+  /** A button showing a Lucide icon instead of a label. */
+  icon(icon: string, title: string, onClick: () => void): HTMLButtonElement {
+    const b = this.button("", title, onClick, "dw-icon");
+    setIcon(b, icon);
     return b;
   }
 

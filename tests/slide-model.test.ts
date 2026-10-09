@@ -102,13 +102,10 @@ describe("parseSlide: free shapes", () => {
     expect(pic.rect).toEqual({ x: 914400, y: 2743200, w: 914400, h: 914400 });
   });
 
-  it("reads tables as text grids", async () => {
+  it("reads tables", async () => {
     const tbl = byName(await slide(2), "Table 5");
     expect(tbl.kind).toBe("table");
-    expect(tbl.table).toEqual([
-      ["A1", "B1"],
-      ["A2", "B2"],
-    ]);
+    expect(tbl.table!.cells.flat().map((c) => c.el.textContent)).toEqual(["A1", "B1", "A2", "B2"]);
     expect(tbl.rect).toEqual({ x: 914400, y: 4572000, w: 3657600, h: 914400 });
   });
 

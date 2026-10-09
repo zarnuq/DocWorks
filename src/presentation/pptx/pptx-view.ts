@@ -1,5 +1,5 @@
 import { FileView, Menu, Modifier, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
-import { PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
+import { dropIndex, PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel } from "../../domain/pptx/slide-model";
 import {
   CONNECTORS,
@@ -22,33 +22,34 @@ import {
 } from "../../domain/pptx/slide-edit";
 import { presetGeometry, solveAdjust } from "../../domain/pptx/geometry";
 import { buildShapeGallery, ShapeChoice } from "./shape-gallery";
-import { ArrangeControl, buildArrangePanel, buildShapePanel, PanelControl } from "./shape-panel";
+import { ArrangeControl, buildArrangePanel, buildShapePanel, buildSlidePanel, PanelControl, SlideControl } from "./shape-panel";
 import { alignRects, Alignment, Clip, copyItems, distributeRects, groupItems, itemRect, pasteItems, setItemRect, snapRect, topLevel, ungroupItem } from "../../domain/pptx/arrange";
 import { promptText } from "../common/toolbar";
 import { History } from "../../core/utils/history";
+import { IMAGE_MIME } from "../../core/utils/images";
+import { pickImage } from "../common/images";
+import { findAll, Match, replaceAll, replaceMatch } from "../../domain/pptx/find";
+import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
 import { FONTS, PaperTheme, Toolbar } from "../common/toolbar";
 import { nextVisible, Slideshow } from "./slideshow";
 import { RenderedShape, renderSlide } from "./slide-renderer";
+import { rangeInParagraph } from "./text-html";
 import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
 
 export const VIEW_TYPE_PPTX = "doc-works-pptx-view";
 
 const THUMB_WIDTH = 168;
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 72, 96];
-const IMAGE_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  bmp: "image/bmp",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-};
 const MIN_SIZE_EMU = 91440;
 const EMU_PER_PT = 12700;
 const EMU_PER_INCH = 914400;
 /** Snap distance for connector ends, in px. */
 const SNAP_PX = 10;
+const PROPS_KEY = "doc-works-format-panel";
+/** CSS custom highlights (typed as a map; the DOM lib in use lacks its maplike methods). */
+const highlights = () => CSS.highlights as unknown as Map<string, Highlight>;
+/** Zoom steps; 1 = fit the slide to the stage. */
+const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
 type Snapshot = { snap: PptxSnapshot; index: number };
 
@@ -122,11 +123,17 @@ export class PptxView extends FileView {
   private notesEl!: HTMLTextAreaElement;
   private notesTimer: number | null = null;
   private propsEl!: HTMLElement;
+  private showProps = window.localStorage.getItem(PROPS_KEY) !== "hidden";
   private galleryEl: HTMLElement | null = null;
   /** Shape picked in the gallery, waiting to be drawn on the slide. */
   private drawing: ShapeChoice | null = null;
   private lockAspect = false;
-  private hideBtn: HTMLButtonElement | null = null;
+  /** Table whose cell has the caret, and the selected cell range (Shift+click extends it). */
+  private tableCell: { frame: Element; range: CellRange } | null = null;
+  /** The next cell focus comes from a Shift+click that extends the range. */
+  private extendingRange = false;
+  /** Slide index being dragged in the thumbnail pane. */
+  private dragFrom: number | null = null;
   private saveIndicatorEl: HTMLElement | null = null;
   private syncTheme: ((t: PaperTheme) => void) | null = null;
 
@@ -144,6 +151,10 @@ export class PptxView extends FileView {
       [["Mod"], "g", () => this.groupSelection()],
       [["Mod", "Shift"], "g", () => this.ungroupSelection()],
     ];
+    this.scope.register(["Mod"], "f", () => {
+      this.openFind();
+      return false;
+    });
     for (const [mods, key, run] of keys) {
       this.scope.register(mods, key, () => {
         if (!this.stageEl || document.activeElement !== this.stageEl) return true;
@@ -194,6 +205,16 @@ export class PptxView extends FileView {
     this.thumbsEl = body.createDiv({ cls: "pptx-thumbs" });
     this.stageEl = body.createDiv({ cls: "pptx-stage" });
     this.stageEl.tabIndex = 0;
+    // Ctrl / Cmd + wheel zooms the slide.
+    this.stageEl.addEventListener(
+      "wheel",
+      (e) => {
+        if (!isMod(e)) return;
+        e.preventDefault();
+        this.setZoom(this.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      },
+      { passive: false }
+    );
     this.slideHostEl = this.stageEl.createDiv({ cls: "pptx-slide-host" });
     this.propsEl = body.createDiv({ cls: "pptx-props" });
     this.propsEl.hide();
@@ -224,8 +245,7 @@ export class PptxView extends FileView {
     window.addEventListener("blur", this.onWindowBlur);
     this.resizeObserver = new ResizeObserver(() => {
       // Re-render only on real width changes, never while the user is typing.
-      const w = this.stageEl.clientWidth;
-      if (Math.abs(w - this.lastStageWidth) > 8 && !this.pendingCommit && !this.activeTextFocused()) this.renderCurrent();
+      if (!this.pendingCommit && !this.activeTextFocused()) this.refit();
     });
     this.resizeObserver.observe(this.stageEl);
 
@@ -238,6 +258,9 @@ export class PptxView extends FileView {
     document.removeEventListener("selectionchange", this.onSelectionChange);
     window.removeEventListener("blur", this.onWindowBlur);
     this.resizeObserver?.disconnect();
+    // onLoadFile empties contentEl; without this the next file's Ctrl+F and shape gallery see stale elements.
+    if (this.findEl) this.closeFind();
+    this.closeGallery();
     this.flushCommit();
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
     if (this.dirty) await this.saveNow();
@@ -284,8 +307,22 @@ export class PptxView extends FileView {
   private renderThumbs(): void {
     if (!this.doc) return;
     this.thumbsEl.empty();
-    this.doc.slides().forEach((slide, i) => {
+    const sections = this.doc.sections();
+    const header = (parent: HTMLElement, k: number) => {
+      const h = parent.createDiv({ cls: "pptx-section", text: sections[k].name || "Untitled section" });
+      h.addEventListener("click", (e) => e.stopPropagation());
+      h.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.sectionMenu(k).showAtMouseEvent(e);
+      });
+      h.addEventListener("dblclick", () => void this.renameSection(k));
+    };
+    const slides = this.doc.slides();
+    slides.forEach((slide, i) => {
       const item = this.thumbsEl.createDiv({ cls: "pptx-thumb" });
+      // Section headers sit inside the first slide's item, so thumbsEl.children[i] stays slide i.
+      sections.forEach((sec, k) => sec.start === i && header(item, k));
       item.toggleClass("is-active", i === this.index);
       item.toggleClass("is-hidden", this.doc!.isHidden(i));
       item.createDiv({ cls: "pptx-thumb-num", text: String(i + 1) });
@@ -297,7 +334,99 @@ export class PptxView extends FileView {
         slideNumber: i + 1,
       });
       item.onclick = () => this.goTo(i);
+      item.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this.goTo(i);
+        this.slideMenu(i).showAtMouseEvent(e);
+      });
+      this.wireThumbDrag(item, i);
     });
+    // Empty sections at the end have no slide to sit on.
+    sections.forEach((sec, k) => sec.start >= slides.length && header(this.thumbsEl, k));
+  }
+
+  /** Drag a thumbnail above or below another to move the slide. */
+  private wireThumbDrag(item: HTMLElement, i: number): void {
+    item.draggable = true;
+    const clear = () => this.thumbsEl.querySelectorAll(".drop-before, .drop-after").forEach((t) => t.removeClass("drop-before", "drop-after"));
+    const below = (e: DragEvent) => {
+      const r = item.getBoundingClientRect();
+      return e.clientY > r.top + r.height / 2;
+    };
+    item.addEventListener("dragstart", (e) => {
+      this.dragFrom = i;
+      e.dataTransfer?.setData("text/plain", String(i + 1));
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    });
+    item.addEventListener("dragend", () => {
+      this.dragFrom = null;
+      clear();
+    });
+    item.addEventListener("dragover", (e) => {
+      if (this.dragFrom === null) return;
+      e.preventDefault();
+      clear();
+      item.addClass(below(e) ? "drop-after" : "drop-before");
+    });
+    item.addEventListener("drop", (e) => {
+      const from = this.dragFrom;
+      if (from === null) return;
+      e.preventDefault();
+      clear();
+      const to = dropIndex(from, i, below(e));
+      if (to !== from) this.mutate((d) => d.moveSlide(from, (this.index = to)));
+    });
+  }
+
+  private slideMenu(i: number): Menu {
+    const menu = new Menu();
+    const item = (title: string, icon: string, run: () => void) => menu.addItem((m) => m.setTitle(title).setIcon(icon).onClick(run));
+    const count = this.doc?.slides().length ?? 0;
+    item("New slide", "plus", () => this.mutate((d) => (this.index = d.addSlide(i))));
+    item("Duplicate slide", "copy", () => this.mutate((d) => (this.index = d.duplicateSlide(i))));
+    item("Delete slide", "trash", () => this.mutate((d) => d.deleteSlide(i)));
+    item(this.doc?.isHidden(i) ? "Show slide" : "Hide slide", "eye-off", () => this.mutate((d) => d.setHidden(i, !d.isHidden(i))));
+    menu.addSeparator();
+    if (i > 0) item("Move up", "arrow-up", () => this.mutate((d) => d.moveSlide(i, (this.index = i - 1))));
+    if (i < count - 1) item("Move down", "arrow-down", () => this.mutate((d) => d.moveSlide(i, (this.index = i + 1))));
+    item("Add section here", "list-plus", () => void this.addSection(i));
+    return menu;
+  }
+
+  private sectionMenu(k: number): Menu {
+    const menu = new Menu();
+    menu.addItem((m) => m.setTitle("Rename section").setIcon("pencil").onClick(() => void this.renameSection(k)));
+    menu.addItem((m) => m.setTitle("Remove section").setIcon("trash").onClick(() => this.mutate((d) => d.removeSection(k))));
+    return menu;
+  }
+
+  private async addSection(start: number): Promise<void> {
+    const name = await promptText(this.app, "Section name", "New section");
+    if (name?.trim()) this.mutate((d) => d.addSection(start, name.trim()));
+  }
+
+  private async renameSection(k: number): Promise<void> {
+    const name = await promptText(this.app, "Section name", this.doc?.sections()[k]?.name ?? "");
+    if (name?.trim()) this.mutate((d) => d.renameSection(k, name.trim()));
+  }
+
+  private slideControl(): SlideControl {
+    const doc = this.doc!;
+    const index = this.index;
+    const layout = doc.layoutOf(doc.slides()[index].path) ?? "";
+    return {
+      layouts: doc.layouts(doc.masterOf(layout) ?? undefined),
+      layout,
+      setLayout: (p) => this.mutate((d) => d.setLayout(index, p), "slide"),
+      background: this.model?.ownBackground ?? null,
+      setBackground: (f) => this.mutate((d) => d.setBackground(index, f), "slide"),
+      applyBackgroundToAll: () => {
+        const f = this.model?.ownBackground ?? null;
+        this.mutate((d) => d.slides().forEach((_, i) => d.setBackground(i, f)));
+      },
+      size: doc.slideSize,
+      setSize: (cx, cy) => this.mutate((d) => d.setSlideSize(cx, cy)),
+    };
   }
 
   private refreshThumb(i: number): void {
@@ -307,6 +436,11 @@ export class PptxView extends FileView {
     renderSlide(host, parseSlide(this.doc, slide.path), this.doc.slideSize, { width: THUMB_WIDTH, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 });
   }
 
+  /** Re-render if the stage width really changed since the last render. */
+  private refit(): void {
+    if (Math.abs(this.stageEl.clientWidth - this.lastStageWidth) > 8) this.renderCurrent();
+  }
+
   private renderCurrent(): void {
     if (!this.doc) return;
     const slides = this.doc.slides();
@@ -314,7 +448,7 @@ export class PptxView extends FileView {
     this.model = parseSlide(this.doc, slides[this.index].path);
 
     this.lastStageWidth = this.stageEl.clientWidth;
-    const width = Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400));
+    const width = Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400)) * this.zoom;
     this.scale = width / this.doc.slideSize.cx;
     this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: true, imageUrl: this.imageUrl, slideNumber: this.index + 1 });
     this.rendered.forEach((rs) => this.wireShape(rs));
@@ -323,7 +457,6 @@ export class PptxView extends FileView {
     this.notesEl.value = this.doc.notesText(this.index);
     this.notesEl.disabled = !canEdit;
     this.notesEl.placeholder = canEdit ? "Click to add speaker notes" : "This presentation has no notes master, so notes can't be added.";
-    this.hideBtn?.setText(this.doc.isHidden(this.index) ? "Show slide" : "Hide slide");
     // Keep the selection across redraws of the same slide (resizes, edits).
     const xml = this.currentSlideXml();
     const keep = this.items.filter((i) => xml?.contains(i));
@@ -353,13 +486,22 @@ export class PptxView extends FileView {
     el.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 || this.drawing) return;
       const item = topLevel(shape.el);
+      // Shift+click in another cell of the same table extends the cell range.
+      if (shape.kind === "cell" && e.shiftKey && this.tableCell?.frame === item && shape.cell) {
+        e.stopPropagation();
+        this.extendingRange = true;
+        const [r, c] = this.tableCell.range;
+        this.tableCell = { frame: item, range: [r, c, shape.cell.r, shape.cell.c] };
+        this.setSelection([item], shape.el);
+        return;
+      }
       if (e.shiftKey || isMod(e)) {
         e.preventDefault();
         this.setSelection(this.items.includes(item) ? this.items.filter((i) => i !== item) : [...this.items, item]);
         return;
       }
       if (!this.items.includes(item)) this.setSelection([item], shape.el);
-      if (textEl?.contains(e.target as Node)) return;
+      if (textEl?.contains(e.target as Node) || (e.target as HTMLElement).closest(".pptx-cell-text")) return;
       this.stageEl.focus({ preventScroll: true });
       this.startMoveItems(e);
     });
@@ -387,7 +529,7 @@ export class PptxView extends FileView {
     }
 
     // Text fills the shape, so its edges are the grab area for moving (as in PowerPoint).
-    if (textEl) {
+    if (textEl && shape.kind !== "cell") {
       for (const side of ["t", "r", "b", "l"]) {
         el.createDiv({ cls: `pptx-edge pptx-edge-${side}` }).addEventListener("pointerdown", (e) => {
           if (e.button !== 0) return;
@@ -417,6 +559,13 @@ export class PptxView extends FileView {
       });
       textEl.addEventListener("focus", () => {
         this.activeText = rs;
+        if (shape.kind === "cell" && shape.cell) {
+          const frame = topLevel(shape.el);
+          if (!this.extendingRange) this.tableCell = { frame, range: [shape.cell.r, shape.cell.c, shape.cell.r, shape.cell.c] };
+          this.extendingRange = false;
+          this.setSelection([frame], shape.el);
+          return;
+        }
         if (this.items.includes(topLevel(shape.el))) this.selected = rs;
         else this.select(rs);
       });
@@ -424,6 +573,8 @@ export class PptxView extends FileView {
         this.flushCommit();
         // Refit only text that was edited: opening and clicking around must not change the file.
         if (this.needsFit.delete(shape.el)) this.autofit(rs);
+        // The stage may have resized while typing (e.g. the format panel opened).
+        if (!rs.textEl?.contains(document.activeElement)) this.refit();
       });
       textEl.addEventListener("keydown", (e) => this.onTextKey(e, rs));
     }
@@ -435,6 +586,65 @@ export class PptxView extends FileView {
   }
 
   /** Select the rendered shape for `el` again after a redraw. */
+  /** The selected cell range of table `frame`, if it is still inside the grid. */
+  private cellRange(frame: Element, table: SlideModel["shapes"][number]["table"]): CellRange | null {
+    if (!table || this.tableCell?.frame !== frame) return null;
+    const [r1, c1, r2, c2] = this.tableCell.range;
+    const ok = (r: number, c: number) => r >= 0 && c >= 0 && r < table.rows.length && c < table.cols.length;
+    return ok(r1, c1) && ok(r2, c2) ? [Math.min(r1, r2), Math.min(c1, c2), Math.max(r1, r2), Math.max(c1, c2)] : null;
+  }
+
+  /** Mark the cells of a multi-cell range. */
+  private highlightCells(): void {
+    const t = this.tableCell;
+    const [r1, c1, r2, c2] = t ? this.cellRange(t.frame, this.rendered.find((r) => r.shape.el === t.frame)?.shape.table ?? null) ?? [0, 0, -1, -1] : [0, 0, -1, -1];
+    const many = r1 !== r2 || c1 !== c2;
+    for (const r of this.rendered) {
+      const cell = r.shape.cell;
+      if (!cell) continue;
+      const inside = many && t && topLevel(r.shape.el) === t.frame && cell.r >= r1 && cell.r <= r2 && cell.c >= c1 && cell.c <= c2;
+      r.el.toggleClass("is-cell-selected", !!inside);
+    }
+  }
+
+  /** Tab / Shift+Tab: move to the next or previous cell; Tab in the last cell adds a row. */
+  private nextCell(rs: RenderedShape, dir: number): void {
+    const frame = topLevel(rs.shape.el);
+    const cells = this.rendered.filter((r) => r.shape.kind === "cell" && r.textEl && topLevel(r.shape.el) === frame);
+    const target = cells[cells.indexOf(rs) + dir];
+    const focus = (r: RenderedShape | undefined) => {
+      if (!r?.textEl) return;
+      r.textEl.focus();
+      const range = document.createRange();
+      range.selectNodeContents(r.textEl);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    };
+    if (target) return focus(target);
+    if (dir < 0) return;
+    const rows = rs.shape.cell ? this.rendered.find((r) => r.shape.el === frame)?.shape.table?.rows.length ?? 0 : 0;
+    this.editShape(frame, (f) => insertRow(f.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "tbl")[0], rows - 1, true));
+    focus(this.rendered.find((r) => r.shape.kind === "cell" && r.textEl && topLevel(r.shape.el) === frame && r.shape.cell!.r === rows && r.shape.cell!.c === 0));
+  }
+
+  private async insertTable(): Promise<void> {
+    const answer = await promptText(this.app, "Insert table: rows × columns", "3 x 3");
+    const m = answer && /(\d+)\s*[x×*, ]\s*(\d+)/.exec(answer);
+    if (!m || !this.doc) return;
+    const rows = Math.min(50, Math.max(1, Number(m[1])));
+    const cols = Math.min(30, Math.max(1, Number(m[2])));
+    const { cx, cy } = this.doc.slideSize;
+    const w = cx * 0.8;
+    const h = Math.min(cy * 0.7, rows * 370840);
+    let frame: Element | null = null;
+    const style = TABLE_STYLES[1].id;
+    this.mutate((d) => {
+      d.ensureTableStyle(style);
+      frame = addTable(this.currentSlideXml()!, rows, cols, { x: (cx - w) / 2, y: (cy - h) / 2, w, h }, style);
+    }, "slide");
+    this.reselect(frame);
+  }
+
   private reselect(el: Element | null): void {
     if (el) this.setSelection([topLevel(el)], el);
   }
@@ -450,12 +660,15 @@ export class PptxView extends FileView {
     }
     this.slideHostEl.querySelectorAll(".pptx-selbox").forEach((b) => b.remove());
     this.items = items;
+    if (this.tableCell && !items.includes(this.tableCell.frame)) this.tableCell = null;
+    this.highlightCells();
     const single = items.length === 1 && items[0].localName !== "grpSp" ? items[0] : null;
     this.selected = this.rendered.find((r) => r.shape.el === (primaryEl ?? single)) ?? null;
     for (const r of this.rendered) if (items.includes(topLevel(r.shape.el))) r.el.addClass("is-in-selection");
 
     if (!items.length) {
-      this.propsEl.hide();
+      if (this.doc && this.model) buildSlidePanel(this.propsEl, this.slideControl());
+      this.propsEl.toggle(this.showProps && !!this.model);
       return;
     }
     const rs = single ? this.rendered.find((r) => r.shape.el === single) : null;
@@ -463,14 +676,25 @@ export class PptxView extends FileView {
       this.selected = rs;
       rs.el.addClass("is-selected");
       this.addAdjustHandles(rs);
-      const ctl = { edit: (fn: (el: Element) => void) => this.editShape(rs.shape.el, fn, true), arrange: this.arrangeControl() } as PanelControl;
+      const ctl: PanelControl = {
+        lockAspect: this.lockAspect,
+        edit: (fn: (el: Element) => void) => this.editShape(rs.shape.el, fn, true),
+        arrange: this.arrangeControl(),
+        cells: this.cellRange(rs.shape.el, rs.shape.table),
+        tableStyles: TABLE_STYLES,
+        setTableStyle: (id: string) =>
+          this.editShape(rs.shape.el, (frame) => {
+            this.doc?.ensureTableStyle(id);
+            setTableStyleId(frame.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "tbl")[0], id);
+          }),
+      };
       Object.defineProperty(ctl, "lockAspect", { get: () => this.lockAspect, set: (v: boolean) => (this.lockAspect = v) });
       buildShapePanel(this.propsEl, rs.shape, ctl);
     } else {
       this.drawSelectionBox();
       buildArrangePanel(this.propsEl, this.arrangeControl());
     }
-    this.propsEl.show();
+    this.propsEl.toggle(this.showProps);
   }
 
   /** Dashed box around a group or multi-selection; a single group can be resized from its corner. */
@@ -611,7 +835,10 @@ export class PptxView extends FileView {
     const rects0 = items.map((i) => this.itemBounds(i));
     const box0 = this.union(rects0);
     const others = this.slideItems().filter((i) => !items.includes(i)).map((i) => this.itemBounds(i));
-    const moving = this.rendered.filter((r) => items.includes(topLevel(r.shape.el))).map((r) => ({ el: r.el, left: r.el.offsetLeft, top: r.el.offsetTop }));
+    // Table cells ride along inside their table's element; moving them too would double the offset.
+    const moving = this.rendered
+      .filter((r) => r.shape.kind !== "cell" && items.includes(topLevel(r.shape.el)))
+      .map((r) => ({ el: r.el, left: r.el.offsetLeft, top: r.el.offsetTop }));
     const selbox = this.slideHostEl.querySelector<HTMLElement>(".pptx-selbox");
     const box = selbox ? { left: selbox.offsetLeft, top: selbox.offsetTop } : null;
     const size = this.doc.slideSize;
@@ -1124,8 +1351,20 @@ export class PptxView extends FileView {
     sel.addRange(range);
 
     fn(rs, textEl);
+    const after = sel.rangeCount ? sel.getRangeAt(0) : null;
+    const offsets = after && textEl.contains(after.commonAncestorContainer) ? textOffsets(textEl, after) : null;
     if (this.pendingCommit === rs) this.pendingCommit = null;
     this.commitText(rs);
+    // An inner span can't cancel an outer span's underline in CSS: redraw flat runs from the saved model.
+    if (rs.shape.text) {
+      renderParagraphs(textEl, rs.shape.text.paras, rs.pxPerPt, this.scale, rs.shape.text.lnSpcReduction, { slideNumber: this.index + 1 });
+      if (offsets) {
+        const range = rangeAt(textEl, offsets);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        this.savedRange = range.cloneRange();
+      }
+    }
     return rs;
   }
 
@@ -1141,9 +1380,7 @@ export class PptxView extends FileView {
   }
 
   private updateParas(fn: Parameters<typeof updateParagraphs>[1]): void {
-    const rs = this.withText((_, el) => updateParagraphs(el, fn), false);
-    // Levels change indents and default sizes: redraw from the saved model.
-    if (rs?.textEl && rs.shape.text) renderParagraphs(rs.textEl, rs.shape.text.paras, rs.pxPerPt, this.scale, rs.shape.text.lnSpcReduction, { slideNumber: this.index + 1 });
+    this.withText((_, el) => updateParagraphs(el, fn), false);
   }
 
   private async editLink(): Promise<void> {
@@ -1208,6 +1445,9 @@ export class PptxView extends FileView {
     } else if (isMod(e) && (key === "b" || key === "i" || key === "u")) {
       e.preventDefault();
       this.toggle(key);
+    } else if (e.key === "Tab" && rs.shape.kind === "cell") {
+      e.preventDefault();
+      this.nextCell(rs, e.shiftKey ? -1 : 1);
     } else if (e.key === "Tab") {
       e.preventDefault();
       this.updateParas((p) => ({ ...p, lvl: p.lvl + (e.shiftKey ? -1 : 1) }));
@@ -1374,17 +1614,6 @@ export class PptxView extends FileView {
     this.setSelection([]);
   }
 
-  private promptInsertImage(): void {
-    const input = document.body.createEl("input", { type: "file", attr: { accept: "image/*" } });
-    input.setCssStyles({ display: "none" });
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (file) void this.insertImageFile(file);
-      input.remove();
-    };
-    input.click();
-  }
-
   private async insertImageFile(file: File): Promise<void> {
     if (!this.doc) return;
     const ext = IMAGE_MIME[extOf(file.name)] ? extOf(file.name) : file.type.split("/")[1]?.replace("jpeg", "jpg") ?? "png";
@@ -1407,6 +1636,108 @@ export class PptxView extends FileView {
       this.imageUrls.set(doc.relTarget(path, rId)!, url);
       addPicture(doc.xml(path)!, { x: (cx - w) / 2, y: (cy - h) / 2, w, h }, rId, file.name);
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Find and replace, zoom
+  // ---------------------------------------------------------------------------
+
+  private findEl: HTMLElement | null = null;
+  private zoomSelect: HTMLSelectElement | null = null;
+  private findInput!: HTMLInputElement;
+  private findMatches: Match[] = [];
+  private findIndex = -1;
+  private zoom = 1;
+
+  private openFind(): void {
+    if (!this.doc) return;
+    if (this.findEl) {
+      this.findInput.focus();
+      this.findInput.select();
+      return;
+    }
+    const bar = (this.findEl = createDiv({ cls: "pptx-find" }));
+    this.contentEl.insertBefore(bar, this.contentEl.querySelector(".pptx-body"));
+    this.findInput = bar.createEl("input", { type: "search", attr: { placeholder: "Find", "aria-label": "Find" } });
+    const replace = bar.createEl("input", { type: "text", attr: { placeholder: "Replace with", "aria-label": "Replace with" } });
+    const caseLabel = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": "Match case" } });
+    const matchCase = caseLabel.createEl("input", { type: "checkbox" });
+    caseLabel.appendText("Aa");
+    const count = bar.createSpan({ cls: "pptx-find-count" });
+    const opts = () => ({ matchCase: matchCase.checked });
+    const refresh = (keep = false) => {
+      this.findMatches = findAll(this.doc!, this.findInput.value, opts());
+      if (!keep) this.findIndex = this.findMatches.findIndex((m) => m.slide >= this.index);
+      this.findIndex = Math.min(this.findIndex, this.findMatches.length - 1);
+      count.setText(this.findInput.value ? (this.findMatches.length ? `${this.findIndex + 1} of ${this.findMatches.length}` : "No results") : "");
+    };
+    const step = (dir: number) => {
+      refresh(true);
+      if (!this.findMatches.length) return;
+      this.findIndex = (this.findIndex + dir + this.findMatches.length) % this.findMatches.length;
+      count.setText(`${this.findIndex + 1} of ${this.findMatches.length}`);
+      this.showMatch(this.findMatches[this.findIndex]);
+    };
+    const button = (text: string, title: string, fn: () => void) =>
+      bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } }).addEventListener("click", fn);
+    button("↑", "Previous match (Shift+Enter)", () => step(-1));
+    button("↓", "Next match (Enter)", () => step(1));
+    button("Replace", "Replace this match", () => {
+      refresh(true);
+      const m = this.findMatches[this.findIndex];
+      if (!m) return step(1);
+      this.mutate(() => replaceMatch(m, replace.value), "slide");
+      refresh(true);
+      this.findIndex--;
+      step(1);
+    });
+    button("Replace all", "Replace every match", () => {
+      let n = 0;
+      this.mutate((d) => (n = replaceAll(d, this.findInput.value, replace.value, opts())));
+      new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
+      refresh();
+    });
+    button("×", "Close (Esc)", () => this.closeFind());
+    this.findInput.addEventListener("input", () => {
+      refresh();
+      if (this.findMatches[this.findIndex]) this.showMatch(this.findMatches[this.findIndex]);
+    });
+    matchCase.addEventListener("change", () => refresh());
+    bar.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") this.closeFind();
+      else if (e.key === "Enter" && e.target === this.findInput) {
+        e.preventDefault();
+        step(e.shiftKey ? -1 : 1);
+      }
+    });
+    this.findInput.focus();
+  }
+
+  private closeFind(): void {
+    this.findEl?.remove();
+    this.findEl = null;
+    this.findMatches = [];
+    if ("highlights" in CSS) highlights().delete("dw-find");
+    this.stageEl.focus({ preventScroll: true });
+  }
+
+  /** Go to a match's slide and highlight it (without taking focus from the find box). */
+  private showMatch(m: Match): void {
+    if (m.slide !== this.index) this.goTo(m.slide);
+    const rs = this.rendered.find((r) => r.shape.el === m.owner && r.textEl);
+    const body = Array.from(m.owner.getElementsByTagNameNS("*", "txBody"))[0];
+    const paraIndex = Array.from(body?.children ?? []).filter((c) => c.localName === "p").indexOf(m.para);
+    const p = rs?.textEl?.querySelectorAll<HTMLElement>(":scope > p")[paraIndex];
+    if (!p) return;
+    const range = rangeInParagraph(p, m.start, m.end);
+    if ("highlights" in CSS) highlights().set("dw-find", new Highlight(range));
+    p.scrollIntoView({ block: "nearest" });
+  }
+
+  private setZoom(zoom: number): void {
+    this.zoom = Math.min(4, Math.max(0.25, zoom));
+    if (this.zoomSelect) this.zoomSelect.value = ZOOMS.some((z) => z === this.zoom) ? String(this.zoom) : "";
+    this.renderCurrent();
   }
 
   // ---------------------------------------------------------------------------
@@ -1438,18 +1769,18 @@ export class PptxView extends FileView {
     btn("Tx", "Clear formatting", () => this.clearFormatting());
     sep();
 
-    for (const [label, align] of [
-      ["Left", "l"],
-      ["Center", "ctr"],
-      ["Right", "r"],
-      ["Justify", "just"],
-    ] as [string, Align][]) {
-      btn(label, `Align ${label.toLowerCase()}`, () => this.updateParas((p) => ({ ...p, align })));
+    for (const [icon, label, align] of [
+      ["align-left", "left", "l"],
+      ["align-center", "center", "ctr"],
+      ["align-right", "right", "r"],
+      ["align-justify", "justify", "just"],
+    ] as [string, string, Align][]) {
+      tb.icon(icon, `Align ${label}`, () => this.updateParas((p) => ({ ...p, align })));
     }
-    btn("• List", "Toggle bullets", () => this.updateParas((p) => ({ ...p, bullet: p.bullet && !p.bullet.startsWith("#") ? null : "•" })));
-    btn("1. List", "Toggle numbering", () => this.updateParas((p) => ({ ...p, bullet: p.bullet?.startsWith("#") ? null : "#arabicPeriod" })));
-    btn("Outdent", "Decrease list level (Shift+Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })));
-    btn("Indent", "Increase list level (Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })));
+    tb.icon("list", "Toggle bullets", () => this.updateParas((p) => ({ ...p, bullet: p.bullet && !p.bullet.startsWith("#") ? null : "•" })));
+    tb.icon("list-ordered", "Toggle numbering", () => this.updateParas((p) => ({ ...p, bullet: p.bullet?.startsWith("#") ? null : "#arabicPeriod" })));
+    tb.icon("outdent", "Decrease list level (Shift+Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })));
+    tb.icon("indent", "Increase list level (Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })));
     tb.select("Line spacing", "Line spacing", ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"].map((v) => [v, v]), (v) =>
       this.updateParas((p) => ({ ...p, lnSpc: { pct: Number(v) } }))
     );
@@ -1461,26 +1792,28 @@ export class PptxView extends FileView {
     sep();
 
     btn("Text box", "Insert text box", () => this.addTextBox());
+    btn("Table", "Insert table", () => void this.insertTable());
     const shapesBtn = btn("Shapes ▾", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
-    btn("Image", "Insert image from file", () => this.promptInsertImage());
+    btn("Image", "Insert image from file", () => pickImage((file) => void this.insertImageFile(file)));
     btn("Delete shape", "Delete selected shape (Del)", () => this.deleteSelected());
     sep();
 
     btn("New slide", "Insert slide after this one", () => this.mutate((d) => (this.index = d.addSlide(this.index))));
-    btn("Duplicate", "Duplicate slide", () => this.mutate((d) => (this.index = d.duplicateSlide(this.index))));
-    btn("Delete slide", "Delete slide", () => this.mutate((d) => d.deleteSlide(this.index)));
-    this.hideBtn = btn("Hide slide", "Skip this slide in the slideshow", () => this.mutate((d) => d.setHidden(this.index, !d.isHidden(this.index))));
-    btn("▲", "Move slide up", () =>
-      this.mutate((d) => {
-        if (this.index > 0) d.moveSlide(this.index, --this.index);
-      })
-    );
-    btn("▼", "Move slide down", () =>
-      this.mutate((d) => {
-        if (this.index < d.slides().length - 1) d.moveSlide(this.index, ++this.index);
-      })
-    );
+    const slideBtn = btn("Slide ▾", "Duplicate, delete, hide, move or add a section", () => {
+      const r = slideBtn.getBoundingClientRect();
+      this.slideMenu(this.index).showAtPosition({ x: r.left, y: r.bottom });
+    });
     sep();
+    const panelBtn = tb.icon("panel-right", "Show or hide the format panel", () => {
+      this.showProps = !this.showProps;
+      window.localStorage.setItem(PROPS_KEY, this.showProps ? "shown" : "hidden");
+      panelBtn.toggleClass("is-active", this.showProps);
+      this.propsEl.toggle(this.showProps);
+    });
+    panelBtn.toggleClass("is-active", this.showProps);
+    tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
+    this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [z === 1 ? "Fit" : `${z * 100}%`, String(z)]), (v) => this.setZoom(Number(v)));
+    this.zoomSelect.value = "1";
     btn("▶ Present", "Present from this slide (Shift+F5). F5 presents from the beginning.", () => this.startPresentation(false), "mod-cta");
 
     const end = tb.end(this.paperTheme, (t) => this.setPaperTheme(t), "workspace");

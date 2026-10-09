@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { ArrangeControl, buildArrangePanel, buildShapePanel, PanelControl } from "../src/presentation/pptx/shape-panel";
+import { ArrangeControl, buildArrangePanel, buildShapePanel, buildSlidePanel, PanelControl, SlideControl } from "../src/presentation/pptx/shape-panel";
 import { addShape } from "../src/domain/pptx/slide-edit";
 import { parseSlide, ShapeModel } from "../src/domain/pptx/slide-model";
 import { loadSample } from "./helpers";
+import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
+import { blankPptx } from "../src/infrastructure/blank";
+import { addTable, CellRange, TABLE_STYLES } from "../src/domain/pptx/table";
 
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 
@@ -134,5 +137,133 @@ describe("arrange panel", () => {
     expect(labels).not.toContain("Horizontally");
     expect(labels).not.toContain("Group");
     expect(host.textContent).toContain("Align to slide");
+  });
+});
+
+describe("slide panel", () => {
+  function slidePanel(background: SlideControl["background"] = null) {
+    const calls: unknown[][] = [];
+    const host = document.createElement("div");
+    const ctl: SlideControl = {
+      layouts: [
+        { name: "Title Slide", path: "a" },
+        { name: "Blank", path: "b" },
+      ],
+      layout: "a",
+      setLayout: (p) => calls.push(["layout", p]),
+      background,
+      setBackground: (f) => calls.push(["background", f]),
+      applyBackgroundToAll: () => calls.push(["all"]),
+      size: { cx: 12192000, cy: 6858000 },
+      setSize: (cx, cy) => calls.push(["size", cx, cy]),
+    };
+    buildSlidePanel(host, ctl);
+    const change = (name: string, value: string) => {
+      const f = host.querySelector<HTMLInputElement>(`[data-field="${name}"]`)!;
+      f.value = value;
+      f.dispatchEvent(new Event("change"));
+    };
+    const click = (text: string) => Array.from(host.querySelectorAll("button")).find((b) => b.textContent === text)!.click();
+    return { host, calls, change, click };
+  }
+
+  it("changes the layout and slide size", () => {
+    const { host, calls, change } = slidePanel();
+    expect(host.querySelector<HTMLSelectElement>('[data-field="Layout"]')!.value).toBe("a");
+    expect(host.querySelector<HTMLSelectElement>('[data-field="Slide size"]')!.value).toBe("12192000x6858000");
+    change("Layout", "b");
+    change("Slide size", "9144000x6858000");
+    expect(calls).toEqual([["layout", "b"], ["size", 9144000, 6858000]]);
+  });
+
+  it("sets, edits and resets the background", () => {
+    const { calls, change, click } = slidePanel();
+    change("Background", "solid");
+    expect(calls).toEqual([["background", { type: "solid", color: "#FFFFFF" }]]);
+
+    const red = slidePanel({ type: "solid", color: "#FF0000" });
+    red.change("Color", "#00ff00");
+    red.click("Apply to all slides");
+    red.change("Background", "layout");
+    expect(red.calls).toEqual([["background", { type: "solid", color: "#00FF00" }], ["all"], ["background", null]]);
+  });
+});
+
+describe("table panel", () => {
+  async function tablePanel(cells: CellRange | null = [0, 0, 0, 0]) {
+    const doc = await PptxDocument.load(await blankPptx());
+    const path = doc.slides()[0].path;
+    const frame = addTable(doc.xml(path)!, 3, 3, { x: 0, y: 0, w: 2743200, h: 1371600 }, TABLE_STYLES[1].id);
+    doc.ensureTableStyle(TABLE_STYLES[1].id);
+    const host = document.createElement("div");
+    const styles: string[] = [];
+    const model = () => parseSlide(doc, path).shapes.find((s) => s.el === frame)!;
+    const cell = (r: number, c: number) => parseSlide(doc, path).shapes.find((s) => s.kind === "cell" && s.cell!.r === r && s.cell!.c === c)!.cell!;
+    const ctl: PanelControl = {
+      lockAspect: false,
+      cells,
+      tableStyles: TABLE_STYLES,
+      setTableStyle: (id) => styles.push(id),
+      edit(fn) {
+        fn(frame);
+        buildShapePanel(host, model(), ctl);
+      },
+    };
+    buildShapePanel(host, model(), ctl);
+    const change = (name: string, value: string) => {
+      const f = host.querySelector<HTMLInputElement>(`[data-field="${name}"]`)!;
+      if (f.type === "checkbox") f.checked = value === "true";
+      else f.value = value;
+      f.dispatchEvent(new Event("change"));
+    };
+    const button = (text: string) => Array.from(host.querySelectorAll("button")).find((b) => b.textContent === text)!.click();
+    const has = (text: string) => Array.from(host.querySelectorAll("button")).some((b) => b.textContent === text);
+    return { model, cell, ctl, host, change, button, has, styles };
+  }
+
+  it("inserts and deletes rows and columns at the current cell", async () => {
+    const { model, button } = await tablePanel([1, 1, 1, 1]);
+    button("Insert row below");
+    button("Insert column right");
+    expect([model().table!.rows.length, model().table!.cols.length]).toEqual([4, 4]);
+    button("Delete row");
+    button("Delete column");
+    expect([model().table!.rows.length, model().table!.cols.length]).toEqual([3, 3]);
+  });
+
+  it("merges a range and offers to split it", async () => {
+    const p = await tablePanel([0, 0, 1, 1]);
+    expect(p.has("Split cell")).toBe(false);
+    p.button("Merge cells");
+    expect(p.cell(0, 0).gridSpan).toBe(2);
+    p.ctl.cells = [0, 0, 0, 0];
+    buildShapePanel(p.host, p.model(), p.ctl);
+    expect(p.has("Merge cells")).toBe(false);
+    p.button("Split cell");
+    expect(p.cell(0, 0).gridSpan).toBe(1);
+  });
+
+  it("fills and borders the selected cells", async () => {
+    const { cell, change } = await tablePanel([1, 1, 2, 2]);
+    change("Cell fill", "solid");
+    change("Color", "#ff0000");
+    expect(cell(2, 2).fill).toEqual({ type: "solid", color: "#FF0000" });
+    change("Border color", "#00ff00");
+    change("Borders", "outer");
+    expect(cell(1, 1).borders.t).toMatchObject({ color: "#00FF00" });
+    expect(cell(1, 1).borders.r?.color).not.toBe("#00FF00");
+    change("Cell fill", "style");
+    expect(cell(2, 2).fill).not.toEqual({ type: "solid", color: "#FF0000" });
+  });
+
+  it("sets style options, the style and sizes", async () => {
+    const { model, change, styles } = await tablePanel([0, 1, 0, 1]);
+    change("Banded rows", "false");
+    change("First column", "true");
+    expect(model().table!.flags).toMatchObject({ bandRow: false, firstCol: true });
+    change("Table style", TABLE_STYLES[3].id);
+    expect(styles).toEqual([TABLE_STYLES[3].id]);
+    change("Column width (in)", "2");
+    expect(model().table!.cols[1]).toBe(1828800);
   });
 });

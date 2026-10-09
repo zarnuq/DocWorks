@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { NS, REL_TYPE } from "../../core/utils/xml";
+import { IMAGE_MIME } from "../../core/utils/images";
 
 export interface Rel {
   id: string;
@@ -14,7 +15,6 @@ export type PackageSnapshot = Map<string, string>;
 
 export const CONTENT_TYPES = "[Content_Types].xml";
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
-const IMAGE_CT: Record<string, string> = { jpg: "image/jpeg", svg: "image/svg+xml" };
 
 const isXmlPart = (path: string) => path.endsWith(".xml") || path.endsWith(".rels");
 export const dirOf = (path: string) => path.slice(0, path.lastIndexOf("/") + 1);
@@ -204,7 +204,7 @@ export class OoxmlPackage {
     if (!hasDefault) {
       const d = types.createElementNS(NS.contentTypes, "Default");
       d.setAttribute("Extension", ext);
-      d.setAttribute("ContentType", IMAGE_CT[ext] ?? `image/${ext}`);
+      d.setAttribute("ContentType", IMAGE_MIME[ext] ?? `image/${ext}`);
       types.documentElement.insertBefore(d, types.documentElement.firstChild);
     }
     return path;

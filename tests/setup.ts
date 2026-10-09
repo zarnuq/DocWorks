@@ -41,3 +41,46 @@ Object.assign(Node.prototype, {
     return create("span", o, this);
   },
 });
+Object.assign(HTMLElement.prototype, {
+  empty(this: HTMLElement) {
+    this.replaceChildren();
+  },
+  addClass(this: HTMLElement, ...c: string[]) {
+    this.classList.add(...c);
+  },
+  removeClass(this: HTMLElement, ...c: string[]) {
+    this.classList.remove(...c);
+  },
+  toggleClass(this: HTMLElement, c: string, on: boolean) {
+    this.classList.toggle(c, on);
+  },
+  setText(this: HTMLElement, t: string) {
+    this.textContent = t;
+  },
+  appendText(this: HTMLElement, t: string) {
+    this.append(t);
+  },
+  setCssProps(this: HTMLElement, props: Record<string, string>) {
+    for (const [k, v] of Object.entries(props)) this.style.setProperty(k, v);
+  },
+  setCssStyles(this: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
+    Object.assign(this.style, styles);
+  },
+  hide(this: HTMLElement) {
+    this.style.display = "none";
+  },
+  show(this: HTMLElement) {
+    this.style.display = "";
+  },
+  toggle(this: HTMLElement, on: boolean) {
+    this.style.display = on ? "" : "none";
+  },
+});
+// jsdom lacks these; the views only construct / observe / disconnect.
+g.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+g.CSS ??= {};
+Element.prototype.scrollIntoView ??= () => {};

@@ -38,13 +38,13 @@ export const HIGHLIGHTS: Record<string, string> = {
 };
 
 /** Paragraph / cell children we read as content rather than keep opaque. */
-const CONTAINERS = new Set(["ins", "smartTag", "customXml", "dir", "bdo"]);
+const CONTAINERS = new Set(["smartTag", "customXml", "dir", "bdo"]);
 /** Pure rendering hints, safe to drop when a paragraph is rewritten. */
 const DROPPED = new Set(["proofErr", "lastRenderedPageBreak", "pPr", "rPr"]);
 const ORDERED_ALIGN: Record<string, Align> = { left: "left", start: "left", center: "center", right: "right", end: "right", both: "justify", distribute: "justify" };
 
 export const wVal = (el: Element | null | undefined, attr = "val") => el?.getAttributeNS(NS.w, attr) ?? null;
-const w = (el: Element | null | undefined, local: string) => (el ? childNS(el, NS.w, local) : null);
+export const w = (el: Element | null | undefined, local: string) => (el ? childNS(el, NS.w, local) : null);
 const isOn = (el: Element | null) => !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
 const hex = (v: string | null) => (v && /^[0-9a-f]{6}$/i.test(v) ? `#${v.toUpperCase()}` : null);
 const xmlOf = (el: Element) => new XMLSerializer().serializeToString(el);
@@ -60,7 +60,12 @@ export interface ParagraphProps {
   ilvl: number;
   lineSpacing: string | null;
   indent: number;
+  spaceBefore: number | null;
+  spaceAfter: number | null;
+  firstLine: number | null;
 }
+
+const pt = (twips: string | null) => (twips === null ? null : Math.round((Number(twips) / 20) * 100) / 100);
 
 export function paragraphProps(pPr: Element | null): ParagraphProps {
   const numPr = w(pPr, "numPr");
@@ -77,6 +82,9 @@ export function paragraphProps(pPr: Element | null): ParagraphProps {
     ilvl: Number(wVal(w(numPr, "ilvl")) ?? 0),
     lineSpacing: line && (!rule || rule === "auto") ? String(Math.round((Number(line) / 240) * 100) / 100) : null,
     indent: left > 0 ? Math.round(left / 720) : 0,
+    spaceBefore: pt(wVal(spacing, "before")),
+    spaceAfter: pt(wVal(spacing, "after")),
+    firstLine: wVal(ind, "hanging") !== null ? -pt(wVal(ind, "hanging"))! : pt(wVal(ind, "firstLine")),
   };
 }
 
@@ -103,6 +111,28 @@ export function runMarks(rPr: Element | null): Mark[] {
   const highlight = HIGHLIGHTS[wVal(w(rPr, "highlight")) ?? ""] ?? hex(wVal(w(rPr, "shd"), "fill"));
   if (highlight) marks.push(m.highlight.create({ color: highlight }));
   return marks;
+}
+
+export function vMergeOf(tcPr: Element | null): "restart" | "continue" | null {
+  const v = w(tcPr, "vMerge");
+  return v ? (wVal(v) === "restart" ? "restart" : "continue") : null;
+}
+
+const NO_LINE = new Set(["nil", "none"]);
+
+/** The border preset a table's own w:tblBorders matches, or null (style borders or something custom). */
+export function bordersOf(tblPr: Element | null): "all" | "outer" | "none" | null {
+  const b = w(tblPr, "tblBorders");
+  if (!b) return null;
+  const on = (side: string) => {
+    const v = wVal(w(b, side));
+    return v === null ? null : !NO_LINE.has(v);
+  };
+  const outer = ["top", "left", "bottom", "right"].map(on);
+  const inner = ["insideH", "insideV"].map(on);
+  if (outer.every((x) => x === false) && inner.every((x) => x !== true)) return "none";
+  if (outer.every((x) => x === true)) return inner.every((x) => x === true) ? "all" : inner.every((x) => x !== true) ? "outer" : null;
+  return null;
 }
 
 // -----------------------------------------------------------------------------
@@ -139,6 +169,11 @@ class Reader {
   }
 
   private raw(el: Element): PMNode {
+    const gallery = el.localName === "sdt" ? wVal(el.getElementsByTagNameNS(NS.w, "docPartGallery")[0]) : null;
+    if (gallery?.includes("Table of Contents")) {
+      const lines = Array.from(el.getElementsByTagNameNS(NS.w, "p")).map((p) => Array.from(p.getElementsByTagNameNS(NS.w, "t")).map((t) => t.textContent).join(""));
+      return schema.nodes.raw_block.create({ xml: xmlOf(el), text: lines.filter(Boolean).join("\n"), kind: "toc" });
+    }
     return schema.nodes.raw_block.create({ xml: xmlOf(el), text: el.textContent ?? "" });
   }
 
@@ -168,11 +203,15 @@ class Reader {
       } else if (el.namespaceURI === NS.w && local === "sdt") {
         const content = w(el, "sdtContent");
         if (content) this.inline(content, marks, out);
+      } else if (el.namespaceURI === NS.w && (local === "ins" || local === "moveTo")) {
+        const shell = el.cloneNode(false) as Element;
+        const mark = schema.marks.insertion.create({ xml: xmlOf(shell), author: wVal(el, "author") ?? "", date: wVal(el, "date") ?? "" });
+        this.inline(el, [...marks, mark], out);
       } else if (el.namespaceURI === NS.w && CONTAINERS.has(local)) {
         // ponytail: wrapper (tracked insertion, smart tag...) is dropped if the paragraph is edited.
         this.inline(el, marks, out);
       } else {
-        out.push(this.opaque(el, el.localName === "del" || el.localName === "fldSimple" ? (el.textContent ?? "") : "", marks));
+        out.push(this.opaque(el, ["del", "moveFrom", "fldSimple"].includes(el.localName) ? (el.textContent ?? "") : "", marks));
       }
     }
   }
@@ -252,17 +291,19 @@ class Reader {
                     key: cellKey,
                     colspan: Number(wVal(w(tcPr, "gridSpan")) ?? 1),
                     background: hex(wVal(w(tcPr, "shd"), "fill")),
+                    vMerge: vMergeOf(tcPr),
                   },
                   content.length ? content : schema.nodes.paragraph.create()
                 );
               })
             );
-          return schema.nodes.table_row.create({ key }, cells);
+          return schema.nodes.table_row.create({ key, header: isOn(w(w(tr, "trPr"), "tblHeader")) }, cells);
         })
       );
     // A table without rows can't exist in the editor; keep it verbatim instead.
     if (!rows.length || rows.some((r) => !r.childCount)) return this.raw(tbl);
-    return this.keyed(tbl, (key) => schema.nodes.table.create({ key }, rows));
+    const widths = Array.from(w(tbl, "tblGrid")?.children ?? []).map((g) => Number(wVal(g, "w")) || 0);
+    return this.keyed(tbl, (key) => schema.nodes.table.create({ key, borders: bordersOf(w(tbl, "tblPr")), widths: widths.length ? widths : null }, rows));
   }
 }
 

@@ -67,10 +67,28 @@ describe("renderSlide", () => {
     expect(byName("Picture 4").el.querySelector("img")!.getAttribute("src")).toBe("blob:ppt/media/image1.png");
   });
 
-  it("renders tables", async () => {
-    const { byName } = await render(2);
-    const cells = Array.from(byName("Table 5").el.querySelectorAll("td")).map((td) => td.textContent);
-    expect(cells).toEqual(["A1", "B1", "A2", "B2"]);
+  it("renders tables with one editable text box per cell, in model order", async () => {
+    const { byName, shapes, model } = await render(2);
+    const table = byName("Table 5");
+    const tds = Array.from(table.el.querySelectorAll("td"));
+    expect(tds.map((td) => td.textContent)).toEqual(["A1", "B1", "A2", "B2"]);
+    expect(Array.from(table.el.querySelectorAll("col")).map((c) => c.style.width)).toEqual(["192px", "192px"]);
+    const i = shapes.indexOf(table);
+    expect(shapes.slice(i + 1, i + 5).map((r) => [r.shape.kind, r.el, r.textEl!.contentEditable])).toEqual(tds.map((td) => ["cell", td, "true"]));
+    expect(shapes.map((r) => r.shape)).toEqual(model.shapes);
+  });
+
+  it("draws merged cells once, with the style's fill and borders", async () => {
+    const { byName } = await render(2, true, (m) => {
+      const t = m.shapes.find((s) => s.name === "Table 5")!.table!;
+      Object.assign(t.cells[0][0], { gridSpan: 2, fill: { type: "solid", color: "#FF0000" }, borders: { l: null, r: null, t: null, b: { color: "#00FF00", width: 38100 } } });
+      t.cells[0][1].hidden = true;
+    });
+    const tds = Array.from(byName("Table 5").el.querySelectorAll("td"));
+    expect(tds).toHaveLength(3);
+    expect(tds[0].colSpan).toBe(2);
+    expect(tds[0].style.background).toBe("rgb(255, 0, 0)");
+    expect(tds[0].style.borderBottom).toBe("4px solid rgb(0, 255, 0)");
   });
 
   it("makes slide-owned text editable only when editing", async () => {

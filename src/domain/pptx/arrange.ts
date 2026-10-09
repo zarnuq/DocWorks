@@ -19,7 +19,7 @@ export function topLevel(el: Element): Element {
   return cur;
 }
 
-function xfrmOf(item: Element): Element | null {
+export function xfrmOf(item: Element): Element | null {
   if (item.localName === "grpSp") return kid(kid(item, NS.p, "grpSpPr"), NS.a, "xfrm");
   if (item.localName === "graphicFrame") return kid(item, NS.p, "xfrm");
   return kid(kid(item, NS.p, "spPr"), NS.a, "xfrm");

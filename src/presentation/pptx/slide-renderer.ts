@@ -147,6 +147,30 @@ function shadowCss(shape: ShapeModel, scale: number): string | null {
   return `drop-shadow(${s.dist * Math.cos(a) * scale}px ${s.dist * Math.sin(a) * scale}px ${(s.blur * scale) / 2}px rgba(${rgb}, ${o}))`;
 }
 
+/** The editable text area of a shape or table cell. */
+function textBox(parent: HTMLElement, shape: ShapeModel, pxPerPt: number, scale: number, opts: RenderOptions, cls: string): HTMLElement {
+  const px = (emu: number) => `${emu * scale}px`;
+  const t = shape.text!;
+  const textEl = parent.createDiv();
+  textEl.className = cls;
+  if (shape.textRect) {
+    const r = shape.textRect;
+    Object.assign(textEl.style, { left: px(r.x), top: px(r.y), width: px(r.w), height: px(r.h) });
+  }
+  textEl.style.justifyContent = JUSTIFY[t.anchor];
+  textEl.style.padding = [t.insets.t, t.insets.r, t.insets.b, t.insets.l].map(px).join(" ");
+  renderParagraphs(textEl, t.paras, pxPerPt, scale, t.lnSpcReduction, { slideNumber: opts.slideNumber });
+  const hlink = t.style.colors.scheme.hlink;
+  if (hlink) textEl.style.setProperty("--pptx-hlink", hlink);
+  textEl.classList.toggle("is-nowrap", !t.wrap);
+  textEl.classList.toggle("is-empty", shape.placeholder && t.paras.every((p) => p.runs.length === 0));
+  if (opts.editable && !shape.inherited) {
+    textEl.contentEditable = "true";
+    textEl.spellcheck = true;
+  }
+  return textEl;
+}
+
 /** Draw a slide into `host` (replacing its contents) with plain DOM APIs. */
 export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: number; cy: number }, opts: RenderOptions): RenderedShape[] {
   const scale = opts.width / size.cx;
@@ -163,7 +187,17 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
   }
   host.replaceChildren(slide);
 
+  // Table cells are drawn with their table; their text shapes come right after it in the model.
+  const cellEls = new Map<Element, HTMLElement>();
+
   return model.shapes.map((shape, index) => {
+    if (shape.kind === "cell") {
+      const td = cellEls.get(shape.el) ?? createDiv();
+      const pxPerPt = EMU_PER_PT * scale;
+      const textEl = shape.text ? textBox(td, shape, pxPerPt, scale, opts, "pptx-text pptx-cell-text") : null;
+      if (shape.text) td.style.verticalAlign = { t: "top", ctr: "middle", b: "bottom" }[shape.text.anchor];
+      return { shape, el: td, textEl, pxPerPt };
+    }
     const el = slide.createDiv();
     el.className = `pptx-shape pptx-kind-${shape.kind}`;
     el.classList.toggle("is-inherited", shape.inherited);
@@ -175,6 +209,20 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
       const img = el.createEl("img");
       img.src = opts.imageUrl(shape.image) ?? "";
       img.draggable = false;
+      const c = shape.crop;
+      if (c) {
+        // Show the srcRect part of the image stretched over the frame.
+        const pct = (v: number) => `${Math.round(v * 10000) / 100}%`;
+        el.classList.add("is-cropped");
+        Object.assign(img.style, {
+          position: "absolute",
+          maxWidth: "none",
+          width: pct(1 / (1 - c.l - c.r)),
+          height: pct(1 / (1 - c.t - c.b)),
+          left: pct(-c.l / (1 - c.l - c.r)),
+          top: pct(-c.t / (1 - c.t - c.b)),
+        });
+      }
       // Pictures cropped to a shape (ellipse, rounded rectangle...).
       if (shape.geom && shape.geom !== "rect" && shape.paths?.[0]) {
         const p = shape.paths[0];
@@ -193,39 +241,34 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     }
 
     if (shape.table) {
+      const t = shape.table;
       const table = el.createEl("table");
-      table.style.fontSize = `${14 * EMU_PER_PT * scale}px`;
-      for (const row of shape.table) {
+      const cols = table.createEl("colgroup");
+      for (const w of t.cols) cols.createEl("col").style.width = px(w);
+      t.cells.forEach((row, r) => {
         const tr = table.createEl("tr");
-        for (const cell of row) tr.createEl("td").textContent = cell;
-      }
+        tr.style.height = px(t.rows[r]);
+        for (const cell of row) {
+          if (cell.hidden) continue;
+          const td = tr.createEl("td");
+          if (cell.gridSpan > 1) td.colSpan = cell.gridSpan;
+          if (cell.rowSpan > 1) td.rowSpan = cell.rowSpan;
+          const fill = fillCss(cell.fill);
+          if (fill) td.style.background = fill;
+          for (const [side, prop] of [["l", "borderLeft"], ["r", "borderRight"], ["t", "borderTop"], ["b", "borderBottom"]] as const) {
+            const b = cell.borders[side];
+            td.style[prop] = b ? `${Math.max(1, Math.round(b.width * scale))}px solid ${b.color}` : "none";
+          }
+          cellEls.set(cell.el, td);
+        }
+      });
     } else if (shape.kind === "frame") {
       el.createDiv().className = "pptx-frame-label";
       el.lastElementChild!.textContent = "Chart or diagram (view only)";
     }
 
     const pxPerPt = EMU_PER_PT * scale * (shape.text?.fontScale ?? 1);
-    let textEl: HTMLElement | null = null;
-    if (shape.text) {
-      const t = shape.text;
-      textEl = el.createDiv();
-      textEl.className = "pptx-text";
-      if (shape.textRect) {
-        const r = shape.textRect;
-        Object.assign(textEl.style, { left: px(r.x), top: px(r.y), width: px(r.w), height: px(r.h) });
-      }
-      textEl.style.justifyContent = JUSTIFY[t.anchor];
-      textEl.style.padding = [t.insets.t, t.insets.r, t.insets.b, t.insets.l].map(px).join(" ");
-      renderParagraphs(textEl, t.paras, pxPerPt, scale, t.lnSpcReduction, { slideNumber: opts.slideNumber });
-      const hlink = t.style.colors.scheme.hlink;
-      if (hlink) textEl.style.setProperty("--pptx-hlink", hlink);
-      textEl.classList.toggle("is-nowrap", !t.wrap);
-      textEl.classList.toggle("is-empty", shape.placeholder && t.paras.every((p) => p.runs.length === 0));
-      if (opts.editable && !shape.inherited) {
-        textEl.contentEditable = "true";
-        textEl.spellcheck = true;
-      }
-    }
+    const textEl = shape.text ? textBox(el, shape, pxPerPt, scale, opts, "pptx-text") : null;
     return { shape, el, textEl, pxPerPt };
   });
 }

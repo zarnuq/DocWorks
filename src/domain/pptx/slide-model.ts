@@ -3,6 +3,8 @@ import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { ColorContext, resolveColor } from "./color";
 import { customGeometry, GeomPath, Geometry, Handle, presetGeometry, Rect, Site } from "./geometry";
 import { Fill, fillCss, Line, readFill, readFillRef, readLine, readShadow, Shadow, ThemeStyles, themeStyles } from "./shape-style";
+import { cellRect, readTable, TableCell, TableModel } from "./table";
+import { Crop, readCrop } from "./slide-edit";
 
 export type { GeomPath, Rect } from "./geometry";
 
@@ -76,7 +78,8 @@ export interface ShapeModel {
   inherited: boolean;
   /** Lives inside a group: text editable, geometry not. */
   grouped: boolean;
-  kind: "sp" | "pic" | "table" | "frame";
+  /** "cell": one table cell's text, listed right after its table; el is the a:tc. */
+  kind: "sp" | "pic" | "table" | "frame" | "cell";
   name: string;
   rect: Rect;
   /** Degrees clockwise. */
@@ -99,7 +102,11 @@ export interface ShapeModel {
   shadow: Shadow | null;
   /** Media path of a picture. */
   image: string | null;
-  table: string[][] | null;
+  /** Pictures: the part of the image cut away on each side (a:srcRect). */
+  crop?: Crop | null;
+  table: TableModel | null;
+  /** For kind "cell": the cell, with its style-resolved fill and borders. */
+  cell?: TableCell;
   text: TextBody | null;
   /** Text box relative to the shape, when it differs from the shape (SmartArt txXfrm). */
   textRect: Rect | null;
@@ -108,6 +115,8 @@ export interface ShapeModel {
 export interface SlideModel {
   path: string;
   background: { color: string | null; image: string | null };
+  /** The slide's own fill background (p:bg/p:bgPr); null when it inherits or uses a picture / theme style. */
+  ownBackground: Fill | null;
   shapes: ShapeModel[];
   notes: string;
 }
@@ -326,7 +335,7 @@ const applyTransform = (r: Rect, t: Transform): Rect => ({
   h: Math.round(r.h * t.sy),
 });
 
-function plainText(txBody: Element | null): string {
+export function plainText(txBody: Element | null): string {
   return kids(txBody, NS.a, "p")
     .map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join(""))
     .join("\n");
@@ -380,6 +389,7 @@ class SlideParser {
     if (this.layout && layoutPath && showMaster(slide)) this.walkPart(this.layout, layoutPath);
     this.walkPart(slide, this.slidePath);
 
+    const ownBgPr = kid(kid(slide.getElementsByTagNameNS(NS.p, "cSld")[0], NS.p, "bg"), NS.p, "bgPr");
     const notesPath = this.doc.notesOf(this.slidePath);
     const notesSp = Array.from(this.doc.xml(notesPath ?? "")?.getElementsByTagNameNS(NS.p, "sp") ?? []).find(
       (sp) => phOf(sp)?.type === "body"
@@ -388,6 +398,7 @@ class SlideParser {
     return {
       path: this.slidePath,
       background: this.bg,
+      ownBackground: ownBgPr ? readFill(ownBgPr, null, this.colors, this.theme) : null,
       shapes: this.shapes,
       notes: notesSp ? plainText(kid(notesSp, NS.p, "txBody")) : "",
     };
@@ -454,6 +465,7 @@ class SlideParser {
           shape.rect = applyTransform(shape.rect, t);
           shape.grouped = grouped;
           this.shapes.push(shape);
+          if (shape.table) this.shapes.push(...this.cells(shape));
         }
       }
     }
@@ -473,6 +485,64 @@ class SlideParser {
     if (!tree || !drawingPath || !at) return false;
     this.walk(tree, drawingPath, { ...t, dx: t.dx + at.rect.x * t.sx, dy: t.dy + at.rect.y * t.sy }, false, true);
     return true;
+  }
+
+  /** Text shapes for a table's cells; covered (merged-away) cells have no text. */
+  private cells(table: ShapeModel): ShapeModel[] {
+    const txStyles = this.master?.getElementsByTagNameNS(NS.p, "txStyles")[0];
+    const pres = this.doc.xml("ppt/presentation.xml");
+    const t = table.table!;
+    return t.cells.flat().map((cell) => {
+      const r = cellRect(t, cell);
+      const tcPr = kid(cell.el, NS.a, "tcPr");
+      const txBody = kid(cell.el, NS.a, "txBody");
+      const style: TextStyle = {
+        chain: [
+          kid(txBody, NS.a, "lstStyle"),
+          cellTextStyle(cell),
+          kid(txStyles, NS.p, "otherStyle"),
+          pres?.getElementsByTagNameNS(NS.p, "defaultTextStyle")[0] ?? null,
+        ],
+        fontRefColor: null,
+        colors: this.colors,
+        fonts: this.fonts,
+        links: { target: (id) => this.doc.relTarget(table.part, id), add: (url) => this.doc.linkRel(table.part, url) },
+      };
+      const inset = (attr: string, d: number) => num(tcPr, attr) ?? d;
+      const anchor = tcPr?.getAttribute("anchor");
+      return {
+        ...table,
+        el: cell.el,
+        kind: "cell",
+        name: `${table.name} cell ${cell.r + 1},${cell.c + 1}`,
+        grouped: true,
+        rect: { x: table.rect.x + r.x, y: table.rect.y + r.y, w: r.w, h: r.h },
+        rot: 0,
+        placeholder: false,
+        paths: null,
+        handles: [],
+        sites: [],
+        table: null,
+        cell,
+        fill: null,
+        line: null,
+        shadow: null,
+        text:
+          txBody && !cell.hidden
+            ? {
+                el: txBody,
+                paras: readParagraphs(txBody, style),
+                anchor: anchor === "ctr" || anchor === "b" ? anchor : "t",
+                autofit: "none",
+                wrap: true,
+                insets: { l: inset("marL", 91440), r: inset("marR", 91440), t: inset("marT", 45720), b: inset("marB", 45720) },
+                fontScale: 1,
+                lnSpcReduction: 0,
+                style,
+              }
+            : null,
+      };
+    });
   }
 
   private shape(el: Element, part: string, inherited: boolean): ShapeModel | null {
@@ -533,6 +603,7 @@ class SlideParser {
       model.kind = "pic";
       const blip = kid(kid(el, ns, "blipFill"), NS.a, "blip");
       model.image = this.doc.relTarget(part, blip?.getAttributeNS(NS.r, "embed") ?? "");
+      model.crop = readCrop(el);
       model.fill = null;
       return model;
     }
@@ -540,9 +611,10 @@ class SlideParser {
     if (el.localName === "graphicFrame") {
       const tbl = el.getElementsByTagNameNS(NS.a, "tbl")[0];
       model.kind = tbl ? "table" : "frame";
-      model.table = tbl
-        ? kids(tbl, NS.a, "tr").map((tr) => kids(tr, NS.a, "tc").map((tc) => plainText(kid(tc, NS.a, "txBody"))))
-        : null;
+      const styles = this.doc.xml(this.doc.relOfType("ppt/presentation.xml", "tableStyles") ?? "");
+      model.table = tbl ? readTable(tbl, styles, this.colors) : null;
+      model.fill = null;
+      model.line = null;
       return model;
     }
 
@@ -596,6 +668,15 @@ class SlideParser {
     }
     return model;
   }
+}
+
+/** The table style's bold / color for a cell, as a list style slotted into the cell's text style chain. */
+function cellTextStyle(cell: TableCell): Element | null {
+  const { b, color } = cell.text;
+  if (b === null && !color) return null;
+  const rPr = `<a:defRPr${b === null ? "" : ` b="${b ? 1 : 0}"`}>${color ? `<a:solidFill><a:srgbClr val="${color.slice(1, 7)}"/></a:solidFill>` : ""}</a:defRPr>`;
+  const lvls = Array.from({ length: 9 }, (_, i) => `<a:lvl${i + 1}pPr>${rPr}</a:lvl${i + 1}pPr>`).join("");
+  return new DOMParser().parseFromString(`<a:lstStyle xmlns:a="${NS.a}">${lvls}</a:lstStyle>`, "application/xml").documentElement;
 }
 
 export function parseSlide(doc: PptxDocument, slidePath: string): SlideModel {

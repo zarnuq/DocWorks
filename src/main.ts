@@ -1,6 +1,12 @@
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, TFolder, WorkspaceLeaf } from "obsidian";
+import { blankDocx, blankPptx } from "./infrastructure/blank";
 import { DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
 import { PptxView, VIEW_TYPE_PPTX } from "./presentation/pptx/pptx-view";
+
+const NEW_FILES = [
+  ["new-presentation", "New presentation", "presentation", "pptx", blankPptx],
+  ["new-document", "New document", "file-text", "docx", blankDocx],
+] as const;
 
 export default class DocWorksPlugin extends Plugin {
   async onload() {
@@ -24,6 +30,22 @@ export default class DocWorksPlugin extends Plugin {
       });
     }
 
+    for (const [id, name, , ext, make] of NEW_FILES) {
+      this.addCommand({
+        id,
+        name,
+        callback: () => void this.createFile(ext, make, this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path ?? "")),
+      });
+    }
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!(file instanceof TFolder)) return;
+        for (const [, name, icon, ext, make] of NEW_FILES) {
+          menu.addItem((item) => item.setTitle(name).setIcon(icon).onClick(() => void this.createFile(ext, make, file)));
+        }
+      })
+    );
+
     // Flush any pending debounced save when Obsidian is closing/reloading.
     this.registerEvent(
       (this.app.workspace as { on(name: string, cb: () => Promise<void>): import("obsidian").EventRef }).on(
@@ -37,6 +59,16 @@ export default class DocWorksPlugin extends Plugin {
         }
       )
     );
+  }
+
+  /** Create "Untitled.<ext>" (or "Untitled 1"...) in `folder` from a blank template and open it. */
+  private async createFile(ext: string, make: () => Promise<Uint8Array>, folder: TFolder): Promise<void> {
+    const dir = folder.isRoot() ? "" : `${folder.path}/`;
+    let path = `${dir}Untitled.${ext}`;
+    for (let i = 1; this.app.vault.getAbstractFileByPath(path); i++) path = `${dir}Untitled ${i}.${ext}`;
+    const bytes = await make();
+    const file = await this.app.vault.createBinary(path, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    await this.app.workspace.getLeaf("tab").openFile(file);
   }
 
   /** Another plugin may already own the extension; keep loading instead of failing. */

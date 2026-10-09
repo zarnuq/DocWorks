@@ -33,6 +33,16 @@ describe("writeParagraphs", () => {
     }
   });
 
+  it("keeps an explicit lvl=\"0\" when unchanged", async () => {
+    const { shape } = await shapeOn(2, "TextBox 1");
+    const p = shape.text!.el.getElementsByTagNameNS(A, "p")[0];
+    if (!pPrs(shape).length) p.prepend(p.ownerDocument.createElementNS(A, "a:pPr"));
+    pPrs(shape)[0].setAttribute("lvl", "0");
+    const before = ser(shape.text!.el);
+    edit(shape, () => {});
+    expect(ser(shape.text!.el)).toBe(before);
+  });
+
   it("keeps line breaks and fields byte-identical when unchanged", async () => {
     const { reparse, shape: original } = await shapeOn(2, "TextBox 1");
     const p = original.text!.el.getElementsByTagNameNS(A, "p")[0];

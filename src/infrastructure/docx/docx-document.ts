@@ -1,24 +1,17 @@
 import JSZip from "jszip";
 import { NS, childNS } from "../../core/utils/xml";
+import { IMAGE_MIME } from "../../core/utils/images";
 import { OoxmlPackage, parseXml } from "../ooxml/ooxml-package";
+import { wVal } from "../../domain/docx/docx-reader";
+import { numberingLevel } from "../../domain/docx/docx-styles";
 
 export type ListKind = "bullet" | "ordered";
 
 const DEFAULT_MAIN = "word/document.xml";
 const NUMBERING_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
-const IMAGE_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  bmp: "image/bmp",
-  svg: "image/svg+xml",
-  webp: "image/webp",
-};
 const BULLETS = ["•", "◦", "▪"];
 const ORDERED_FORMATS = ["decimal", "lowerLetter", "lowerRoman"];
 
-const wVal = (el: Element | null | undefined, attr = "val") => el?.getAttributeNS(NS.w, attr) ?? null;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -52,7 +45,50 @@ const BUILTIN_STYLES: Record<string, readonly [string, string, string]> = {
   Heading5: heading(4, 22),
   Heading6: heading(5, 22, "<w:i/>"),
   Quote: ["Quote", `<w:ind w:left="720" w:right="720"/>`, `<w:i/>`],
+  TOCHeading: ["TOC Heading", `<w:keepNext/><w:spacing w:before="240" w:after="120"/>`, `<w:b/><w:sz w:val="28"/>`],
+  TOC1: ["toc 1", `<w:spacing w:after="100"/>`, ``],
+  TOC2: ["toc 2", `<w:spacing w:after="100"/><w:ind w:left="220"/>`, ``],
+  TOC3: ["toc 3", `<w:spacing w:after="100"/><w:ind w:left="440"/>`, ``],
 };
+
+/** Tail of CT_Settings' child order, from the settings we add onward. */
+const SETTINGS_ORDER = ["alwaysMergeEmptyNamespace", "updateFields", "hdrShapeDefaults", "footnotePr", "endnotePr", "compat", "docVars", "rsids", "mathPr", "attachedSchema", "themeFontLang", "clrSchemeMapping", "doNotIncludeSubdocsInStats", "doNotAutoCompressPictures", "forceUpgrade", "captions", "readModeInkLockDown", "smartTagType", "schemaLibrary", "shapeDefaults", "doNotEmbedSmartTags", "decimalSymbol", "listSeparator"];
+
+const nextId = (part: Document, tag: string) =>
+  Array.from(part.getElementsByTagNameNS(NS.w, tag)).reduce((m, e) => Math.max(m, Number(wVal(e, "id")) || 0), 0) + 1;
+
+/** Plain text of a comment or footnote: one line per paragraph. */
+function noteText(el: Element): string {
+  return Array.from(el.getElementsByTagNameNS(NS.w, "p"))
+    .map((p) => Array.from(p.getElementsByTagNameNS(NS.w, "t")).map((t) => t.textContent).join(""))
+    .join("\n")
+    .replace(/^\s+/, "");
+}
+
+/**
+ * Replace a comment's or footnote's text, one paragraph per line. The first
+ * paragraph's properties and its reference mark run (w:annotationRef /
+ * w:footnoteRef) are kept.
+ */
+function setNoteText(el: Element, text: string): void {
+  const doc = el.ownerDocument;
+  const first = el.getElementsByTagNameNS(NS.w, "p")[0];
+  const pPr = first && childNS(first, NS.w, "pPr");
+  const mark = first && Array.from(first.children).find((r) => r.localName === "r" && Array.from(r.children).some((c) => /^(annotationRef|footnoteRef|endnoteRef)$/.test(c.localName)));
+  el.replaceChildren();
+  text.split("\n").forEach((line, i) => {
+    const p = el.appendChild(doc.createElementNS(NS.w, "w:p"));
+    if (pPr) p.appendChild(pPr.cloneNode(true));
+    if (i === 0 && mark) {
+      p.appendChild(mark.cloneNode(true));
+      if (mark.getElementsByTagNameNS(NS.w, "footnoteRef").length) line = ` ${line}`;
+    }
+    if (!line) return;
+    const t = p.appendChild(doc.createElementNS(NS.w, "w:r")).appendChild(doc.createElementNS(NS.w, "w:t"));
+    t.setAttributeNS(NS.xml, "xml:space", "preserve");
+    t.textContent = line;
+  });
+}
 
 /**
  * A .docx package. The main document part stays a live DOM; the editor rewrites
@@ -126,6 +162,151 @@ export class DocxDocument extends OoxmlPackage {
     return rel ? rel.target : null;
   }
 
+  // --- Headers and footers ---------------------------------------------------
+
+  /** The body's final w:sectPr (page setup), created if asked. */
+  private finalSectPr(create: boolean): Element | null {
+    const last = this.body.lastElementChild;
+    if (last?.localName === "sectPr" && last.namespaceURI === NS.w) return last;
+    if (!create) return null;
+    return this.body.appendChild(this.document.createElementNS(NS.w, "w:sectPr"));
+  }
+
+  /** Root (w:hdr / w:ftr) of the default header or footer, if the document has one. */
+  headerFooter(kind: "header" | "footer"): Element | null {
+    const ref = Array.from(this.finalSectPr(false)?.children ?? []).find(
+      (c) => c.localName === `${kind}Reference` && (wVal(c, "type") ?? "default") === "default"
+    );
+    const path = ref && this.relTarget(this.mainPath, ref.getAttributeNS(NS.r, "id") ?? "");
+    return (path && this.xml(path)?.documentElement) || null;
+  }
+
+  /** The default header or footer, created (empty) if missing. */
+  ensureHeaderFooter(kind: "header" | "footer"): Element {
+    const existing = this.headerFooter(kind);
+    if (existing) return existing;
+    const path = this.nextPartPath(`word/${kind}`, ".xml");
+    const tag = kind === "header" ? "hdr" : "ftr";
+    this.parts.set(path, parseXml(`<w:${tag} xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:p/></w:${tag}>`)!);
+    this.addOverride(path, `application/vnd.openxmlformats-officedocument.wordprocessingml.${kind}+xml`);
+    const rId = this.addRel(this.mainPath, kind, path);
+    const sectPr = this.finalSectPr(true)!;
+    const ref = this.document.createElementNS(NS.w, `w:${kind}Reference`);
+    ref.setAttributeNS(NS.w, "w:type", "default");
+    ref.setAttributeNS(NS.r, "r:id", rId);
+    // Header / footer references come first in w:sectPr.
+    const before = Array.from(sectPr.children).find((c) => !c.localName.endsWith("Reference")) ?? null;
+    sectPr.insertBefore(ref, before);
+    return this.headerFooter(kind)!;
+  }
+
+  // --- Comments ----------------------------------------------------------------
+
+  private partOf(type: string): Document | null {
+    const path = this.relOfType(this.mainPath, type);
+    return path ? this.xml(path) : null;
+  }
+
+  /** A part related from the main document, created from `rootXml` if missing. */
+  private ensurePart(type: string, file: string, rootXml: string): Document {
+    const existing = this.partOf(type);
+    if (existing) return existing;
+    const path = `word/${file}.xml`;
+    this.parts.set(path, parseXml(rootXml)!);
+    this.addOverride(path, `application/vnd.openxmlformats-officedocument.wordprocessingml.${file}+xml`);
+    this.addRel(this.mainPath, type, path);
+    return this.parts.get(path)!;
+  }
+
+  private notes(part: Document | null, tag: string): Element[] {
+    return Array.from(part?.getElementsByTagNameNS(NS.w, tag) ?? []).filter((n) => !["separator", "continuationSeparator", "continuationNotice"].includes(wVal(n, "type") ?? ""));
+  }
+
+  comments(): { id: string; author: string; initials: string; date: string; text: string }[] {
+    return this.notes(this.partOf("comments"), "comment").map((c) => ({
+      id: wVal(c, "id") ?? "",
+      author: wVal(c, "author") ?? "",
+      initials: wVal(c, "initials") ?? "",
+      date: wVal(c, "date") ?? "",
+      text: noteText(c),
+    }));
+  }
+
+  /** New comment; returns its id (anchor it in the text with the editor's addCommentAnchors). */
+  addComment(text: string, author: string): string {
+    const part = this.ensurePart("comments", "comments", `<w:comments xmlns:w="${NS.w}"/>`);
+    const id = String(nextId(part, "comment"));
+    const initials = author.split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase()).join("").slice(0, 3);
+    const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    const el = part.createElementNS(NS.w, "w:comment");
+    for (const [k, v] of [["id", id], ["author", author], ["date", date], ["initials", initials]]) el.setAttributeNS(NS.w, `w:${k}`, v);
+    part.documentElement.appendChild(el);
+    setNoteText(el, text);
+    return id;
+  }
+
+  setCommentText(id: string, text: string): void {
+    const el = this.notes(this.partOf("comments"), "comment").find((c) => wVal(c, "id") === id);
+    if (el) setNoteText(el, text);
+  }
+
+  deleteComment(id: string): void {
+    this.notes(this.partOf("comments"), "comment").find((c) => wVal(c, "id") === id)?.remove();
+  }
+
+  // --- Footnotes -------------------------------------------------------------------
+
+  footnotes(): { id: string; text: string }[] {
+    return this.notes(this.partOf("footnotes"), "footnote").map((f) => ({ id: wVal(f, "id") ?? "", text: noteText(f) }));
+  }
+
+  /** New footnote; returns its id (place the reference with the editor's insertFootnote). */
+  addFootnote(text: string): string {
+    const fresh = !this.partOf("footnotes");
+    const sep = (type: string, id: number, mark: string) =>
+      `<w:footnote w:type="${type}" w:id="${id}"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:${mark}/></w:r></w:p></w:footnote>`;
+    const part = this.ensurePart(
+      "footnotes",
+      "footnotes",
+      `<w:footnotes xmlns:w="${NS.w}">${sep("separator", -1, "separator")}${sep("continuationSeparator", 0, "continuationSeparator")}</w:footnotes>`
+    );
+    if (fresh) this.ensureSetting("footnotePr", `<w:footnotePr><w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>`);
+    const id = String(Math.max(1, nextId(part, "footnote")));
+    const el = parseXml(`<w:footnote xmlns:w="${NS.w}" w:id="${id}"><w:p><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:footnoteRef/></w:r></w:p></w:footnote>`)!.documentElement;
+    const node = part.documentElement.appendChild(part.importNode(el, true));
+    setNoteText(node, text);
+    return id;
+  }
+
+  setFootnoteText(id: string, text: string): void {
+    const el = this.notes(this.partOf("footnotes"), "footnote").find((f) => wVal(f, "id") === id);
+    if (el) setNoteText(el, text);
+  }
+
+  deleteFootnote(id: string): void {
+    this.notes(this.partOf("footnotes"), "footnote").find((f) => wVal(f, "id") === id)?.remove();
+  }
+
+  /** Styles a table of contents uses, and a request for Word to refresh fields (page numbers) on open. */
+  prepareToc(): void {
+    this.ensureParagraphStyles(["TOCHeading", "TOC1", "TOC2", "TOC3"]);
+    this.ensureSetting("updateFields", `<w:updateFields w:val="true"/>`);
+  }
+
+  /** Add a document setting (settings.xml) at its schema position, if the document has settings and lacks it. */
+  ensureSetting(local: string, xml: string): void {
+    const settings = this.partOf("settings");
+    if (!settings || settings.getElementsByTagNameNS(NS.w, local).length) return;
+    const root = settings.documentElement;
+    const at = SETTINGS_ORDER.indexOf(local);
+    const before = Array.from(root.children).find((c) => SETTINGS_ORDER.indexOf(c.localName) > at) ?? null;
+    root.insertBefore(settings.importNode(parseXml(`<r xmlns:w="${NS.w}">${xml}</r>`)!.documentElement.firstElementChild!, true), before);
+  }
+
+  hyperlinkRel(href: string): string {
+    return this.rels(this.mainPath).find((r) => r.type === "hyperlink" && r.external && r.target === href)?.id ?? this.addRel(this.mainPath, "hyperlink", href, true);
+  }
+
   /** Store an image and relate it to the document. Returns the rId. */
   addImage(bytes: Uint8Array, ext: string): string {
     return this.addRel(this.mainPath, "image", this.storeImage("word", bytes, ext));
@@ -147,12 +328,7 @@ export class DocxDocument extends OoxmlPackage {
   }
 
   listLevel(numId: string, ilvl: number): Element | null {
-    const numbering = this.numberingXml();
-    if (!numbering) return null;
-    const num = Array.from(numbering.getElementsByTagNameNS(NS.w, "num")).find((n) => wVal(n, "numId") === numId);
-    const absId = wVal(num && childNS(num, NS.w, "abstractNumId"));
-    const abs = Array.from(numbering.getElementsByTagNameNS(NS.w, "abstractNum")).find((a) => wVal(a, "abstractNumId") === absId);
-    return Array.from(abs?.getElementsByTagNameNS(NS.w, "lvl") ?? []).find((l) => wVal(l, "ilvl") === String(ilvl)) ?? null;
+    return numberingLevel(this.numberingXml(), numId, ilvl);
   }
 
   /** A numId for a multi-level bullet/ordered list, reusing one we created before or creating it. */
