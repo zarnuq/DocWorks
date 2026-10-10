@@ -5,6 +5,7 @@
  */
 import { CHARS, FONT_ALIASES, FONT_WIDTHS, UNITS_PER_EM } from "./font-metrics";
 import { fontStack } from "../../core/utils/fonts";
+import { KERN_CHARS, KERN_UNITS, KERNING } from "./font-kerning";
 
 export { fontStack };
 
@@ -39,8 +40,45 @@ function context(): OffscreenCanvasRenderingContext2D | null {
   return canvas.ctx;
 }
 
-/** Letter-spacing (px) that makes `text` as wide as in `font`; null when the font or a canvas is unavailable. */
-export function letterSpacing(text: string, run: { font: string; b: boolean; i: boolean }, sizePx: number): number | null {
+const KERN_INDEX = new Map([...KERN_CHARS].map((ch, i) => [ch, i]));
+const kernTables = new Map<string, Map<number, number> | null>();
+
+/** Pair adjustments of a font ([first index * 256 + second] -> 1/KERN_UNITS em), null if it has none. */
+function kernTable(font: string, b: boolean): Map<number, number> | null {
+  const name = font.toLowerCase();
+  const key = `${name}/${b}`;
+  if (!kernTables.has(key)) {
+    const data = KERNING[FONT_ALIASES[name] ?? name]?.[b ? 1 : 0];
+    let table: Map<number, number> | null = null;
+    if (data) {
+      const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+      table = new Map();
+      for (let k = 0; k + 2 < bytes.length; k += 3) table.set(bytes[k] * 256 + bytes[k + 1], (bytes[k + 2] << 24) >> 24);
+    }
+    kernTables.set(key, table);
+  }
+  return kernTables.get(key)!;
+}
+
+/** Total kerning of `text` in `font`, in em (negative: the pairs close up). Italic uses the upright pairs. */
+export function kerningEm(text: string, font: string, b: boolean): number {
+  const table = kernTable(font, b);
+  if (!table) return 0;
+  const chars = [...text];
+  let units = 0;
+  for (let k = 1; k < chars.length; k++) {
+    const x = KERN_INDEX.get(chars[k - 1]);
+    const y = KERN_INDEX.get(chars[k]);
+    if (x !== undefined && y !== undefined) units += table.get(x * 256 + y) ?? 0;
+  }
+  return units / KERN_UNITS;
+}
+
+/**
+ * Letter-spacing (px) that makes `text` as wide as in `font` (with its kerning when `kern`); null when the font or
+ * a canvas is unavailable.
+ */
+export function letterSpacing(text: string, run: { font: string; b: boolean; i: boolean; kern?: boolean }, sizePx: number): number | null {
   const table = widthTable(run.font, run.b, run.i);
   const ctx = table && context();
   if (!table || !ctx || !text) return null;
@@ -52,6 +90,7 @@ export function letterSpacing(text: string, run: { font: string; b: boolean; i: 
     if (w) units += w;
     else missing += ch;
   }
-  const target = (units / UNITS_PER_EM) * sizePx + (missing ? ctx.measureText(missing).width : 0);
+  const kerning = run.kern ? kerningEm(text, run.font, run.b) * sizePx : 0;
+  const target = (units / UNITS_PER_EM) * sizePx + kerning + (missing ? ctx.measureText(missing).width : 0);
   return (target - ctx.measureText(text).width) / [...text].length;
 }

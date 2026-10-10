@@ -38,14 +38,19 @@ export function placementOf(drawing: Element | null): Placement {
   return { wrap, x: offset("positionH"), y: offset("positionV"), align: align === "left" || align === "right" || align === "center" ? align : null };
 }
 
+/** Width of the usual text column (6.5 in), for deciding which side a wrapped picture floats to. */
+const COLUMN = 624;
+
 /** CSS for a placement: floats for wrapped text, a block for break text, absolute for behind / in front. */
-export function placementCss(p: Placement): { cls: string; style: string } {
+export function placementCss(p: Placement, width = 0): { cls: string; style: string } {
   switch (p.wrap) {
     case "inline":
       return { cls: "", style: "" };
     case "square":
       if (p.align === "center") return { cls: "docx-wrap", style: "display: block; margin-left: auto; margin-right: auto" };
       if (p.align === "right") return { cls: "docx-wrap", style: `float: right; margin-top: ${p.y}px` };
+      // ponytail: a 6.5 in column is assumed; text wraps on one side only (CSS floats), Word wraps both.
+      if (!p.align && width && p.x + width / 2 > COLUMN / 2) return { cls: "docx-wrap", style: `float: right; margin-right: ${Math.max(0, COLUMN - p.x - width)}px; margin-top: ${p.y}px` };
       return { cls: "docx-wrap", style: `float: left; margin-left: ${p.align ? 0 : p.x}px; margin-top: ${p.y}px` };
     case "topBottom":
       if (p.align === "center") return { cls: "docx-wrap", style: "display: block; margin-left: auto; margin-right: auto" };

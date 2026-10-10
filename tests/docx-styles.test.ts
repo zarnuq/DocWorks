@@ -149,3 +149,34 @@ describe("line height follows the text, not the style", () => {
     expect(css).not.toContain("font-size: 10pt");
   });
 });
+
+describe("table borders from the table style", () => {
+  const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  const styles = new DocxStyles(
+    new DOMParser().parseFromString(
+      `<w:styles xmlns:w="${W}"><w:style w:type="table" w:styleId="TableGrid"><w:tblPr><w:tblBorders>` +
+        ["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="single" w:sz="4"/>`).join("") +
+        `</w:tblBorders></w:tblPr></w:style><w:style w:type="table" w:styleId="Plain"><w:basedOn w:val="TableNormal"/></w:style></w:styles>`,
+      "application/xml"
+    ),
+    null
+  );
+
+  it("has no borders without a style (Word's Table Normal), else the style's", () => {
+    expect(styles.tableBorders(null)).toBe("none");
+    expect(styles.tableBorders("Plain")).toBe("none");
+    expect(styles.tableBorders("TableGrid")).toBe("all");
+  });
+
+  it("draws a table without borders of its own with its style's (a header's empty layout table shows none)", () => {
+    const xml = new DOMParser().parseFromString(
+      `<w:body xmlns:w="${W}"><w:tbl><w:tblPr/><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl><w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/></w:tblPr><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl></w:body>`,
+      "application/xml"
+    ).documentElement;
+    const { doc } = readDocx(xml, { imageSrc: () => null, hyperlinkHref: () => null });
+    const div = document.createElement("div");
+    div.appendChild(DOMSerializer.fromSchema(schema).serializeFragment(doc.content, { document }));
+    styleRenderedParagraphs(div, doc, styles);
+    expect(Array.from(div.querySelectorAll("table")).map((t) => t.className)).toEqual(["docx-borders-none", "docx-borders-all"]);
+  });
+});

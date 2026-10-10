@@ -18,6 +18,7 @@ import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./
 import { headerFooterType, pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
 import { attrsOf, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView } from "./docx-image-view";
+import { TextBoxView } from "./docx-textbox-view";
 
 export interface DocWorksSettings {
   /** "document": pages use the document's own size; "letter": always 8.5 x 11 in. */
@@ -194,6 +195,8 @@ export class DocxView extends FileView {
                 if (node) view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, alt }));
               }),
           }),
+        // Text boxes are edited in place; other run content is drawn as usual.
+        opaque: (node, view, getPos) => new TextBoxView(node, view, getPos, ctx, { imageSrc: (id) => urls.get(id) ?? null, hyperlinkHref: (id) => docx.hyperlinkHref(id) }, docx),
       },
       dispatchTransaction: (tr) => {
         if (!this.editor) return;

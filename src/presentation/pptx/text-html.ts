@@ -119,7 +119,8 @@ export function renderParagraphs(
         styleRun(span, runPatch(run), pxPerPt);
         // Match PowerPoint's widths (font fitting) plus the run's own character spacing.
         // All-caps text is drawn (so measured) in capitals.
-        const ls = (letterSpacing(run.cap === "all" ? segment.toUpperCase() : segment, run, run.sz * pxPerPt) ?? 0) + run.spc * pxPerPt;
+        const kern = !!run.kern && run.sz >= run.kern;
+        const ls = (letterSpacing(run.cap === "all" ? segment.toUpperCase() : segment, { ...run, kern }, run.sz * pxPerPt) ?? 0) + run.spc * pxPerPt;
         if (Math.abs(ls) > 0.01) span.style.letterSpacing = `${ls}px`;
       });
     }

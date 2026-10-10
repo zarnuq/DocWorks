@@ -26,6 +26,8 @@ export interface RunProps {
   cap: "none" | "all" | "small";
   /** Hyperlink address (a:hlinkClick). */
   link: string | null;
+  /** Smallest size (pt) PowerPoint kerns at (a:rPr kern); absent or 0: no kerning. */
+  kern?: number;
 }
 
 export interface Run extends RunProps {
@@ -171,6 +173,7 @@ function mergeRunProps(props: Partial<RunProps>, rPr: Element | null, style: Tex
   if (props.strike === undefined && rPr.hasAttribute("strike")) props.strike = rPr.getAttribute("strike") !== "noStrike";
   if (props.sz === undefined && rPr.hasAttribute("sz")) props.sz = Number(rPr.getAttribute("sz")) / 100;
   if (props.spc === undefined && rPr.hasAttribute("spc")) props.spc = Number(rPr.getAttribute("spc")) / 100;
+  if (props.kern === undefined && rPr.hasAttribute("kern")) props.kern = Number(rPr.getAttribute("kern")) / 100;
   if (props.cap === undefined && rPr.hasAttribute("cap")) props.cap = (["all", "small"] as const).find((c) => c === rPr.getAttribute("cap")) ?? "none";
   const link = kid(rPr, NS.a, "hlinkClick")?.getAttributeNS(NS.r, "id");
   if (props.link === undefined && link) props.link = style.links?.target(link) ?? null;

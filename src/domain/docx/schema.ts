@@ -93,7 +93,7 @@ export interface LinkAttrs {
 }
 /** A text box: its paragraphs in a box of its size, placed like a picture. */
 function textBoxSpec(box: NonNullable<ReturnType<typeof textBoxOf>>, attrs: Record<string, string>): DOMOutputSpec {
-  const { cls, style } = placementCss(box.placement);
+  const { cls, style } = placementCss(box.placement, box.width);
   const css = [`width: ${box.width}px`, `height: ${box.height}px`, box.fill ? `background-color: ${box.fill}` : "", box.line ? `border: 1px solid ${box.line}` : "", style];
   return ["span", { ...attrs, class: `${attrs.class} docx-textbox ${cls}`.trim(), style: css.filter(Boolean).join("; ") }, ...box.paragraphs.map((t) => ["span", { class: "docx-textbox-p" }, t] as DOMOutputSpec)];
 }
@@ -256,7 +256,7 @@ export const docxSchema = new Schema({
       },
       toDOM: (node) => {
         const { src, alt, width, height, wrap, x, y, align } = attrsOf<ImageAttrs>(node);
-        const { cls, style } = placementCss({ wrap, x, y, align });
+        const { cls, style } = placementCss({ wrap, x, y, align }, width ?? 0);
         const size = `${width ? `width: ${width}px; ` : ""}${height ? `height: ${height}px; ` : ""}`;
         return ["img", { src, alt, class: `docx-image-node ${cls}`.trim(), style: size + style }];
       },

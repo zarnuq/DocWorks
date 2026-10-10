@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { letterSpacing, textWidthEm } from "../src/presentation/pptx/text-fit";
+import { kerningEm, letterSpacing, textWidthEm } from "../src/presentation/pptx/text-fit";
 import { renderParagraphs } from "../src/presentation/pptx/text-html";
 import type { Para, RunProps } from "../src/domain/pptx/slide-model";
 
@@ -98,5 +98,41 @@ describe("letter spacing for capitals", () => {
     const lower = letterSpacing("Contingent", run, 20)!;
     expect(caps).not.toBeCloseTo(lower, 3);
     expect(parseFloat(span.style.letterSpacing)).toBeCloseTo(caps, 3);
+  });
+});
+
+describe("kerning", () => {
+  it("sums the font's pair adjustments (AV and To close up in every common font)", () => {
+    for (const font of ["Calibri", "Arial", "Times New Roman", "Aptos"]) {
+      expect(kerningEm("AV", font, false)).toBeLessThan(0);
+      expect(kerningEm("To", font, true)).toBeLessThan(0);
+    }
+    expect(kerningEm("xx", "Calibri", false)).toBe(0);
+    expect(kerningEm("AV", "Wingdings", false)).toBe(0);
+    // Pairs are only between neighbours.
+    expect(kerningEm("A V", "Arial", false)).toBe(kerningEm("A ", "Arial", false) + kerningEm(" V", "Arial", false));
+  });
+
+  it("narrows the width text is fitted to when kerning is on", () => {
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    const plain = letterSpacing("AVATAR", { font: "Calibri", b: false, i: false }, 40)!;
+    const kerned = letterSpacing("AVATAR", { font: "Calibri", b: false, i: false, kern: true }, 40)!;
+    expect(kerned).toBeCloseTo(plain + (kerningEm("AVATAR", "Calibri", false) * 40) / 6, 5);
+  });
+
+  it("kerns slide text from PowerPoint's minimum size (a:rPr kern), not below it or without it", () => {
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    const host = document.body.appendChild(document.createElement("div"));
+    const defaults: RunProps = { b: false, i: false, u: false, strike: false, sz: 20, color: "#000000", font: "Calibri", spc: 0, cap: "none", link: null };
+    const run = (extra: Partial<RunProps>) => ({ ...defaults, text: "AVATAR", ...extra });
+    const para = (r: ReturnType<typeof run>): Para => ({ runs: [r], align: "l", lvl: 0, bullet: null, marL: 0, indent: 0, defaults });
+    const spacing = (r: ReturnType<typeof run>) => {
+      renderParagraphs(host, [para(r)], 1);
+      return parseFloat(host.querySelector("span")!.style.letterSpacing);
+    };
+    const off = spacing(run({}));
+    expect(spacing(run({ kern: 12 }))).toBeLessThan(off);
+    expect(spacing(run({ kern: 24 }))).toBeCloseTo(off, 5);
+    host.remove();
   });
 });

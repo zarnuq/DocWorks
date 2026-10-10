@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { textWidthEm } from "../src/presentation/pptx/text-fit";
+import { kerningEm, textWidthEm } from "../src/presentation/pptx/text-fit";
 import { EditorState, TextSelection, Command } from "prosemirror-state";
 import { DecorationSet, EditorView } from "prosemirror-view";
 import { docxSchema as schema } from "../src/domain/docx/schema";
@@ -309,8 +309,10 @@ describe("text as wide as in the document's font (when that font isn't installed
     vi.stubGlobal("OffscreenCanvas", FakeCanvas);
     const doc = s.doc.create(null, [s.paragraph.create(null, [schema.text("Hello ", [m.font.create({ font: "Calibri" }), m.size.create({ pt: 12 })]), schema.text("world", [m.font.create({ font: "Calibri" }), m.size.create({ pt: 12 }), m.bold.create()])])]);
     const [plain, bold] = spacing(doc);
+    expect(kerningEm("Hello ", "Calibri", false) + kerningEm("world", "Calibri", true)).not.toBe(0);
     const px = 12 * (96 / 72);
-    const want = (text: string, b: boolean) => ((textWidthEm(text, "Calibri", b, false)! - text.length * 0.6) * px) / text.length;
+    // Kerned, as Google Docs (and Word's default for new documents) draws them.
+    const want = (text: string, b: boolean) => ((textWidthEm(text, "Calibri", b, false)! + kerningEm(text, "Calibri", b) - text.length * 0.6) * px) / text.length;
     expect([plain.from, plain.to, bold.from, bold.to]).toEqual([1, 7, 7, 12]);
     expect(parseFloat(plain.style.slice(15))).toBeCloseTo(want("Hello ", false), 3);
     expect(parseFloat(bold.style.slice(15))).toBeCloseTo(want("world", true), 3);
@@ -327,7 +329,7 @@ describe("text as wide as in the document's font (when that font isn't installed
     );
     const [d] = spacing(s.doc.create(null, [s.paragraph.create(null, schema.text("Hello"))]), styles);
     const px = 10 * (96 / 72);
-    expect(parseFloat(d.style.slice(15))).toBeCloseTo(((textWidthEm("Hello", "Arial", false, false)! - 5 * 0.6) * px) / 5, 3);
+    expect(parseFloat(d.style.slice(15))).toBeCloseTo(((textWidthEm("Hello", "Arial", false, false)! + kerningEm("Hello", "Arial", false) - 5 * 0.6) * px) / 5, 3);
   });
 
   it("leaves fonts it has no widths for, and text without a canvas, alone", () => {

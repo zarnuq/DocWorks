@@ -793,7 +793,8 @@ function fitText(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number, dec
     const key = `${font}|${b}|${i}|${pt}|${text}`;
     if (!fitCache.has(key)) {
       if (fitCache.size > 20000) fitCache.clear();
-      fitCache.set(key, letterSpacing(text, { font, b, i }, (pt * 96) / 72));
+      // Kerned: Google Docs always kerns, and so does Word for new documents (w:kern in the default style).
+      fitCache.set(key, letterSpacing(text, { font, b, i, kern: true }, (pt * 96) / 72));
     }
     const ls = fitCache.get(key);
     if (ls !== null && ls !== undefined && Math.abs(ls) > 0.01) {
@@ -804,6 +805,17 @@ function fitText(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number, dec
 
 /** Give rendered paragraphs (header / footer bands, outside any editor) their document styling. */
 export function styleRenderedParagraphs(root: HTMLElement, doc: PMNode, styles: DocxStyles): void {
+  // Tables without borders of their own take their style's (as the editor's decorations do).
+  const tables = Array.from(root.querySelectorAll("table"));
+  let t = 0;
+  doc.descendants((node) => {
+    if (node.type !== schema.nodes.table) return true;
+    const el = tables[t++];
+    const a = attrsOf<TableAttrs>(node);
+    const borders = a.borders ? null : styles.tableBorders(a.style);
+    if (el && borders) el.classList.add(`docx-borders-${borders}`);
+    return true;
+  });
   const els = Array.from(root.querySelectorAll<HTMLElement>("p, h1, h2, h3, h4, h5, h6"));
   let i = 0;
   doc.descendants((node, pos) => {
@@ -827,6 +839,8 @@ function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
   doc.descendants((node, pos) => {
     if (node.type === schema.nodes.table) {
       tableDecorations(node, pos, decos);
+      const borders = attrsOf<TableAttrs>(node).borders ? null : styles.tableBorders(attrsOf<TableAttrs>(node).style);
+      if (borders) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `docx-borders-${borders}` }));
       return true;
     }
     if (node.type !== schema.nodes.paragraph) return true;

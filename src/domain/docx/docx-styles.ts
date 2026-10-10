@@ -2,7 +2,7 @@ import { Node as PMNode } from "prosemirror-model";
 import { NS } from "../../core/utils/xml";
 import { fontStack } from "../../core/utils/fonts";
 import { letterNumber, romanNumber } from "../../core/utils/numbering";
-import { w, wVal } from "./docx-reader";
+import { bordersOf, w, wVal } from "./docx-reader";
 import { attrsOf, ParagraphAttrs } from "./schema";
 
 /** Marker drawn before a list paragraph. */
@@ -172,6 +172,13 @@ export class DocxStyles {
     const out = css.join("; ");
     this.cssCache.set(cacheKey, out);
     return out;
+  }
+
+  /** Borders a table gets from its style when it sets none itself: none without a style (Word's "Table Normal"). */
+  tableBorders(styleId: string | null): "all" | "outer" | "none" | null {
+    if (!styleId) return "none";
+    const own = this.chain(styleId).map((s) => w(w(s, "tblPr"), "tblBorders")).find(Boolean);
+    return own ? bordersOf(own.parentElement) : "none";
   }
 
   /** Whether a paragraph style keeps with the next paragraph / keeps its lines together. */

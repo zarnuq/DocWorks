@@ -38,6 +38,8 @@ describe("where a picture sits (Word's / Google Docs' wrap options)", () => {
     expect(placementCss({ wrap: "square", x: 81, y: 10, align: null })).toMatchObject({ cls: "docx-wrap" });
     expect(placementCss({ wrap: "square", x: 81, y: 10, align: null }).style).toContain("float: left; margin-left: 81px; margin-top: 10px");
     expect(placementCss({ wrap: "square", x: 0, y: 0, align: "right" }).style).toContain("float: right");
+    // Offset toward the right of the column: floats right, so text wraps on its left (Word wraps both sides).
+    expect(placementCss({ wrap: "square", x: 336, y: 0, align: null }, 240).style).toContain("float: right; margin-right: 48px");
     expect(placementCss({ wrap: "topBottom", x: 0, y: 0, align: "center" }).style).toContain("display: block; margin-left: auto; margin-right: auto");
     expect(placementCss({ wrap: "behind", x: 20, y: 5, align: null })).toEqual({ cls: "docx-float docx-behind", style: "left: 20px; top: 5px" });
     expect(placementCss(INLINE)).toEqual({ cls: "", style: "" });
@@ -116,6 +118,53 @@ describe("picture options in the editor", () => {
     select.dispatchEvent(new Event("change"));
     expect(view.state.doc.child(0).child(0).attrs.wrap).toBe("inline");
     expect(view.dom.querySelector<HTMLElement>(".docx-image")!.style.float).toBe("");
+    view.destroy();
+  });
+});
+
+describe("editing text boxes", () => {
+  const box = (fallback = true) =>
+    `<w:r ${NSS} xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:v="urn:schemas-microsoft-com:vml"><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:anchor distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="5" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>` +
+    pos(`<wp:posOffset>0</wp:posOffset>`) +
+    `<wp:extent cx="1905000" cy="952500"/><wp:wrapSquare wrapText="bothSides"/><wp:docPr id="4" name="Text Box 4"/><a:graphic><a:graphicData uri="x"><wps:wsp><wps:txbx><w:txbxContent><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>Old text</w:t></w:r></w:p></w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice>` +
+    (fallback ? `<mc:Fallback><w:pict><v:shape><v:textbox><w:txbxContent><w:p><w:r><w:t>Old text</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></mc:Fallback>` : "") +
+    `</mc:AlternateContent></w:r>`;
+
+  it("reads a text box's paragraphs and writes edits back to it and its fallback picture", async () => {
+    const { readTextBox, writeTextBox } = await import("../src/domain/docx/textbox");
+    const xml = box();
+    const read = readTextBox(xml, { imageSrc: () => null, hyperlinkHref: () => null })!;
+    expect(read.doc.textContent).toBe("Old text");
+    expect(read.doc.child(0).attrs.align).toBe("center");
+    let st = EditorState.create({ doc: read.doc });
+    st = st.apply(st.tr.insertText("New ", 1));
+    const out = writeTextBox(xml, st.doc, read.origins, { nextDocPrId: () => 1 });
+    const root = new DOMParser().parseFromString(out, "application/xml").documentElement;
+    const contents = Array.from(root.getElementsByTagNameNS(W, "txbxContent"));
+    expect(contents.map((c) => c.textContent)).toEqual(["New Old text", "New Old text"]);
+    // Formatting the editor doesn't touch is kept.
+    expect(contents[0].getElementsByTagNameNS(W, "jc")).toHaveLength(1);
+    expect(readTextBox("<w:r xmlns:w=\"" + W + "\"><w:t>x</w:t></w:r>", { imageSrc: () => null, hyperlinkHref: () => null })).toBeNull();
+  });
+
+  it("edits a text box in place in the document", async () => {
+    const { EditorView } = await import("prosemirror-view");
+    const { TextBoxView } = await import("../src/presentation/docx/docx-textbox-view");
+    const { DocxStyles } = await import("../src/domain/docx/docx-styles");
+    const ctx = { ensureList: () => "1", listKind: () => null, styles: new DocxStyles(null, null) };
+    const opaque = schema.nodes.opaque.create({ xml: box(false), text: "" });
+    const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, [opaque, schema.text("after")]));
+    const view = new EditorView(document.body.appendChild(document.createElement("div")), {
+      state: EditorState.create({ doc }),
+      nodeViews: { opaque: (node, v, getPos) => new TextBoxView(node, v, getPos, ctx, { imageSrc: () => null, hyperlinkHref: () => null }, { nextDocPrId: () => 1 }) },
+    });
+    const inner = view.dom.querySelector(".docx-textbox .ProseMirror")!;
+    expect(inner.textContent).toBe("Old text");
+    const sub = (view.dom.querySelector(".docx-textbox") as HTMLElement & { pmView?: unknown }) && TextBoxView.editorOf(view.dom.querySelector(".docx-textbox")!)!;
+    sub.dispatch(sub.state.tr.insertText("Edited ", 1));
+    expect(view.state.doc.child(0).child(0).attrs.xml).toContain("Edited Old text");
+    // The inner editor survives the outer update.
+    expect(view.dom.querySelector(".docx-textbox .ProseMirror")!.textContent).toBe("Edited Old text");
     view.destroy();
   });
 });

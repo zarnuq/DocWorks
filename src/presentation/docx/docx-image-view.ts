@@ -69,7 +69,7 @@ export class DocxImageView implements NodeView {
     this.img.style.height = height ? `${height}px` : "";
     // Floating pictures sit where the document puts them (see drawing.ts).
     const a = attrsOf<ImageAttrs>(this.node);
-    const { cls, style } = placementCss({ wrap: a.wrap, x: a.x, y: a.y, align: a.align });
+    const { cls, style } = placementCss({ wrap: a.wrap, x: a.x, y: a.y, align: a.align }, a.width ?? 0);
     this.dom.className = `docx-image ${cls}`.trim() + (this.dom.classList.contains("is-selected") ? " is-selected" : "");
     this.dom.setAttribute("style", style);
     if (this.wrap) this.wrap.value = a.wrap;

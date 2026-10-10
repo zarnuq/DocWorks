@@ -254,6 +254,11 @@
   outline-offset: -1px;
 }
 
+/* Headers and footers drawn on the pages are display only: no editing gridlines (as in Word and Google Docs). */
+.docx-editor-host .ProseMirror .docx-hf table.docx-borders-none > tbody > tr > td {
+  outline: none;
+}
+
 :is(.docx-editor-host, .docx-hf-editor) .ProseMirror table.docx-borders-outer {
   border: 1px solid #9ca3af;
 }
@@ -403,6 +408,17 @@ img.docx-behind,
   padding: 0.05in 0.1in;
   vertical-align: top;
   line-height: normal;
+}
+
+/* A text box's own editor: none of the page's styling. */
+.docx-editor-host.is-paged .ProseMirror .docx-textbox .ProseMirror,
+.docx-editor-host .ProseMirror .docx-textbox .ProseMirror {
+  width: auto;
+  max-width: none;
+  min-height: 0;
+  padding: 0;
+  box-shadow: none;
+  background: none;
 }
 
 .docx-textbox-p {
