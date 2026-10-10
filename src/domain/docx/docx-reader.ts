@@ -63,9 +63,21 @@ export interface ParagraphProps {
   spaceBefore: number | null;
   spaceAfter: number | null;
   firstLine: number | null;
+  tabLeader: string | null;
+  markSize: number | null;
+  markFont: string | null;
+  keepNext: boolean | null;
+  keepLines: boolean | null;
 }
 
 const pt = (twips: string | null) => (twips === null ? null : Math.round((Number(twips) / 20) * 100) / 100);
+
+/** Leader of the right-aligned tab stop furthest along, or null. */
+function rightTabLeader(tabs: Element | null): string | null {
+  const stops = tabs ? Array.from(tabs.children).filter((t) => t.localName === "tab" && wVal(t) !== "clear") : [];
+  const last = stops.sort((a, b) => Number(wVal(a, "pos")) - Number(wVal(b, "pos"))).pop();
+  return last && ["right", "end"].includes(wVal(last) ?? "") ? wVal(last, "leader") ?? "none" : null;
+}
 
 export function paragraphProps(pPr: Element | null): ParagraphProps {
   const numPr = w(pPr, "numPr");
@@ -85,6 +97,11 @@ export function paragraphProps(pPr: Element | null): ParagraphProps {
     spaceBefore: pt(wVal(spacing, "before")),
     spaceAfter: pt(wVal(spacing, "after")),
     firstLine: wVal(ind, "hanging") !== null ? -pt(wVal(ind, "hanging"))! : pt(wVal(ind, "firstLine")),
+    tabLeader: rightTabLeader(w(pPr, "tabs")),
+    markSize: wVal(w(w(pPr, "rPr"), "sz")) ? Number(wVal(w(w(pPr, "rPr"), "sz"))) / 2 : null,
+    markFont: wVal(w(w(pPr, "rPr"), "rFonts"), "ascii") ?? wVal(w(w(pPr, "rPr"), "rFonts"), "hAnsi"),
+    keepNext: w(pPr, "keepNext") ? isOn(w(pPr, "keepNext")) : null,
+    keepLines: w(pPr, "keepLines") ? isOn(w(pPr, "keepLines")) : null,
   };
 }
 
@@ -121,6 +138,19 @@ export function vMergeOf(tcPr: Element | null): "restart" | "continue" | null {
 const NO_LINE = new Set(["nil", "none"]);
 
 /** A cell's own border overrides (w:tcBorders), as "t:none b:line"; null when it has none. Display only. */
+/** Cell padding as "top right bottom left" in pt ("-" = default), from the cell's w:tcMar, else the table's w:tblCellMar. */
+function marginsOf(tcPr: Element | null, tblPr: Element | null): string | null {
+  // ponytail: a table style's tblCellMar isn't read; such tables keep the default padding.
+  const sides = [["top"], ["right", "end"], ["bottom"], ["left", "start"]].map((names) => {
+    for (const mar of [w(tcPr, "tcMar"), w(tblPr, "tblCellMar")]) {
+      const side = names.map((n) => w(mar, n)).find(Boolean);
+      if (side && (wVal(side, "type") ?? "dxa") === "dxa") return `${Number(wVal(side, "w")) / 20}pt`;
+    }
+    return "-";
+  });
+  return sides.every((x) => x === "-") ? null : sides.join(" ");
+}
+
 export function edgesOf(tcPr: Element | null): string | null {
   const b = w(tcPr, "tcBorders");
   if (!b) return null;
@@ -153,8 +183,21 @@ export function bordersOf(tblPr: Element | null): "all" | "outer" | "none" | nul
 class Reader {
   origins: Origins = new Map();
   private nextKey = 1;
+  /** Complex fields (w:fldChar begin ... end) the reader is inside, innermost last; fields can span paragraphs. */
+  private fields: { instr: string; result: boolean }[] = [];
 
-  constructor(private ctx: ReadContext) {}
+  /** Paragraphs that end a section followed by one starting on a new page. */
+  private sectionBreaks = new Set<Element>();
+
+  constructor(private ctx: ReadContext, body?: Element) {
+    // A section's w:type says how it starts, so a break follows a section's last paragraph when the *next* section isn't continuous.
+    const sects = Array.from(body?.getElementsByTagNameNS(NS.w, "sectPr") ?? []).filter((s) => ["pPr", "body"].includes(s.parentElement?.localName ?? ""));
+    sects.forEach((s, i) => {
+      const p = s.parentElement?.localName === "pPr" ? s.parentElement.parentElement : null;
+      const next = sects[i + 1];
+      if (p && wVal(w(next, "type")) !== "continuous") this.sectionBreaks.add(p);
+    });
+  }
 
   private keyed(el: Element, make: (key: string) => PMNode): PMNode {
     const key = `k${this.nextKey++}`;
@@ -172,6 +215,8 @@ class Reader {
         out.push(this.paragraph(el));
       } else if (el.localName === "tbl") {
         out.push(this.table(el));
+      } else if (el.localName === "sdt" && this.hasBlocks(w(el, "sdtContent"))) {
+        out.push(this.sdt(el));
       } else if (el.localName !== "sectPr" && el.localName !== "tblPr" && el.localName !== "tcPr" && el.localName !== "trPr") {
         out.push(this.raw(el));
       }
@@ -179,12 +224,17 @@ class Reader {
     return out;
   }
 
+  private hasBlocks(content: Element | null): boolean {
+    return !!content && Array.from(content.children).some((c) => c.namespaceURI === NS.w && ["p", "tbl", "sdt"].includes(c.localName));
+  }
+
+  private sdt(el: Element): PMNode {
+    const gallery = wVal(w(el, "sdtPr")?.getElementsByTagNameNS(NS.w, "docPartGallery")[0]);
+    const kind = gallery?.includes("Table of Contents") ? "toc" : "other";
+    return this.keyed(el, (key) => schema.nodes.sdt.create({ key, kind }, this.blocks(w(el, "sdtContent")!)));
+  }
+
   private raw(el: Element): PMNode {
-    const gallery = el.localName === "sdt" ? wVal(el.getElementsByTagNameNS(NS.w, "docPartGallery")[0]) : null;
-    if (gallery?.includes("Table of Contents")) {
-      const lines = Array.from(el.getElementsByTagNameNS(NS.w, "p")).map((p) => Array.from(p.getElementsByTagNameNS(NS.w, "t")).map((t) => t.textContent).join(""));
-      return schema.nodes.raw_block.create({ xml: xmlOf(el), text: lines.filter(Boolean).join("\n"), kind: "toc" });
-    }
     return schema.nodes.raw_block.create({ xml: xmlOf(el), text: el.textContent ?? "" });
   }
 
@@ -197,7 +247,7 @@ class Reader {
     }
     const inline: PMNode[] = [];
     this.inline(p, [], inline);
-    return this.keyed(p, (key) => schema.nodes.paragraph.create({ key, ...paragraphProps(pPr) }, inline));
+    return this.keyed(p, (key) => schema.nodes.paragraph.create({ key, ...paragraphProps(pPr), sectionBreak: this.sectionBreaks.has(p) }, inline));
   }
 
   private inline(container: Element, marks: readonly Mark[], out: PMNode[]): void {
@@ -235,10 +285,21 @@ class Reader {
   private run(r: Element, outer: readonly Mark[], out: PMNode[]): void {
     const rPr = w(r, "rPr");
     const marks = [...outer, ...runMarks(rPr)];
+    const field = this.fields[this.fields.length - 1];
+    const name = field?.result ? /^\s*(PAGE|NUMPAGES)\b/.exec(field.instr)?.[1] : undefined;
+    if (name) marks.push(schema.marks.field.create({ name }));
     const text = (s: string) => out.push(schema.text(s, marks));
 
     for (const child of Array.from(r.children)) {
       const local = child.namespaceURI === NS.w ? child.localName : "";
+      if (local === "fldChar") {
+        const type = wVal(child, "fldCharType");
+        if (type === "begin") this.fields.push({ instr: "", result: false });
+        else if (type === "separate" && this.fields.length) this.fields[this.fields.length - 1].result = true;
+        else if (type === "end") this.fields.pop();
+      } else if (local === "instrText" && this.fields.length) {
+        this.fields[this.fields.length - 1].instr += child.textContent ?? "";
+      }
       if (local === "t") {
         if (child.textContent) text(child.textContent);
       } else if (local === "tab") {
@@ -304,12 +365,14 @@ class Reader {
                     background: hex(wVal(w(tcPr, "shd"), "fill")),
                     vMerge: vMergeOf(tcPr),
                     edges: edgesOf(tcPr),
+                    margins: marginsOf(tcPr, w(tbl, "tblPr")),
                   },
                   content.length ? content : schema.nodes.paragraph.create()
                 );
               })
             );
-          return schema.nodes.table_row.create({ key, header: isOn(w(w(tr, "trPr"), "tblHeader")) }, cells);
+          const trPr = w(tr, "trPr");
+          return schema.nodes.table_row.create({ key, header: isOn(w(trPr, "tblHeader")), cantSplit: isOn(w(trPr, "cantSplit")) }, cells);
         })
       );
     // A table without rows can't exist in the editor; keep it verbatim instead.
@@ -321,7 +384,7 @@ class Reader {
 
 /** Read <w:body> into a ProseMirror doc plus the origins needed to write it back losslessly. */
 export function readDocx(body: Element, ctx: ReadContext): { doc: PMNode; origins: Origins } {
-  const reader = new Reader(ctx);
+  const reader = new Reader(ctx, body);
   const blocks = reader.blocks(body);
   const doc = schema.nodes.doc.create(null, blocks.length ? blocks : schema.nodes.paragraph.create());
   return { doc, origins: reader.origins };

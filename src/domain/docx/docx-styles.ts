@@ -1,5 +1,6 @@
 import { Node as PMNode } from "prosemirror-model";
 import { NS } from "../../core/utils/xml";
+import { fontStack } from "../../core/utils/fonts";
 import { letterNumber, romanNumber } from "../../core/utils/numbering";
 import { w, wVal } from "./docx-reader";
 import { attrsOf, ParagraphAttrs } from "./schema";
@@ -56,12 +57,6 @@ const SINGLE_LINE: Record<string, number> = {
 };
 export const singleLine = (font: string | null): number => SINGLE_LINE[font?.toLowerCase() ?? ""] ?? 1.17;
 
-/** Generic CSS family to fall back on when a document font isn't installed. */
-export function genericFamily(font: string): string {
-  if (/mono|courier|consolas|menlo/i.test(font)) return "monospace";
-  return /garamond|times|cambria|georgia|palatino|book|baskerville|bodoni|didot|century|minion|serif|roman/i.test(font) && !/sans/i.test(font) ? "serif" : "sans-serif";
-}
-
 /** CSS line-height for `lines` of Word line spacing in `font`. */
 export const lineHeight = (lines: number, font: string | null): number => Math.round(lines * singleLine(font) * 100) / 100;
 
@@ -89,6 +84,18 @@ export class DocxStyles {
     const defaults = this.stylesXml?.getElementsByTagNameNS(NS.w, "docDefaults")[0];
     const sources = [...this.chain(styleId), ...(tableStyleId ? this.chain(tableStyleId) : []), defaults].filter(Boolean) as Element[];
     return sources.map((s) => this.fontOf(w(w(s, "rPr") ?? w(w(s, "rPrDefault"), "rPr"), "rFonts"))).find(Boolean) ?? null;
+  }
+
+  /** Bold / italic / all caps a paragraph style gives its text. */
+  runFlags(styleId: string | null, tableStyleId: string | null = null): { b: boolean; i: boolean; caps: boolean } {
+    const defaults = this.stylesXml?.getElementsByTagNameNS(NS.w, "docDefaults")[0];
+    const sources = [...this.chain(styleId), ...(tableStyleId ? this.chain(tableStyleId) : []), defaults].filter(Boolean) as Element[];
+    const rPrs = sources.map((s) => w(s, "rPr") ?? w(w(s, "rPrDefault"), "rPr"));
+    const on = (local: string) => {
+      const el = rPrs.map((r) => w(r, local)).find(Boolean);
+      return !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
+    };
+    return { b: on("b"), i: on("i"), caps: on("caps") };
   }
 
   /** The font size (pt) a paragraph style resolves to, or null. */
@@ -140,7 +147,7 @@ export class DocxStyles {
     const color = wVal(first(rPrs, "color"));
     if (color && /^[0-9a-f]{6}$/i.test(color)) css.push(`color: #${color.toUpperCase()}`);
     const font = rPrs.map((r) => this.fontOf(w(r, "rFonts"))).find(Boolean) ?? null;
-    if (font) css.push(`font-family: "${font}", ${genericFamily(font)}`);
+    if (font) css.push(`font-family: ${fontStack(font)}`);
     if (isOn(first(rPrs, "caps"))) css.push("text-transform: uppercase");
 
     const jc = wVal(first(pPrs, "jc"));
@@ -151,14 +158,40 @@ export class DocxStyles {
     const after = spacing("after");
     if (before) css.push(`margin-top: ${Number(before) / 20}pt`);
     if (after) css.push(`margin-bottom: ${Number(after) / 20}pt`);
+    const inds = pPrs.map((p) => w(p, "ind")).filter(Boolean) as Element[];
+    const ind = (...attrs: string[]) => inds.flatMap((x) => attrs.map((at) => wVal(x, at))).find((v) => v !== null) ?? null;
+    const left = ind("left", "start");
+    const right = ind("right", "end");
+    if (left && left !== "0") css.push(`margin-left: ${Number(left) / 20}pt`);
+    if (right && right !== "0") css.push(`margin-right: ${Number(right) / 20}pt`);
     const line = spacing("line");
     const rule = spacing("lineRule");
     if (line && rule === "exact") css.push(`line-height: ${Number(line) / 20}pt`);
-    else css.push(`line-height: ${lineHeight(line && rule !== "atLeast" ? Number(line) / 240 : 1, font)}`);
+    else css.push(`line-height: ${lineHeight(this.lines(styleId, tableStyleId)!, font)}`);
 
     const out = css.join("; ");
     this.cssCache.set(cacheKey, out);
     return out;
+  }
+
+  /** Whether a paragraph style keeps with the next paragraph / keeps its lines together. */
+  keep(styleId: string | null): { next: boolean; lines: boolean } {
+    const pPrs = this.chain(styleId).map((s) => w(s, "pPr"));
+    const first = (local: string) => pPrs.map((p) => w(p, local)).find(Boolean) ?? null;
+    const on = (el: Element | null) => !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
+    return { next: on(first("keepNext")), lines: on(first("keepLines")) };
+  }
+
+  /** Line spacing of a style in lines, or null for an exact height in points. */
+  lines(styleId: string | null, tableStyleId: string | null = null): number | null {
+    const defaults = this.stylesXml?.getElementsByTagNameNS(NS.w, "docDefaults")[0];
+    const sources = [...this.chain(styleId), ...(tableStyleId ? this.chain(tableStyleId) : []), defaults].filter(Boolean) as Element[];
+    const spacings = sources.map((s) => w(w(s, "pPr") ?? w(w(s, "pPrDefault"), "pPr"), "spacing")).filter(Boolean) as Element[];
+    const spacing = (attr: string) => spacings.map((s) => wVal(s, attr)).find((v) => v !== null) ?? null;
+    const line = spacing("line");
+    const rule = spacing("lineRule");
+    if (line && rule === "exact") return null;
+    return line && rule !== "atLeast" ? Number(line) / 240 : 1;
   }
 
   /** numId / ilvl a paragraph gets from its style, if any. */

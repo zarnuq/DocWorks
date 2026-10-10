@@ -36,6 +36,12 @@ export function pageSetup(body: Element, size: PageSize = "document"): PageSetup
   };
 }
 
+/** Which header / footer page `page` shows, given the section's "different first page" and "different odd & even" options. */
+export function headerFooterType(page: number, firstPage: boolean, oddEven: boolean): "default" | "first" | "even" {
+  if (firstPage && page === 1) return "first";
+  return oddEven && page % 2 === 0 ? "even" : "default";
+}
+
 /** A line of a paragraph: its extent relative to the paragraph top, and the text position it starts at. */
 export interface Line {
   top: number;
@@ -54,6 +60,8 @@ export type Unit =
 
 export interface Row {
   height: number;
+  /** The row moves to the next page whole instead of breaking across it. */
+  cantSplit?: boolean;
   cells: Cell[];
 }
 
@@ -69,6 +77,10 @@ export interface TopBlock {
   unit: Unit;
   /** A manual page break ends the block. */
   breakAfter: boolean;
+  /** Keep on the same page as the start of the next block. */
+  keepNext?: boolean;
+  /** Don't break inside this paragraph. */
+  keepLines?: boolean;
 }
 
 /** Blank space inserted at `pos` that ends a page inside a paragraph or table cell; `gapAt` is where the drawn gap starts (once per page break). */
@@ -112,8 +124,9 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
   };
 
   /** Flow a paragraph from `used` on `page`; null when it has to move to the next page whole. */
-  const flowText = (u: Extract<Unit, { kind: "text" }>, used: number, page: number): Flow | null => {
+  const flowText = (u: Extract<Unit, { kind: "text" }>, used: number, page: number, keepLines = false): Flow | null => {
     const lines = u.lines;
+    if (keepLines && used > 0 && used + u.height > avail && lines.some((l) => used + l.bottom > avail)) return null;
     let start = 0;
     let startTop = 0;
     let base = used;
@@ -159,6 +172,14 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
         used += row.height;
         continue;
       }
+      if (row.cantSplit && used > 0 && row.height <= avail) {
+        // The whole row moves: a spacer opens each of its cells.
+        if (i === 0) return null;
+        for (const c of row.cells) if (c.children.length) addSpacer(c.children[0].pos, used + c.padTop, c.left, page);
+        page++;
+        used = row.height;
+        continue;
+      }
       const mark = out.spacers.length;
       const marked = new Set(shown);
       const cells = row.cells.map((c) => flowCell(c, used, page));
@@ -184,20 +205,34 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
     out.pageNumbers.push(++page);
     used = 0;
   };
-  const flow = (u: Unit): Flow | null => {
-    if (u.kind === "text") return flowText(u, used, page);
+  const flow = (b: TopBlock): Flow | null => {
+    const u = b.unit;
+    if (u.kind === "text") return flowText(u, used, page, b.keepLines);
     if (u.kind === "table") return flowTable(u, used, page);
     return used > 0 && used + u.height > avail ? null : { used: used + u.height, page };
   };
-  blocks.forEach((b, i) => {
+  // Where each block started, to move a chain of "keep with next" blocks back onto a new page.
+  const starts: { used: number; page: number; spacers: number }[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
     if (i > 0 && blocks[i - 1].breakAfter) newPage(i);
-    let r = flow(b.unit);
+    starts[i] = { used, page, spacers: out.spacers.length };
+    let r = flow(b);
     if (!r) {
+      let j = i;
+      while (j > 0 && blocks[j - 1].keepNext && !blocks[j - 1].breakAfter && starts[j - 1].page === page && starts[j - 1].spacers === out.spacers.length) j--;
+      if (j < i && starts[j].used > 0) {
+        used = starts[j].used;
+        newPage(j);
+        i = j - 1;
+        continue;
+      }
       newPage(i);
-      r = flow(b.unit)!;
+      starts[i] = { used, page, spacers: out.spacers.length };
+      r = flow(b)!;
     }
     ({ used, page } = r);
-  });
+  }
   out.fills.push(Math.max(0, avail - used));
   out.pages = page;
   return out;

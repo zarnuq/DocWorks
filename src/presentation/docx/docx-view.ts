@@ -4,7 +4,7 @@ import { DOMSerializer, Node as PMNode } from "prosemirror-model";
 import { EditorView } from "prosemirror-view";
 import { toggleMark } from "prosemirror-commands";
 import { redo, undo } from "prosemirror-history";
-import { DocxDocument } from "../../infrastructure/docx/docx-document";
+import { DocxDocument, HFType } from "../../infrastructure/docx/docx-document";
 import { Origins, readDocx } from "../../domain/docx/docx-reader";
 import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
@@ -15,7 +15,7 @@ import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, 
 import { pagesPlugin, repaginate } from "./docx-pages";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
-import { pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
+import { headerFooterType, pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
 import { attrsOf, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView } from "./docx-image-view";
 
@@ -44,6 +44,10 @@ const STYLES: [string, string][] = [
 const PAGE_VIEW_KEY = "doc-works-page-view";
 const REVIEW_KEY = "doc-works-review-panel";
 type HF = "header" | "footer";
+/** A header or footer part: "header:default", "footer:first"... */
+type HFPart = `${HF}:${HFType}`;
+const HF_PARTS: HFPart[] = ["header:default", "header:first", "header:even", "footer:default", "footer:first", "footer:even"];
+const splitPart = (part: HFPart) => part.split(":") as [HF, HFType];
 
 const dataUrl = (file: Blob) =>
   new Promise<string>((resolve, reject) => {
@@ -83,12 +87,12 @@ export class DocxView extends FileView {
   private findEl: HTMLElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   /** Header and footer content, for drawing them in the page view. */
-  private hf: Record<HF, PMNode | null> = { header: null, footer: null };
+  private hf = new Map<HFPart, PMNode>();
   private styleSelect: HTMLSelectElement | null = null;
   private fontSelect: HTMLSelectElement | null = null;
   private sizeSelect: HTMLSelectElement | null = null;
   /** rId -> data URL for pictures in the header and footer parts. */
-  private hfUrls: Record<HF, Map<string, string>> = { header: new Map(), footer: new Map() };
+  private hfUrls = new Map<HFPart, Map<string, string>>();
   private reviewEl: HTMLElement | null = null;
   private reviewOpen = window.localStorage.getItem(REVIEW_KEY) === "on";
   private reviewTimer: number | null = null;
@@ -132,9 +136,9 @@ export class DocxView extends FileView {
     try {
       docx = await DocxDocument.load(await this.app.vault.readBinary(file));
       urls = await docx.imageUrls();
-      for (const kind of ["header", "footer"] as const) {
-        const path = docx.headerFooterPath(kind);
-        this.hfUrls[kind] = path ? await docx.imageUrls(path) : new Map<string, string>();
+      for (const part of HF_PARTS) {
+        const path = docx.headerFooterPath(...splitPart(part));
+        if (path) this.hfUrls.set(part, await docx.imageUrls(path));
       }
     } catch (err) {
       status.setText(`Could not open this .docx file: ${(err as Error).message}`);
@@ -149,7 +153,7 @@ export class DocxView extends FileView {
       hyperlinkHref: (id) => docx.hyperlinkHref(id),
     });
     this.origins = origins;
-    this.hf = { header: this.readHF("header"), footer: this.readHF("footer") };
+    this.readAllHF();
 
     const ctx: EditorContext = {
       styles: new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml()),
@@ -479,6 +483,15 @@ export class DocxView extends FileView {
         .setValue(a.lineSpacing ?? "")
         .onChange((v) => (patch.lineSpacing = v || null))
     );
+    // As in Google Docs' "Line & paragraph spacing" menu; shows the style's setting until changed here.
+    const style = this.ctx?.styles.keep(a.style) ?? { next: false, lines: false };
+    const toggle = (name: string, desc: string, value: boolean, set: (v: boolean) => void) =>
+      new Setting(modal.contentEl)
+        .setName(name)
+        .setDesc(desc)
+        .addToggle((t) => t.setValue(value).onChange(set));
+    toggle("Keep with next", "Stay on the same page as the next paragraph.", a.keepNext ?? style.next, (v) => (patch.keepNext = v));
+    toggle("Keep lines together", "Don't break this paragraph across pages.", a.keepLines ?? style.lines, (v) => (patch.keepLines = v));
     new Setting(modal.contentEl)
       .addButton((b) =>
         b
@@ -736,21 +749,26 @@ export class DocxView extends FileView {
   // Pages, headers and footers
   // ---------------------------------------------------------------------------
 
-  private readHF(kind: HF): PMNode | null {
-    const root = this.docx?.headerFooter(kind);
-    return root ? readDocx(root, this.hfReadContext(kind)).doc : null;
+  private readAllHF(): void {
+    this.hf.clear();
+    for (const part of HF_PARTS) {
+      const root = this.docx?.headerFooter(...splitPart(part));
+      if (root) this.hf.set(part, readDocx(root, this.hfReadContext(part)).doc);
+    }
   }
 
   /** Images and links in a header / footer resolve through that part's own relationships. */
-  private hfReadContext(kind: HF) {
+  private hfReadContext(part: HFPart) {
     const docx = this.docx;
-    const part = docx?.headerFooterPath(kind) ?? undefined;
-    return { imageSrc: (id: string) => this.hfUrls[kind].get(id) ?? null, hyperlinkHref: (id: string) => docx?.hyperlinkHref(id, part) ?? null };
+    const path = docx?.headerFooterPath(...splitPart(part)) ?? undefined;
+    return { imageSrc: (id: string) => this.hfUrls.get(part)?.get(id) ?? null, hyperlinkHref: (id: string) => docx?.hyperlinkHref(id, path) ?? null };
   }
 
-  /** Header / footer content for the page view, with page number fields filled in. */
+  /** The header / footer a page shows (first page, even pages or the default), with page number fields filled in. */
   private renderHF(kind: HF, page: number, total: number): Node | null {
-    const doc = this.hf[kind];
+    const docx = this.docx;
+    if (!docx) return null;
+    const doc = this.hf.get(`${kind}:${headerFooterType(page, docx.differentFirstPage(), docx.differentOddEven())}`);
     if (!doc || !doc.textContent.trim() && !doc.content.size) return null;
     const frag = DOMSerializer.fromSchema(schema).serializeFragment(doc.content);
     const wrap = createDiv({ cls: `docx-hf docx-hf-${kind}` });
@@ -765,14 +783,15 @@ export class DocxView extends FileView {
       setup: () => (this.pageView ? this.setup : null),
       header: (page, total) => this.renderHF("header", page, total),
       footer: (page, total) => this.renderHF("footer", page, total),
+      keep: (node) => this.ctx?.styles.keep(attrsOf<ParagraphAttrs>(node).style) ?? { next: false, lines: false },
     });
   }
 
   private headerFooterDialog(): void {
     const docx = this.docx;
     if (!docx || !this.ctx) return;
-    const modal = new HeaderFooterModal(this.app, this.ctx, docx, (kind) => this.hfReadContext(kind), () => {
-      this.hf = { header: this.readHF("header"), footer: this.readHF("footer") };
+    const modal = new HeaderFooterModal(this.app, this.ctx, docx, (part) => this.hfReadContext(part), () => {
+      this.readAllHF();
       this.dirty = true;
       void this.saveNow();
       if (this.editor) repaginate(this.editor);
@@ -822,6 +841,17 @@ export class DocxView extends FileView {
       })
     );
     item("Repeat header row on each page", cmd.toggleHeaderRow);
+    const canBreak = this.editor ? cmd.rowsCanBreak(this.editor.state) : true;
+    menu.addItem((i) =>
+      i
+        .setTitle("Allow rows to break across pages")
+        .setChecked(canBreak)
+        .onClick(() => {
+          if (!this.editor) return;
+          if (!cmd.setRowsCanBreak(!canBreak)(this.editor.state, this.editor.dispatch)) new Notice("Click inside a table first.");
+          this.editor.focus();
+        })
+    );
     menu.addSeparator();
     item("Delete row", cmd.deleteRow);
     item("Delete column", cmd.deleteColumn);
@@ -866,14 +896,14 @@ export class DocxView extends FileView {
 
 /** Edits the default header and footer, each in its own small editor. */
 class HeaderFooterModal extends Modal {
-  private editors: { kind: HF; view: EditorView; origins: Origins }[] = [];
+  private editors = new Map<HFPart, { view: EditorView; origins: Origins; changed: boolean }>();
   private changed = false;
 
   constructor(
     app: App,
     private ctx: EditorContext,
     private docx: DocxDocument,
-    private readContext: (kind: HF) => { imageSrc: (id: string) => string | null; hyperlinkHref: (id: string) => string | null },
+    private readContext: (part: HFPart) => { imageSrc: (id: string) => string | null; hyperlinkHref: (id: string) => string | null },
     private onDone: () => void
   ) {
     super(app);
@@ -882,39 +912,69 @@ class HeaderFooterModal extends Modal {
   onOpen(): void {
     this.titleEl.setText("Header and footer");
     this.modalEl.addClass("docx-hf-modal");
+    this.render();
+  }
+
+  /** The options (as in Google Docs' header options), then an editor for each header and footer they call for. */
+  private render(): void {
+    this.contentEl.empty();
+    const option = (name: string, value: boolean, set: (on: boolean) => void) =>
+      new Setting(this.contentEl).setName(name).addToggle((t) =>
+        t.setValue(value).onChange((on) => {
+          set(on);
+          this.changed = true;
+          this.render();
+        })
+      );
+    option("Different first page", this.docx.differentFirstPage(), (on) => this.docx.setDifferentFirstPage(on));
+    option("Different odd & even", this.docx.differentOddEven(), (on) => this.docx.setDifferentOddEven(on));
+    const types: HFType[] = ["default", ...(this.docx.differentFirstPage() ? ["first" as const] : []), ...(this.docx.differentOddEven() ? ["even" as const] : [])];
+    const label: Record<HFType, string> = { default: this.docx.differentOddEven() ? " (odd pages)" : "", first: " (first page)", even: " (even pages)" };
     for (const kind of ["header", "footer"] as const) {
-      new Setting(this.contentEl).setName(kind === "header" ? "Header" : "Footer").setHeading();
-      const root = this.docx.headerFooter(kind);
-      const { doc, origins } = root ? readDocx(root, this.readContext(kind)) : { doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create()), origins: new Map() as Origins };
-      const bar = this.contentEl.createDiv({ cls: "docx-hf-tools" });
-      const host = this.contentEl.createDiv({ cls: "docx-hf-editor" });
+      for (const type of types) this.section(`${kind}:${type}`, `${kind === "header" ? "Header" : "Footer"}${label[type]}`);
+    }
+  }
+
+  private section(part: HFPart, title: string): void {
+    new Setting(this.contentEl).setName(title).setHeading();
+    const bar = this.contentEl.createDiv({ cls: "docx-hf-tools" });
+    const host = this.contentEl.createDiv({ cls: "docx-hf-editor" });
+    const kept = this.editors.get(part);
+    let entry = kept;
+    if (kept) host.appendChild(kept.view.dom);
+    else {
+      const root = this.docx.headerFooter(...splitPart(part));
+      const { doc, origins } = root ? readDocx(root, this.readContext(part)) : { doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create()), origins: new Map() as Origins };
       const view: EditorView = new EditorView(host, {
         state: EditorState.create({ doc, plugins: docxPlugins(this.ctx) }),
         dispatchTransaction: (tr) => {
           view.updateState(view.state.apply(tr));
-          if (tr.docChanged) this.changed = true;
+          if (tr.docChanged) this.editors.get(part)!.changed = this.changed = true;
         },
       });
-      const run = (c: Command) => {
-        c(view.state, view.dispatch);
-        view.focus();
-      };
-      const tb = new Toolbar(bar);
-      for (const [icon, align] of [["align-left", "left"], ["align-center", "center"], ["align-right", "right"]] as [string, Align][]) {
-        tb.icon(icon, `Align ${align}`, () => run(cmd.setAlign(align)));
-      }
-      tb.button("Page number", "Insert the page number", () => run((st, d) => (d?.(st.tr.replaceSelectionWith(pageNumberNode())), true)));
-      bar.addEventListener("mousedown", (e) => (e.target as HTMLElement).closest("button") && e.preventDefault());
-      this.editors.push({ kind, view, origins });
+      entry = { view, origins, changed: false };
+      this.editors.set(part, entry);
     }
+    const view = entry!.view;
+    const run = (c: Command) => {
+      c(view.state, view.dispatch);
+      view.focus();
+    };
+    const tb = new Toolbar(bar);
+    for (const [icon, align] of [["align-left", "left"], ["align-center", "center"], ["align-right", "right"]] as [string, Align][]) {
+      tb.icon(icon, `Align ${align}`, () => run(cmd.setAlign(align)));
+    }
+    tb.button("Page number", "Insert the page number", () => run((st, d) => (d?.(st.tr.replaceSelectionWith(pageNumberNode())), true)));
+    bar.addEventListener("mousedown", (e) => (e.target as HTMLElement).closest("button") && e.preventDefault());
   }
 
   onClose(): void {
     if (this.changed) {
-      for (const { kind, view, origins } of this.editors) {
-        const empty = !view.state.doc.textContent.trim() && !this.docx.headerFooter(kind);
-        if (empty) continue;
-        writeBody(this.docx.ensureHeaderFooter(kind), view.state.doc, origins, this.docx);
+      for (const [part, { view, origins, changed }] of this.editors) {
+        if (!changed) continue;
+        const [kind, type] = splitPart(part);
+        if (!view.state.doc.textContent.trim() && !this.docx.headerFooter(kind, type)) continue;
+        writeBody(this.docx.ensureHeaderFooter(kind, type), view.state.doc, origins, this.docx);
       }
       this.onDone();
     }

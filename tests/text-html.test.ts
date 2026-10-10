@@ -52,6 +52,18 @@ describe("renderParagraphs / readParagraphs", () => {
     expect(spans[1].style.fontWeight).toBe("bold");
   });
 
+  it("lets a run turn off an underline its text box style sets (CSS can't undo a parent's underline)", () => {
+    const underlined = { ...defaults, u: true };
+    const paras = [para([run("plain", { u: false }), run(" under", { u: true })], { defaults: underlined })];
+    renderParagraphs(host, paras, PX_PER_PT);
+    const p = host.querySelector("p")!;
+    expect(p.style.textDecoration).toBe("");
+    const spans = p.querySelectorAll("span");
+    expect(spans[0].style.textDecoration).toBe("none");
+    expect(spans[1].style.textDecoration).toBe("underline");
+    expect(readParagraphs(host, PX_PER_PT, () => underlined)[0].runs.map((r) => r.u)).toEqual([false, true]);
+  });
+
   it("renders empty paragraphs with a <br> and reads them back empty", () => {
     renderParagraphs(host, [para([])], PX_PER_PT);
     expect(host.innerHTML).toContain("<br>");

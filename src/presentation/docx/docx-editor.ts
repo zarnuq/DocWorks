@@ -11,6 +11,8 @@ import { keymap } from "prosemirror-keymap";
 import { InputRule, inputRules } from "prosemirror-inputrules";
 import { attrsOf, docxSchema as schema, HEADING_LEVEL, Align, CellAttrs, ParagraphAttrs, TableAttrs, TableBorders } from "../../domain/docx/schema";
 import { DocxStyles, lineHeight } from "../../domain/docx/docx-styles";
+import { fontStack } from "../../core/utils/fonts";
+import { letterSpacing } from "../pptx/text-fit";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
 
@@ -231,20 +233,19 @@ export function tocEntries(doc: PMNode): { level: number; text: string }[] {
   return out;
 }
 
-/** A Word TOC field (\o "1-3") with the current headings as its cached result; Word refreshes it on open. */
+/** A Word TOC field (\o "1-3") in a content control, with the current headings as its cached result; Word refreshes it on open. */
 function tocNode(doc: PMNode): PMNode {
   const entries = tocEntries(doc);
-  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const para = (style: string | null, runs: string) => `<w:p>${style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : ""}${runs}</w:p>`;
-  const text = (t: string) => `<w:r><w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
-  const begin = `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>`;
   const rows = entries.length ? entries : [{ level: 1, text: "No headings yet" }];
-  const body = rows.map((e, i) => para(`TOC${e.level}`, (i === 0 ? begin : "") + text(e.text))).join("");
-  const xml =
-    `<w:sdt xmlns:w="${NS_W}"><w:sdtPr><w:docPartObj><w:docPartGallery w:val="Table of Contents"/><w:docPartUnique/></w:docPartObj></w:sdtPr><w:sdtContent>` +
-    para("TOCHeading", text("Contents")) + body + para(null, `<w:r><w:fldChar w:fldCharType="end"/></w:r>`) + `</w:sdtContent></w:sdt>`;
-  const lines = ["Contents", ...rows.map((e) => `${"    ".repeat(e.level - 1)}${e.text}`)];
-  return schema.nodes.raw_block.create({ xml, text: lines.join("\n"), kind: "toc" });
+  const run = (inner: string) => opaqueXml(`<w:r xmlns:w="${NS_W}">${inner}</w:r>`);
+  const begin = [run(`<w:fldChar w:fldCharType="begin"/>`), run(`<w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText>`), run(`<w:fldChar w:fldCharType="separate"/>`)];
+  const para = (style: string | null, content: PMNode[]) => schema.nodes.paragraph.create({ style }, content);
+  const xml = `<w:sdt xmlns:w="${NS_W}"><w:sdtPr><w:docPartObj><w:docPartGallery w:val="Table of Contents"/><w:docPartUnique/></w:docPartObj></w:sdtPr></w:sdt>`;
+  return schema.nodes.sdt.create({ kind: "toc", xml }, [
+    para("TOCHeading", [schema.text("Contents")]),
+    ...rows.map((e, i) => para(`TOC${e.level}`, [...(i === 0 ? begin : []), schema.text(e.text)])),
+    para(null, [run(`<w:fldChar w:fldCharType="end"/>`)]),
+  ]);
 }
 
 /** Address of the link at the cursor or selection start, or null. */
@@ -261,7 +262,7 @@ export const cmd = {
   updateToc: ((state, dispatch) => {
     const at: { pos: number; size: number }[] = [];
     state.doc.forEach((node, pos) => {
-      if (node.type === schema.nodes.raw_block && node.attrs.kind === "toc") at.push({ pos, size: node.nodeSize });
+      if (node.type === schema.nodes.sdt && node.attrs.kind === "toc") at.push({ pos, size: node.nodeSize });
     });
     if (!at.length) return false;
     if (dispatch) {
@@ -500,6 +501,32 @@ export const cmd = {
     return true;
   }) as Command,
 
+  /** Whether rows of the table at the cursor may break across pages (none is marked "can't split"). */
+  rowsCanBreak(state: EditorState): boolean {
+    const info = cellAround(state.selection.$from);
+    let can = true;
+    info?.table.forEach((row) => (can &&= !row.attrs.cantSplit));
+    return can;
+  },
+
+  /** Let every row of the table at the cursor break across pages, or move whole (Google Docs' "Allow row to overflow across pages"). */
+  setRowsCanBreak(allow: boolean): Command {
+    return (state, dispatch) => {
+      const info = cellAround(state.selection.$from);
+      if (!info) return false;
+      if (dispatch) {
+        const tr = state.tr;
+        let pos = info.tablePos + 1;
+        info.table.forEach((row) => {
+          tr.setNodeMarkup(pos, undefined, { ...row.attrs, cantSplit: !allow });
+          pos += row.nodeSize;
+        });
+        dispatch(tr);
+      }
+      return true;
+    };
+  },
+
   deleteRow: editTable((rows, { row }) => rows.filter((_, i) => i !== row)),
   deleteColumn: editTable((rows, { col }) => rows.map((cells) => cells.filter((_, i) => i !== col))),
   deleteTable: editTable(() => []),
@@ -549,11 +576,68 @@ function paragraphCss(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number
   const css = [styles.paragraphCss(a.style, tableStyle)];
   // Direct paragraph formatting must win over the style, so it goes last.
   if (a.align) css.push(`text-align: ${a.align}`);
-  if (a.lineSpacing) css.push(`line-height: ${lineHeight(Number(a.lineSpacing), styles.fontFor(a.style, tableStyle))}`);
+  // Word sizes lines by the text's font, not the style's: 10pt text in a 12pt style gets 10pt lines.
+  const text = textFont(node, a);
+  if (text.size) css.push(`font-size: ${text.size}pt`);
+  if (text.font) css.push(`font-family: ${fontStack(text.font)}`);
+  const lines = a.lineSpacing ? Number(a.lineSpacing) : text.size || text.font ? styles.lines(a.style, tableStyle) : null;
+  if (lines) css.push(`line-height: ${lineHeight(lines, text.font ?? styles.fontFor(a.style, tableStyle))}`);
   if (a.spaceBefore !== null) css.push(`margin-top: ${a.spaceBefore}pt`);
   if (a.spaceAfter !== null) css.push(`margin-bottom: ${a.spaceAfter}pt`);
   if (a.firstLine) css.push(`text-indent: ${a.firstLine}pt`);
   return css.filter(Boolean).join("; ");
+}
+
+/** Size and font of the paragraph mark, else of the text when every run sets a size. */
+function textFont(node: PMNode, a: ParagraphAttrs): { size: number | null; font: string | null } {
+  if (a.markSize) return { size: a.markSize, font: a.markFont };
+  let size = 0;
+  let font: string | null = null;
+  let all = true;
+  node.forEach((child) => {
+    if (!child.isText) return;
+    const pt = child.marks.find((m) => m.type === schema.marks.size)?.attrs.pt as number | undefined;
+    if (!pt) all = false;
+    else if (pt > size) {
+      size = pt;
+      font = (child.marks.find((m) => m.type === schema.marks.font)?.attrs.font as string | undefined) ?? null;
+    }
+  });
+  return all && size ? { size, font: font ?? a.markFont } : { size: null, font: a.markFont };
+}
+
+const fitCache = new Map<string, number | null>();
+
+/**
+ * Letter-spacing that makes each run as wide as in its Word font (from font-metrics), so lines wrap where Word and
+ * Google Docs wrap them even when the font isn't installed. With the real font installed it comes out ~0.
+ */
+function fitText(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number, decos: Decoration[]): void {
+  const a = attrsOf<ParagraphAttrs>(node);
+  let table: string | null = null;
+  const $p = doc.resolve(pos);
+  for (let d = $p.depth; d > 0 && !table; d--) if ($p.node(d).type === schema.nodes.table) table = attrsOf<TableAttrs>($p.node(d)).style;
+  const base = { font: styles.fontFor(a.style, table), size: styles.sizeFor(a.style, table) ?? 10, ...styles.runFlags(a.style, table) };
+  node.forEach((child, offset) => {
+    // ponytail: runs with tabs are left alone (a tab's width isn't a character's); they're short in practice.
+    if (!child.isText || child.text!.includes("\t")) return;
+    const mark = (type: MarkType) => child.marks.find((m) => m.type === type);
+    const font = (mark(schema.marks.font)?.attrs.font as string | undefined) ?? base.font;
+    if (!font) return;
+    const pt = (mark(schema.marks.size)?.attrs.pt as number | undefined) ?? base.size;
+    const b = !!mark(schema.marks.bold) || base.b;
+    const i = !!mark(schema.marks.italic) || base.i;
+    const text = base.caps ? child.text!.toUpperCase() : child.text!;
+    const key = `${font}|${b}|${i}|${pt}|${text}`;
+    if (!fitCache.has(key)) {
+      if (fitCache.size > 20000) fitCache.clear();
+      fitCache.set(key, letterSpacing(text, { font, b, i }, (pt * 96) / 72));
+    }
+    const ls = fitCache.get(key);
+    if (ls !== null && ls !== undefined && Math.abs(ls) > 0.01) {
+      decos.push(Decoration.inline(pos + 1 + offset, pos + 1 + offset + child.nodeSize, { style: `letter-spacing: ${Math.round(ls * 1000) / 1000}px` }));
+    }
+  });
 }
 
 /** Give rendered paragraphs (header / footer bands, outside any editor) their document styling. */
@@ -588,14 +672,29 @@ function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
     const attrs: Record<string, string> = {};
     const mark = marks.get(pos);
     if (mark) {
-      css.push(`padding-left: ${mark.indentPt}pt`, `--docx-hanging: ${mark.hangingPt}pt`);
+      // The list level's indent replaces the style's.
+      css.push("margin-left: 0", `padding-left: ${mark.indentPt}pt`, `--docx-hanging: ${mark.hangingPt}pt`);
       attrs.class = "docx-list";
       attrs["data-list"] = mark.text;
     } else if (node.attrs.indent) {
       css.push(`margin-left: ${node.attrs.indent * 36}pt`);
     }
+    // The last tab runs to a right-aligned tab stop (table of contents lines): the line becomes a flex row
+    // where that tab stretches, drawing its leader.
+    // ponytail: in that row a text node of only spaces between two styled spans collapses; real TOC lines don't have one.
+    const leader = attrsOf<ParagraphAttrs>(node).tabLeader;
+    const tabs: number[] = [];
+    if (leader)
+      node.forEach((child, offset) => {
+        for (let i = child.isText ? child.text!.indexOf("\t") : -1; i >= 0; i = child.text!.indexOf("\t", i + 1)) tabs.push(pos + 1 + offset + i);
+      });
+    if (tabs.length) {
+      attrs.class = [attrs.class, "docx-tab-right"].filter(Boolean).join(" ");
+      tabs.forEach((at, i) => decos.push(Decoration.inline(at, at + 1, { class: i === tabs.length - 1 ? `docx-tab-fill docx-leader-${leader}` : "docx-tab" })));
+    }
     attrs.style = css.filter(Boolean).join("; ");
     decos.push(Decoration.node(pos, pos + node.nodeSize, attrs));
+    fitText(styles, doc, node, pos, decos);
     return false;
   });
   return DecorationSet.create(doc, decos);

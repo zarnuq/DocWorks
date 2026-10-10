@@ -88,7 +88,10 @@ export function renderParagraphs(
     p.style.paddingLeft = `${para.marL * pxPerEmu}px`;
     p.style.textIndent = `${para.indent * pxPerEmu}px`;
     p.style.setProperty("--pptx-bullet-width", `${Math.abs(para.indent) * pxPerEmu}px`);
-    styleRun(p, para.defaults, pxPerPt);
+    // Underline / strike-through go on the runs: CSS can't take a paragraph's underline off one of its runs.
+    const { u: _u, strike: _strike, ...paraProps } = para.defaults;
+    styleRun(p, paraProps, pxPerPt);
+    const runPatch = (run: RunProps) => ({ ...diff(run, para.defaults), ...(para.defaults.u || para.defaults.strike ? { u: run.u, strike: run.strike } : {}) });
     // PowerPoint sizes lines from the text itself (single = 1.2 x font size), not the level default.
     const size = para.runs.length ? Math.max(...para.runs.map((r) => r.sz)) : (para.endSz ?? para.defaults.sz);
     const single = 1.2 * size * pxPerPt;
@@ -105,7 +108,7 @@ export function renderParagraphs(
         const span = p.createSpan({ text: fieldText(run, opts) });
         span.dataset.field = run.field;
         span.contentEditable = "false";
-        styleRun(span, diff(run, para.defaults), pxPerPt);
+        styleRun(span, runPatch(run), pxPerPt);
         continue;
       }
       run.text.split("\n").forEach((segment, i) => {
@@ -113,7 +116,7 @@ export function renderParagraphs(
         if (!segment) return;
         const span = p.createSpan();
         span.textContent = segment;
-        styleRun(span, diff(run, para.defaults), pxPerPt);
+        styleRun(span, runPatch(run), pxPerPt);
         // Match PowerPoint's widths (font fitting) plus the run's own character spacing.
         // All-caps text is drawn (so measured) in capitals.
         const ls = (letterSpacing(run.cap === "all" ? segment.toUpperCase() : segment, run, run.sz * pxPerPt) ?? 0) + run.spc * pxPerPt;

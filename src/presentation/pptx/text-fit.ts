@@ -4,20 +4,9 @@
  * fallback font actually used is spread over the run as letter-spacing.
  */
 import { CHARS, FONT_ALIASES, FONT_WIDTHS, UNITS_PER_EM } from "./font-metrics";
+import { fontStack } from "../../core/utils/fonts";
 
-/** Metric-compatible stand-ins for Office fonts, used when the real font isn't installed. */
-const FALLBACK: Record<string, string> = {
-  calibri: '"Carlito", "Liberation Sans", Arial',
-  cambria: '"Caladea", "Liberation Serif", serif',
-  arial: '"Liberation Sans", Arimo',
-  "times new roman": '"Liberation Serif", Tinos, serif',
-  "courier new": '"Liberation Mono", Cousine, monospace',
-};
-
-export function fontStack(font: string): string {
-  const extra = FALLBACK[font.toLowerCase()];
-  return `"${font}", ${extra ? extra + ", " : ""}sans-serif`;
-}
+export { fontStack };
 
 const INDEX = new Map([...CHARS].map((ch, i) => [ch, i]));
 const decoded = new Map<string, Uint8Array | null>();

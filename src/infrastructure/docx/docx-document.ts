@@ -52,7 +52,13 @@ const BUILTIN_STYLES: Record<string, readonly [string, string, string]> = {
 };
 
 /** Tail of CT_Settings' child order, from the settings we add onward. */
-const SETTINGS_ORDER = ["alwaysMergeEmptyNamespace", "updateFields", "hdrShapeDefaults", "footnotePr", "endnotePr", "compat", "docVars", "rsids", "mathPr", "attachedSchema", "themeFontLang", "clrSchemeMapping", "doNotIncludeSubdocsInStats", "doNotAutoCompressPictures", "forceUpgrade", "captions", "readModeInkLockDown", "smartTagType", "schemaLibrary", "shapeDefaults", "doNotEmbedSmartTags", "decimalSymbol", "listSeparator"];
+const SETTINGS_ORDER = ["evenAndOddHeaders", "bookFoldRevPrinting", "bookFoldPrinting", "bookFoldPrintingSheets", "drawingGridHorizontalSpacing", "drawingGridVerticalSpacing", "displayHorizontalDrawingGridEvery", "displayVerticalDrawingGridEvery", "doNotUseMarginsForDrawingGridOrigin", "drawingGridHorizontalOrigin", "drawingGridVerticalOrigin", "doNotShadeFormData", "noPunctuationKerning", "characterSpacingControl", "printTwoOnOne", "strictFirstAndLastChars", "noLineBreaksAfter", "noLineBreaksBefore", "savePreviewPicture", "doNotValidateAgainstSchema", "saveInvalidXml", "ignoreMixedContent", "alwaysShowPlaceholderText", "doNotDemarcateInvalidXml", "saveXmlDataOnly", "useXSLTWhenSaving", "saveThroughXslt", "showXMLTags", "alwaysMergeEmptyNamespace", "updateFields", "hdrShapeDefaults", "footnotePr", "endnotePr", "compat", "docVars", "rsids", "mathPr", "attachedSchema", "themeFontLang", "clrSchemeMapping", "doNotIncludeSubdocsInStats", "doNotAutoCompressPictures", "forceUpgrade", "captions", "readModeInkLockDown", "smartTagType", "schemaLibrary", "shapeDefaults", "doNotEmbedSmartTags", "decimalSymbol", "listSeparator"];
+
+/** CT_SectPr child order. */
+const SECT_ORDER = ["headerReference", "footerReference", "footnotePr", "endnotePr", "type", "pgSz", "pgMar", "paperSrc", "pgBorders", "lnNumType", "pgNumType", "cols", "formProt", "vAlign", "noEndnote", "titlePg", "textDirection", "bidi", "rtlGutter", "docGrid", "printerSettings", "sectPrChange"];
+
+/** Which header / footer of a section: every page, the first page, or even pages. */
+export type HFType = "default" | "first" | "even";
 
 const nextId = (part: Document, tag: string) =>
   Array.from(part.getElementsByTagNameNS(NS.w, tag)).reduce((m, e) => Math.max(m, Number(wVal(e, "id")) || 0), 0) + 1;
@@ -179,23 +185,23 @@ export class DocxDocument extends OoxmlPackage {
     return this.body.appendChild(this.document.createElementNS(NS.w, "w:sectPr"));
   }
 
-  /** Root (w:hdr / w:ftr) of the default header or footer, if the document has one. */
-  /** Part path of the default header or footer, if there is one. */
-  headerFooterPath(kind: "header" | "footer"): string | null {
+  /** Part path of a header or footer, if the section has one of that type. */
+  headerFooterPath(kind: "header" | "footer", type: HFType = "default"): string | null {
     const ref = Array.from(this.finalSectPr(false)?.children ?? []).find(
-      (c) => c.localName === `${kind}Reference` && (wVal(c, "type") ?? "default") === "default"
+      (c) => c.localName === `${kind}Reference` && (wVal(c, "type") ?? "default") === type
     );
     return (ref && this.relTarget(this.mainPath, ref.getAttributeNS(NS.r, "id") ?? "")) || null;
   }
 
-  headerFooter(kind: "header" | "footer"): Element | null {
-    const path = this.headerFooterPath(kind);
+  /** Root (w:hdr / w:ftr) of a header or footer, if the document has one. */
+  headerFooter(kind: "header" | "footer", type: HFType = "default"): Element | null {
+    const path = this.headerFooterPath(kind, type);
     return (path && this.xml(path)?.documentElement) || null;
   }
 
-  /** The default header or footer, created (empty) if missing. */
-  ensureHeaderFooter(kind: "header" | "footer"): Element {
-    const existing = this.headerFooter(kind);
+  /** The header or footer of `type`, created (empty) and referenced from the final section if missing. */
+  ensureHeaderFooter(kind: "header" | "footer", type: HFType = "default"): Element {
+    const existing = this.headerFooter(kind, type);
     if (existing) return existing;
     const path = this.nextPartPath(`word/${kind}`, ".xml");
     const tag = kind === "header" ? "hdr" : "ftr";
@@ -204,15 +210,40 @@ export class DocxDocument extends OoxmlPackage {
     const rId = this.addRel(this.mainPath, kind, path);
     const sectPr = this.finalSectPr(true)!;
     const ref = this.document.createElementNS(NS.w, `w:${kind}Reference`);
-    ref.setAttributeNS(NS.w, "w:type", "default");
+    ref.setAttributeNS(NS.w, "w:type", type);
     ref.setAttributeNS(NS.r, "r:id", rId);
     // Header / footer references come first in w:sectPr.
     const before = Array.from(sectPr.children).find((c) => !c.localName.endsWith("Reference")) ?? null;
     sectPr.insertBefore(ref, before);
-    return this.headerFooter(kind)!;
+    return this.headerFooter(kind, type)!;
   }
 
-  // --- Comments ----------------------------------------------------------------
+  /** "Different first page" (w:titlePg on the final section). */
+  differentFirstPage(): boolean {
+    const el = Array.from(this.finalSectPr(false)?.children ?? []).find((c) => c.localName === "titlePg");
+    return !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
+  }
+
+  setDifferentFirstPage(on: boolean): void {
+    const sectPr = this.finalSectPr(true)!;
+    Array.from(sectPr.children).filter((c) => c.localName === "titlePg").forEach((c) => c.remove());
+    if (!on) return;
+    const at = SECT_ORDER.indexOf("titlePg");
+    const before = Array.from(sectPr.children).find((c) => SECT_ORDER.indexOf(c.localName) > at) ?? null;
+    sectPr.insertBefore(this.document.createElementNS(NS.w, "w:titlePg"), before);
+  }
+
+  /** "Different odd & even" pages (w:evenAndOddHeaders in settings.xml). */
+  differentOddEven(): boolean {
+    const el = this.partOf("settings")?.getElementsByTagNameNS(NS.w, "evenAndOddHeaders")[0];
+    return !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
+  }
+
+  setDifferentOddEven(on: boolean): void {
+    const settings = on ? this.ensurePart("settings", "settings", `<w:settings xmlns:w="${NS.w}"/>`) : this.partOf("settings");
+    Array.from(settings?.getElementsByTagNameNS(NS.w, "evenAndOddHeaders") ?? []).forEach((e) => e.remove());
+    if (on) this.ensureSetting("evenAndOddHeaders", `<w:evenAndOddHeaders/>`);
+  }
 
   private partOf(type: string): Document | null {
     const path = this.relOfType(this.mainPath, type);

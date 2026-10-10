@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { textWidthEm } from "../src/presentation/pptx/text-fit";
 import { EditorState, TextSelection, Command } from "prosemirror-state";
 import { DecorationSet, EditorView } from "prosemirror-view";
 import { docxSchema as schema } from "../src/domain/docx/schema";
@@ -11,7 +12,7 @@ import { writeBody } from "../src/domain/docx/docx-writer";
 import { paragraphProps, readDocx } from "../src/domain/docx/docx-reader";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { readSample, W } from "./helpers";
-import { layoutPages, pageSetup, TopBlock, Unit } from "../src/domain/docx/pages";
+import { headerFooterType, layoutPages, pageSetup, TopBlock, Unit } from "../src/domain/docx/pages";
 import { acceptRevisions, rejectRevisions, revisions } from "../src/domain/docx/revisions";
 import { countWords, findKey, findRanges, replaceAllCmd, replaceRangeCmd, setFind } from "../src/presentation/docx/docx-find";
 
@@ -283,6 +284,136 @@ describe("page view", () => {
   });
 });
 
+describe("text as wide as in the document's font (when that font isn't installed)", () => {
+  /** Fake canvas: every character of the installed font is 0.6em wide. */
+  class FakeCanvas {
+    getContext() {
+      return {
+        font: "",
+        measureText(this: { font: string }, text: string) {
+          return { width: [...text].length * 0.6 * parseFloat(/([\d.]+)px/.exec(this.font)![1]) };
+        },
+      };
+    }
+  }
+  afterEach(() => vi.unstubAllGlobals());
+  const spacing = (doc: ReturnType<typeof s.doc.create>, styles = ctx.styles) => {
+    const st = EditorState.create({ doc, plugins: docxPlugins({ ...ctx, styles }) });
+    return st.plugins
+      .flatMap((pl) => (pl.props.decorations?.call(pl, st) as DecorationSet | undefined)?.find() ?? [])
+      .map((d) => ({ from: d.from, to: d.to, style: (d as unknown as { type: { attrs?: { style?: string } } }).type.attrs?.style ?? "" }))
+      .filter((d) => d.style.startsWith("letter-spacing"));
+  };
+
+  it("spreads the width difference over each run, from its font, size and weight", () => {
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    const doc = s.doc.create(null, [s.paragraph.create(null, [schema.text("Hello ", [m.font.create({ font: "Calibri" }), m.size.create({ pt: 12 })]), schema.text("world", [m.font.create({ font: "Calibri" }), m.size.create({ pt: 12 }), m.bold.create()])])]);
+    const [plain, bold] = spacing(doc);
+    const px = 12 * (96 / 72);
+    const want = (text: string, b: boolean) => ((textWidthEm(text, "Calibri", b, false)! - text.length * 0.6) * px) / text.length;
+    expect([plain.from, plain.to, bold.from, bold.to]).toEqual([1, 7, 7, 12]);
+    expect(parseFloat(plain.style.slice(15))).toBeCloseTo(want("Hello ", false), 3);
+    expect(parseFloat(bold.style.slice(15))).toBeCloseTo(want("world", true), 3);
+  });
+
+  it("uses the paragraph style's font and size for runs without their own", () => {
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    const styles = new DocxStyles(
+      new DOMParser().parseFromString(
+        `<w:styles xmlns:w="${W}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial"/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>`,
+        "application/xml"
+      ),
+      null
+    );
+    const [d] = spacing(s.doc.create(null, [s.paragraph.create(null, schema.text("Hello"))]), styles);
+    const px = 10 * (96 / 72);
+    expect(parseFloat(d.style.slice(15))).toBeCloseTo(((textWidthEm("Hello", "Arial", false, false)! - 5 * 0.6) * px) / 5, 3);
+  });
+
+  it("leaves fonts it has no widths for, and text without a canvas, alone", () => {
+    expect(spacing(s.doc.create(null, [s.paragraph.create(null, schema.text("Hello", [m.font.create({ font: "Calibri" })]))]))).toEqual([]);
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    expect(spacing(s.doc.create(null, [s.paragraph.create(null, schema.text("Hello", [m.font.create({ font: "Wingdings" })]))]))).toEqual([]);
+  });
+});
+
+describe("keeping paragraphs and rows together", () => {
+  const read = (inner: string) => {
+    const body = new DOMParser().parseFromString(`<w:body xmlns:w="${W}">${inner}</w:body>`, "application/xml").documentElement;
+    return { body, ...readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null }) };
+  };
+  const writeCtx = { nextDocPrId: () => 1, ensureParagraphStyles: () => {} };
+
+  it("reads keep with next / keep lines together, unset meaning the style decides", () => {
+    const { doc } = read(`<w:p><w:pPr><w:keepNext/><w:keepLines w:val="0"/></w:pPr></w:p><w:p/>`);
+    expect([doc.child(0).attrs.keepNext, doc.child(0).attrs.keepLines]).toEqual([true, false]);
+    expect([doc.child(1).attrs.keepNext, doc.child(1).attrs.keepLines]).toEqual([null, null]);
+  });
+
+  it("writes them in schema order, turning a style's setting off with val=0", () => {
+    const { body, doc, origins } = read(`<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>`);
+    let st = EditorState.create({ doc, selection: TextSelection.create(doc, 1) });
+    st = run(st, cmd.setParagraph({ keepNext: false, keepLines: true }));
+    writeBody(body, st.doc, origins, writeCtx);
+    const pPr = body.getElementsByTagNameNS(W, "pPr")[0];
+    expect(Array.from(pPr.children).map((c) => c.localName)).toEqual(["pStyle", "keepNext", "keepLines", "jc"]);
+    expect(pPr.children[1].getAttributeNS(W, "val")).toBe("0");
+    expect(pPr.children[2].hasAttributeNS(W, "val")).toBe(false);
+  });
+
+  it("knows which styles keep with the next paragraph", () => {
+    const styles = new DocxStyles(
+      new DOMParser().parseFromString(
+        `<w:styles xmlns:w="${W}"><w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:keepNext/><w:keepLines/></w:pPr></w:style>` +
+          `<w:style w:type="paragraph" w:styleId="Heading2"><w:basedOn w:val="Heading1"/><w:pPr><w:keepLines w:val="0"/></w:pPr></w:style></w:styles>`,
+        "application/xml"
+      ),
+      null
+    );
+    expect(styles.keep("Heading2")).toEqual({ next: true, lines: false });
+    expect(styles.keep(null)).toEqual({ next: false, lines: false });
+  });
+
+  it("lets rows break across pages or not, for the whole table (Google Docs' table option)", () => {
+    const { body, doc, origins } = read(
+      `<w:tbl><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>`
+    );
+    expect(doc.child(0).child(0).attrs.cantSplit).toBe(true);
+    let st = EditorState.create({ doc, selection: TextSelection.create(doc, 4) });
+    expect(cmd.rowsCanBreak(st)).toBe(false);
+    st = run(st, cmd.setRowsCanBreak(false));
+    expect([0, 1].map((i) => st.doc.child(0).child(i).attrs.cantSplit)).toEqual([true, true]);
+    st = run(st, cmd.setRowsCanBreak(true));
+    expect(cmd.rowsCanBreak(st)).toBe(true);
+    st = run(st, cmd.setRowsCanBreak(false));
+    writeBody(body, st.doc, origins, writeCtx);
+    expect(body.getElementsByTagNameNS(W, "cantSplit")).toHaveLength(2);
+  });
+});
+
+describe("section breaks", () => {
+  it("starts a new page where a section ends, unless the next section starts continuous", async () => {
+    const sect = (type: string) => `<w:sectPr>${type ? `<w:type w:val="${type}"/>` : ""}</w:sectPr>`;
+    const xml =
+      `<w:body xmlns:w="${W}"><w:p><w:pPr>${sect("")}</w:pPr><w:r><w:t>one</w:t></w:r></w:p>` +
+      `<w:p><w:pPr>${sect("continuous")}</w:pPr><w:r><w:t>two</w:t></w:r></w:p><w:p><w:r><w:t>three</w:t></w:r></w:p></w:body>`;
+    const body = new DOMParser().parseFromString(xml, "application/xml").documentElement;
+    const { doc } = readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null });
+    // A section's w:type says how that section starts: section 2 is continuous, section 3 (the body's) a new page.
+    expect(doc.child(0).attrs.sectionBreak).toBe(false);
+    expect(doc.child(1).attrs.sectionBreak).toBe(true);
+    const host = document.body.appendChild(document.createElement("div"));
+    const setup = { width: 816, height: 1056, top: 96, right: 96, bottom: 96, left: 96, header: 48, footer: 48 };
+    const view = new EditorView(host, {
+      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx), pagesPlugin({ setup: () => setup, header: () => null, footer: () => null })] }),
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(pagesKey.getState(view.state)!.pages).toBe(2);
+    expect(host.querySelector(".docx-page-gap")!.nextElementSibling!.textContent).toBe("three");
+    view.destroy();
+  });
+});
+
 describe("headers and footers", () => {
   it("creates a default header and footer referenced from the final section", async () => {
     const docx = await DocxDocument.load(await blankDocx());
@@ -295,6 +426,39 @@ describe("headers and footers", () => {
     const back = await DocxDocument.load(await docx.save());
     expect(back.headerFooter("header")!.localName).toBe("hdr");
     expect(back.headerFooter("footer")!.localName).toBe("ftr");
+  });
+
+  it("keeps separate first-page and even-page headers, switched on like Google Docs' header options", async () => {
+    const docx = await DocxDocument.load(await blankDocx());
+    expect(docx.differentFirstPage()).toBe(false);
+    expect(docx.differentOddEven()).toBe(false);
+    const first = docx.ensureHeaderFooter("header", "first");
+    const even = docx.ensureHeaderFooter("footer", "even");
+    expect(docx.ensureHeaderFooter("header", "first")).toBe(first);
+    expect(docx.headerFooter("header")).toBeNull();
+    docx.setDifferentFirstPage(true);
+    docx.setDifferentOddEven(true);
+    const sectPr = Array.from(docx.body.children).pop()!;
+    const refs = Array.from(sectPr.children).filter((c) => c.localName.endsWith("Reference"));
+    expect(refs.map((r) => `${r.localName}:${r.getAttributeNS(W, "type")}`)).toEqual(["headerReference:first", "footerReference:even"]);
+    // titlePg sits after the page setup, as the schema wants.
+    const order = Array.from(sectPr.children).map((c) => c.localName);
+    expect(order.indexOf("titlePg")).toBeGreaterThan(order.indexOf("pgMar"));
+    const back = await DocxDocument.load(await docx.save());
+    expect([back.differentFirstPage(), back.differentOddEven()]).toEqual([true, true]);
+    expect(back.headerFooter("header", "first")!.localName).toBe("hdr");
+    expect(back.headerFooter("footer", "even")!.localName).toBe("ftr");
+    back.setDifferentFirstPage(false);
+    back.setDifferentOddEven(false);
+    expect([back.differentFirstPage(), back.differentOddEven()]).toEqual([false, false]);
+    // The parts stay, as in Word and Google Docs, ready if the option comes back on.
+    expect(back.headerFooter("header", "first")).not.toBeNull();
+  });
+
+  it("picks the header a page shows: first page, even pages, then the default", () => {
+    expect([1, 2, 3].map((p) => headerFooterType(p, true, true))).toEqual(["first", "even", "default"]);
+    expect([1, 2].map((p) => headerFooterType(p, false, true))).toEqual(["default", "even"]);
+    expect([1, 2].map((p) => headerFooterType(p, true, false))).toEqual(["first", "default"]);
   });
 
   it("edits header text through the normal reader and writer", async () => {
@@ -504,14 +668,21 @@ describe("table of contents", () => {
     st = run(st, cmd.insertToc);
     const toc = st.doc.child(1);
     expect(toc.attrs.kind).toBe("toc");
-    expect(toc.attrs.text).toBe("Contents\nStart\n    Detail");
-    expect(toc.attrs.xml).toContain('TOC \\o "1-3"');
-    expect(toc.attrs.xml).toContain('w:val="TOC2"');
+    expect(text(st).slice(1, 4)).toEqual(["Contents", "Start", "Detail"]);
+    expect(toc.child(1).firstChild!.attrs.xml).toContain('w:fldCharType="begin"');
     // Rename a heading, then update.
     const pos = st.doc.child(0).nodeSize + toc.nodeSize + 1;
     st = st.apply(st.tr.insertText("Real ", pos));
     st = run(st, cmd.updateToc);
-    expect(st.doc.child(1).attrs.text).toBe("Contents\nReal Start\n    Detail");
+    expect(text(st).slice(1, 4)).toEqual(["Contents", "Real Start", "Detail"]);
+    // Written out as Word's TOC field inside a content control.
+    const body = new DOMParser().parseFromString(`<w:body xmlns:w="${W}"/>`, "application/xml").documentElement;
+    writeBody(body, st.doc, new Map(), { nextDocPrId: () => 1 });
+    const sdt = body.getElementsByTagNameNS(W, "sdt")[0];
+    expect(sdt.getElementsByTagNameNS(W, "docPartGallery")[0].getAttributeNS(W, "val")).toBe("Table of Contents");
+    expect(sdt.getElementsByTagNameNS(W, "instrText")[0].textContent).toContain('TOC \\o "1-3"');
+    expect(Array.from(sdt.getElementsByTagNameNS(W, "pStyle")).map((x) => x.getAttributeNS(W, "val"))).toEqual(["TOCHeading", "TOC1", "TOC2"]);
+    expect(Array.from(sdt.getElementsByTagNameNS(W, "fldChar")).map((x) => x.getAttributeNS(W, "fldCharType"))).toEqual(["begin", "separate", "end"]);
   });
 
   it("recognizes Word's own table of contents so it can be updated", async () => {
@@ -523,7 +694,7 @@ describe("table of contents", () => {
     expect(doc.child(0).attrs.kind).toBe("toc");
     let st = EditorState.create({ doc, plugins: docxPlugins(ctx) });
     st = run(st, cmd.updateToc);
-    expect(st.doc.child(0).attrs.text).toBe("Contents\nNew");
+    expect(text(st).slice(0, 2)).toEqual(["Contents", "New"]);
   });
 
   it("defines the TOC styles and asks Word to refresh fields on open", async () => {
@@ -650,5 +821,110 @@ describe("display fidelity", () => {
     const dom = ser(math);
     expect(dom.textContent).toBe("K5");
     expect(dom.querySelector("sub")?.textContent).toBe("5");
+  });
+});
+
+describe("content controls and fields", () => {
+  const read = (inner: string) => {
+    const body = new DOMParser().parseFromString(`<w:body xmlns:w="${W}">${inner}</w:body>`, "application/xml").documentElement;
+    return { body, ...readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null }) };
+  };
+  const sdt = (content: string, pr = `<w:alias w:val="Box"/>`) => `<w:sdt><w:sdtPr>${pr}</w:sdtPr><w:sdtEndPr/><w:sdtContent>${content}</w:sdtContent></w:sdt>`;
+  const p = (t: string) => `<w:p><w:r><w:t>${t}</w:t></w:r></w:p>`;
+  const writeCtx = { nextDocPrId: () => 1, ensureParagraphStyles: () => {} };
+
+  it("reads a block content control as editable paragraphs", () => {
+    const { doc } = read(sdt(p("One") + p("Two")));
+    const box = doc.child(0);
+    expect(box.type.name).toBe("sdt");
+    expect(box.childCount).toBe(2);
+    expect(box.child(1).type.name).toBe("paragraph");
+    expect(box.child(1).textContent).toBe("Two");
+  });
+
+  it("writes an edited content control back inside its properties", () => {
+    const { body, doc, origins } = read(sdt(p("One")));
+    const st = EditorState.create({ doc }).apply(EditorState.create({ doc }).tr.insertText("!", 5));
+    writeBody(body, st.doc, origins, writeCtx);
+    const out = body.firstElementChild!;
+    expect(out.localName).toBe("sdt");
+    expect(out.getElementsByTagNameNS(W, "alias")[0].getAttributeNS(W, "val")).toBe("Box");
+    expect(out.getElementsByTagNameNS(W, "sdtEndPr")).toHaveLength(1);
+    const content = out.getElementsByTagNameNS(W, "sdtContent")[0];
+    expect(content.textContent).toBe("One!");
+  });
+
+  it("marks the result of a PAGE / NUMPAGES field so the page view can fill it in", () => {
+    const field = (instr: string, result: string) =>
+      `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> ${instr} </w:instrText></w:r>` +
+      `<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${result}</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>`;
+    const { doc } = read(sdt(`<w:p><w:r><w:t xml:space="preserve">Page </w:t></w:r>${field("PAGE", "2")}<w:r><w:t xml:space="preserve"> of </w:t></w:r>${field("NUMPAGES", "9")}</w:p>`));
+    expect(doc.textContent).toBe("Page 2 of 9");
+    const dom = DOMSerializer.fromSchema(schema).serializeFragment(doc.content, { document });
+    const div = document.createElement("div");
+    div.appendChild(dom);
+    expect(Array.from(div.querySelectorAll<HTMLElement>("[data-field]")).map((f) => `${f.dataset.field}=${f.textContent}`)).toEqual(["PAGE=2", "NUMPAGES=9"]);
+    expect(div.textContent).not.toContain("PAGE");
+  });
+
+  it("does not mark the result of other fields", () => {
+    const { doc } = read(`<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>PAGEREF _Toc1 \\h</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>4</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>`);
+    expect(doc.child(0).textContent).toBe("4");
+    expect(doc.child(0).lastChild!.marks.some((x) => x.type.name === "field")).toBe(false);
+  });
+
+  it("reads Word's table of contents as a content control of styled entries", () => {
+    const entry = (style: string, t: string) => `<w:p><w:pPr><w:pStyle w:val="${style}"/><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9345"/></w:tabs></w:pPr><w:r><w:t>${t}</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>5</w:t></w:r></w:p>`;
+    const { doc } = read(sdt(entry("TOC1", "Intro") + entry("TOC2", "Detail"), `<w:docPartObj><w:docPartGallery w:val="Table of Contents"/></w:docPartObj>`));
+    const toc = doc.child(0);
+    expect(toc.type.name).toBe("sdt");
+    expect(toc.attrs.kind).toBe("toc");
+    expect(toc.child(1).attrs.style).toBe("TOC2");
+    expect(toc.child(1).attrs.tabLeader).toBe("dot");
+  });
+
+  it("stretches the last tab of a paragraph with a right tab stop, drawing its leader", () => {
+    const { doc } = read(
+      `<w:p><w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9345"/></w:tabs></w:pPr><w:r><w:t>1.1</w:t><w:tab/><w:t>Scope</w:t><w:tab/><w:t>6</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>a</w:t><w:tab/><w:t>b</w:t></w:r></w:p>`
+    );
+    const st = EditorState.create({ doc, plugins: docxPlugins(ctx) });
+    const decos = st.plugins.flatMap((pl) => (pl.props.decorations?.call(pl, st) as DecorationSet | undefined)?.find() ?? []);
+    const fills = decos.filter((d) => (d as unknown as { type: { attrs?: { class?: string } } }).type.attrs?.class?.includes("docx-tab-fill"));
+    expect(fills).toHaveLength(1);
+    // The second tab of the first paragraph: "1.1\tScope\t6" starts at 1.
+    expect(fills[0].from).toBe(1 + "1.1\tScope".length);
+    expect((fills[0] as unknown as { type: { attrs: { class: string } } }).type.attrs.class).toContain("docx-leader-dot");
+    // Earlier tabs stay tabs (their own element, so the flex line keeps them).
+    const tabs = decos.filter((d) => (d as unknown as { type: { attrs?: { class?: string } } }).type.attrs?.class === "docx-tab");
+    expect(tabs.map((d) => d.from)).toEqual([1 + "1.1".length]);
+  });
+
+  it("builds and updates its own table of contents as a content control", () => {
+    const heading = (style: string, t: string) => s.paragraph.create({ style }, schema.text(t));
+    let st = state([s.paragraph.create(null, schema.text("intro")), heading("Heading1", "Start"), heading("Heading2", "Detail")], 1);
+    st = run(st, cmd.insertToc);
+    const toc = st.doc.child(1);
+    expect(toc.type.name).toBe("sdt");
+    expect(toc.attrs.kind).toBe("toc");
+    expect(text(st).slice(1, 4)).toEqual(["Contents", "Start", "Detail"]);
+    expect(toc.child(2).attrs.style).toBe("TOC2");
+  });
+
+  it("lays out the paragraphs inside a content control one by one", async () => {
+    const doc = s.doc.create(null, [
+      s.sdt.create(null, [s.paragraph.create(null, [schema.text("one"), s.page_break.create()]), s.paragraph.create(null, schema.text("two"))]),
+    ]);
+    const host = document.body.appendChild(document.createElement("div"));
+    const setup = { width: 816, height: 1056, top: 96, right: 96, bottom: 96, left: 96, header: 48, footer: 48 };
+    const view = new EditorView(host, {
+      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx), pagesPlugin({ setup: () => setup, header: () => null, footer: () => null })] }),
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(pagesKey.getState(view.state)!.pages).toBe(2);
+    // The gap sits between the two paragraphs, inside the control.
+    const gap = host.querySelector(".docx-page-gap")!;
+    expect(gap.nextElementSibling!.textContent).toBe("two");
+    view.destroy();
   });
 });

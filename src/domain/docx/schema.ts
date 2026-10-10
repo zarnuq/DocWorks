@@ -1,4 +1,5 @@
 import { Schema, Node as PMNode, DOMOutputSpec } from "prosemirror-model";
+import { fontStack } from "../../core/utils/fonts";
 import { mathSpec } from "./math";
 
 /**
@@ -35,6 +36,16 @@ export interface ParagraphAttrs {
   spaceAfter: number | null;
   /** First-line indent in points; negative = hanging. */
   firstLine: number | null;
+  /** Leader of the paragraph's right-aligned tab stop ("none", "dot"...), null if it has none (display only). */
+  tabLeader: string | null;
+  /** Size (pt) and font of the paragraph mark, which Word sizes the lines by (display only). */
+  markSize: number | null;
+  markFont: string | null;
+  /** The paragraph ends a section and the next one starts on a new page (display only). */
+  sectionBreak: boolean;
+  /** Keep with next / keep lines together; null = from the style. */
+  keepNext: boolean | null;
+  keepLines: boolean | null;
 }
 export interface CellAttrs {
   key: string | null;
@@ -44,6 +55,8 @@ export interface CellAttrs {
   vMerge: "restart" | "continue" | null;
   /** The cell's own border overrides, e.g. "t:none b:line" (display only; the XML keeps the details). */
   edges: string | null;
+  /** Padding "top right bottom left" in pt, "-" = default (display only). */
+  margins: string | null;
 }
 export type TableBorders = "all" | "outer" | "none";
 export interface TableAttrs {
@@ -93,6 +106,12 @@ export const docxSchema = new Schema({
         spaceBefore: { default: null },
         spaceAfter: { default: null },
         firstLine: { default: null },
+        tabLeader: { default: null },
+        markSize: { default: null },
+        markFont: { default: null },
+        sectionBreak: { default: false },
+        keepNext: { default: null },
+        keepLines: { default: null },
       },
       parseDOM: [
         { tag: "p" },
@@ -114,6 +133,14 @@ export const docxSchema = new Schema({
       },
     },
 
+    /** Content control (w:sdt) around blocks. `xml` is the empty w:sdt with its properties, for controls the editor made. */
+    sdt: {
+      group: "block",
+      content: "block+",
+      attrs: { key: { default: null }, kind: { default: "other" }, xml: { default: "" } },
+      toDOM: (node) => ["div", { class: node.attrs.kind === "toc" ? "docx-sdt docx-toc" : "docx-sdt" }, 0],
+    },
+
     table: {
       group: "block",
       content: "table_row+",
@@ -124,27 +151,31 @@ export const docxSchema = new Schema({
     },
     table_row: {
       content: "table_cell+",
-      /** header: repeats at the top of each page (w:tblHeader). */
-      attrs: { key: { default: null }, header: { default: false } },
+      /** header: repeats at the top of each page (w:tblHeader); cantSplit: moves to the next page whole. */
+      attrs: { key: { default: null }, header: { default: false }, cantSplit: { default: false } },
       parseDOM: [{ tag: "tr" }],
       toDOM: () => ["tr", 0],
     },
     table_cell: {
       content: "block+",
       isolating: true,
-      attrs: { key: { default: null }, colspan: { default: 1 }, background: { default: null }, vMerge: { default: null }, edges: { default: null } },
+      attrs: { key: { default: null }, colspan: { default: 1 }, background: { default: null }, vMerge: { default: null }, edges: { default: null }, margins: { default: null } },
       parseDOM: [{ tag: "td" }, { tag: "th" }],
       toDOM(node): DOMOutputSpec {
         const attrs: Record<string, string> = {};
         const edges = node.attrs.edges as string | null;
         if (edges) attrs.class = edges.split(" ").map((e) => `docx-e-${e.replace(":", "-")}`).join(" ");
         if (node.attrs.colspan > 1) attrs.colspan = String(node.attrs.colspan);
-        if (node.attrs.background) attrs.style = `background-color: ${node.attrs.background}`;
+        const style: string[] = [];
+        if (node.attrs.background) style.push(`background-color: ${node.attrs.background}`);
+        const margins = (node.attrs.margins as string | null)?.split(" ") ?? [];
+        ["top", "right", "bottom", "left"].forEach((side, i) => margins[i] && margins[i] !== "-" && style.push(`padding-${side}: ${margins[i]}`));
+        if (style.length) attrs.style = style.join("; ");
         return ["td", attrs, 0];
       },
     },
 
-    /** Block we can't edit (content control, horizontal rule...), written back verbatim. */
+    /** Block we can't edit (horizontal rule, unknown elements...), written back verbatim. */
     raw_block: {
       group: "block",
       atom: true,
@@ -153,7 +184,6 @@ export const docxSchema = new Schema({
       parseDOM: [{ tag: "hr", attrs: { kind: "hr" } }],
       toDOM(node): DOMOutputSpec {
         if (node.attrs.kind === "hr") return ["hr"];
-        if (node.attrs.kind === "toc") return ["div", { class: "docx-toc", contenteditable: "false", title: "Table of contents (update it from the toolbar)" }, node.attrs.text];
         return ["div", { class: "docx-raw-block", contenteditable: "false", title: "Read-only content" }, node.attrs.text];
       },
     },
@@ -222,6 +252,12 @@ export const docxSchema = new Schema({
   },
 
   marks: {
+    /** Cached result of a PAGE / NUMPAGES field; the page view shows the real number. */
+    field: {
+      attrs: { name: {} },
+      inclusive: false,
+      toDOM: (mark) => ["span", { "data-field": mark.attrs.name as string }, 0],
+    },
     /** Original w:rPr XML: keeps every run property we don't model. */
     rpr: {
       attrs: { xml: {} },
@@ -271,7 +307,7 @@ export const docxSchema = new Schema({
     },
     font: {
       attrs: { font: {} },
-      toDOM: (mark) => ["span", { style: `font-family: "${mark.attrs.font}"` }, 0],
+      toDOM: (mark) => ["span", { style: `font-family: ${fontStack(mark.attrs.font as string)}` }, 0],
     },
     size: {
       attrs: { pt: {} },

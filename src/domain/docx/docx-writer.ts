@@ -106,6 +106,7 @@ class Writer {
 
   private block(node: PMNode): Element {
     if (node.type === schema.nodes.table) return this.table(node);
+    if (node.type === schema.nodes.sdt) return this.sdt(node);
     if (node.type === schema.nodes.raw_block) {
       const { xml } = attrsOf<XmlAttrs>(node);
       if (xml) return this.import(xml);
@@ -114,6 +115,17 @@ class Writer {
       );
     }
     return this.paragraph(node);
+  }
+
+  /** A content control: its original properties around the rewritten content. */
+  private sdt(node: PMNode): Element {
+    const c = this.claim(node);
+    if (c.verbatim) return c.o!.el.cloneNode(true) as Element;
+    const sdt = c.o ? this.shell("sdt", c) : this.import(attrsOf<XmlAttrs>(node).xml || `<w:sdt xmlns:w="${NS.w}"/>`);
+    for (const child of Array.from(c.o?.el.children ?? [])) if (child.localName !== "sdtContent") sdt.appendChild(child.cloneNode(true));
+    const content = sdt.appendChild(this.el("sdtContent"));
+    for (const el of this.blocks(node)) content.appendChild(el);
+    return sdt;
   }
 
   private paragraph(node: PMNode): Element {
@@ -182,6 +194,15 @@ class Writer {
       ind.removeAttributeNS(NS.w, "hanging");
       if (a.firstLine) this.set(ind, a.firstLine > 0 ? "firstLine" : "hanging", twips(Math.abs(a.firstLine)));
       if (!ind.attributes.length) ind.remove();
+    }
+
+    for (const key of ["keepNext", "keepLines"] as const) {
+      if (a[key] === was[key]) continue;
+      this.drop(pPr, key);
+      if (a[key] !== null) {
+        const el = this.upsert(pPr, key);
+        if (!a[key]) this.set(el, "val", "0");
+      }
     }
 
     if (pPr.attributes.length || pPr.children.length) p.appendChild(pPr);
@@ -261,6 +282,12 @@ class Writer {
     if (header !== wasHeader) {
       this.drop(trPr, "tblHeader");
       if (header) this.upsert(trPr, "tblHeader");
+    }
+    const cantSplit = !!node.attrs.cantSplit;
+    const couldNotSplit = !!w(base, "cantSplit") && !["0", "false", "off"].includes(wVal(w(base, "cantSplit")) ?? "");
+    if (cantSplit !== couldNotSplit) {
+      this.drop(trPr, "cantSplit");
+      if (cantSplit) this.upsert(trPr, "cantSplit");
     }
     if (trPr.children.length || trPr.attributes.length) tr.appendChild(trPr);
     let col = 0;

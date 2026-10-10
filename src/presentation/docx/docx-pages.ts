@@ -15,6 +15,8 @@ export interface PagesOptions {
   setup(): PageSetup | null;
   /** Header / footer content for a 1-based page number out of `total`. */
   header(page: number, total: number): Node | null;
+  /** Keep with next / keep lines together for a paragraph, with its style applied; default: its own settings only. */
+  keep?(node: PMNode): { next: boolean; lines: boolean };
   footer(page: number, total: number): Node | null;
 }
 
@@ -36,7 +38,7 @@ export function repaginate(view: EditorView): void {
 }
 
 function hasPageBreak(node: PMNode): boolean {
-  let found = false;
+  let found = !!node.attrs.sectionBreak;
   node.descendants((n) => {
     if (n.type === schema.nodes.page_break) found = true;
     return !found;
@@ -126,16 +128,27 @@ function measureRows(view: EditorView, table: PMNode, tablePos: number, origin: 
       });
       cells.push({ padTop: tops[0] - box.top, padBottom: box.bottom - contentBottom, left: contentLeft(td, origin), children });
     });
-    rows.push({ height: tr.getBoundingClientRect().height, cells });
+    rows.push({ height: tr.getBoundingClientRect().height, cantSplit: !!row.attrs.cantSplit, cells });
   });
   return rows;
 }
 
-function measure(view: EditorView): TopBlock[] {
+/** The blocks pages break between: top-level blocks, with content controls opened up. */
+function flowBlocks(doc: PMNode): { node: PMNode; pos: number }[] {
+  const out: { node: PMNode; pos: number }[] = [];
+  const walk = (parent: PMNode, start: number) =>
+    parent.forEach((node, offset) => {
+      if (node.type === schema.nodes.sdt) walk(node, start + offset + 1);
+      else out.push({ node, pos: start + offset });
+    });
+  walk(doc, 0);
+  return out;
+}
+
+function measure(view: EditorView, opts: PagesOptions): TopBlock[] {
   const origin = view.dom.getBoundingClientRect();
-  const doc = view.state.doc;
   const items: { node: PMNode; pos: number; el: HTMLElement | null; top: number }[] = [];
-  doc.forEach((node, pos) => {
+  flowBlocks(view.state.doc).forEach(({ node, pos }) => {
     const el = view.nodeDOM(pos);
     const dom = el instanceof HTMLElement ? el : null;
     items.push({ node, pos, el: dom, top: dom ? dom.getBoundingClientRect().top : NaN });
@@ -147,7 +160,11 @@ function measure(view: EditorView): TopBlock[] {
       height = next ? next.top - it.top : it.el.getBoundingClientRect().height + px(getComputedStyle(it.el).marginBottom);
     }
     const unit = it.el ? measureUnit(view, it.node, it.pos, it.el, height, origin) : { kind: "block" as const, height, pos: it.pos };
-    return { unit, breakAfter: hasPageBreak(it.node) };
+    if (it.node.type !== schema.nodes.paragraph) return { unit, breakAfter: hasPageBreak(it.node) };
+    // The paragraph's own setting wins over its style's.
+    const style = opts.keep?.(it.node) ?? { next: false, lines: false };
+    const a = it.node.attrs as { keepNext: boolean | null; keepLines: boolean | null };
+    return { unit, breakAfter: hasPageBreak(it.node), keepNext: a.keepNext ?? style.next, keepLines: a.keepLines ?? style.lines };
   });
 }
 
@@ -168,13 +185,12 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   view.dom.classList.add("docx-measuring");
   let layout: PageLayout;
   try {
-    layout = layoutPages(measure(view), setup.height - bands[0] - bands[1], bands[1] + PAGE_SPACE + bands[0]);
+    layout = layoutPages(measure(view, opts), setup.height - bands[0] - bands[1], bands[1] + PAGE_SPACE + bands[0]);
   } finally {
     view.dom.classList.remove("docx-measuring");
   }
   const { starts, pageNumbers, fills, spacers, pages } = layout;
-  const offsets: number[] = [];
-  doc.forEach((_, pos) => offsets.push(pos));
+  const offsets = flowBlocks(doc).map((b) => b.pos);
 
   const part = (cls: string, content: Node | null) => {
     const el = createDiv({ cls, attr: { contenteditable: "false" } });

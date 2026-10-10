@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { DocxStyles, singleLine } from "../src/domain/docx/docx-styles";
 import { docxSchema as schema } from "../src/domain/docx/schema";
+import { DOMSerializer } from "prosemirror-model";
+import { readDocx } from "../src/domain/docx/docx-reader";
+import { styleRenderedParagraphs } from "../src/presentation/docx/docx-editor";
 import { blockPos, readSample } from "./helpers";
 
 async function setup() {
@@ -33,6 +36,18 @@ describe("DocxStyles.paragraphCss", () => {
     expect(css).toContain("margin-bottom: 10pt");
     // 1.15 lines (276/240) of the font's single line.
     expect(css).toContain("line-height: 1.35");
+  });
+
+  it("indents paragraphs from their style (table of contents levels)", () => {
+    const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const xml = new DOMParser().parseFromString(
+      `<w:styles xmlns:w="${W}"><w:style w:type="paragraph" w:styleId="TOC2"><w:pPr><w:ind w:left="220" w:right="440"/></w:pPr></w:style>` +
+        `<w:style w:type="paragraph" w:styleId="Child"><w:basedOn w:val="TOC2"/></w:style></w:styles>`,
+      "application/xml"
+    );
+    const styles = new DocxStyles(xml, null);
+    expect(styles.paragraphCss("Child")).toContain("margin-left: 11pt; margin-right: 22pt");
+    expect(styles.paragraphCss(null)).not.toContain("margin-left");
   });
 
   it("layers a table style's paragraph settings between the defaults and the paragraph style", () => {
@@ -84,5 +99,42 @@ describe("DocxStyles.listMarks", () => {
     const s = new DocxStyles(docx.stylesXml(), docx.numberingXml());
     const doc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create({ numId, ilvl: 1 }, schema.text("x"))]);
     expect(s.listMarks(doc).get(0)).toEqual({ text: "◦", indentPt: 72, hangingPt: 18 });
+  });
+});
+
+describe("line height follows the text, not the style", () => {
+  const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  // Style: 12pt (unknown font, single line 1.17), 279/240 lines - like a Google Docs export.
+  const styles = new DocxStyles(
+    new DOMParser().parseFromString(
+      `<w:styles xmlns:w="${W}"><w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="279" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>`,
+      "application/xml"
+    ),
+    null
+  );
+  const render = (body: string) => {
+    const xml = new DOMParser().parseFromString(`<w:body xmlns:w="${W}">${body}</w:body>`, "application/xml").documentElement;
+    const { doc } = readDocx(xml, { imageSrc: () => null, hyperlinkHref: () => null });
+    const div = document.createElement("div");
+    div.appendChild(DOMSerializer.fromSchema(schema).serializeFragment(doc.content, { document }));
+    styleRenderedParagraphs(div, doc, styles);
+    return Array.from(div.querySelectorAll("p")).map((p) => p.getAttribute("style") ?? "");
+  };
+  const arial10 = `<w:rPr><w:rFonts w:ascii="Arial"/><w:sz w:val="20"/></w:rPr>`;
+
+  it("sizes the line by the paragraph mark's font (10pt Arial text in a 12pt style)", () => {
+    const [css] = render(`<w:p><w:pPr>${arial10}</w:pPr><w:r>${arial10}<w:t>Text</w:t></w:r></w:p>`);
+    // 279/240 lines of Arial's single line (1.15) at 10pt, not of 12pt.
+    expect(css).toMatch(/font-size: 10pt; font-family: "Arial", "Liberation Sans", Arimo, sans-serif; line-height: 1\.34\b/);
+  });
+
+  it("uses the text's size when every run sets it and the mark doesn't", () => {
+    const [css] = render(`<w:p><w:r>${arial10}<w:t>a</w:t></w:r><w:r><w:rPr><w:sz w:val="22"/></w:rPr><w:t>b</w:t></w:r></w:p>`);
+    expect(css).toContain("font-size: 11pt");
+  });
+
+  it("keeps the style's size when some text has none of its own", () => {
+    const [css] = render(`<w:p><w:r>${arial10}<w:t>a</w:t></w:r><w:r><w:t>b</w:t></w:r></w:p>`);
+    expect(css).not.toContain("font-size: 10pt");
   });
 });

@@ -9,7 +9,8 @@
     "build": "node esbuild.config.mjs production",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "check:files": "bash scripts/check-files.sh"
   },
   "dependencies": {
     "jszip": "^3.10.1",

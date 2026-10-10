@@ -19,7 +19,7 @@ const text = (n: number, lh: number, pos = 0, extra = 0): Unit => ({
 });
 const para = (n: number, lh: number, pos = 0, extra = 0): TopBlock => ({ unit: text(n, lh, pos, extra), breakAfter: false });
 const cell = (left: number, children: Unit[], padTop = 0, padBottom = 0) => ({ padTop, padBottom, left, children });
-const table = (rows: { height: number; cells: ReturnType<typeof cell>[] }[], pos = 0): TopBlock => ({
+const table = (rows: { height: number; cantSplit?: boolean; cells: ReturnType<typeof cell>[] }[], pos = 0): TopBlock => ({
   unit: { kind: "table", height: rows.reduce((a, r) => a + r.height, 0), pos, rows },
   breakAfter: false,
 });
@@ -182,6 +182,72 @@ describe("layoutPages: tables", () => {
   });
 });
 
+describe("layoutPages: keeping things together (Word / Google Docs paragraph and row options)", () => {
+  const keep = (b: TopBlock, opts: Partial<TopBlock>) => ({ ...b, ...opts });
+
+  it("moves a heading kept with the next paragraph to the page that paragraph starts on", () => {
+    // 440 used; the heading (30) fits, the 3-line paragraph after it doesn't, so both move.
+    const l = lay([block(440), keep(block(30), { keepNext: true }), para(3, 20)]);
+    expect(l.starts).toEqual([1]);
+    expect(l.fills).toEqual([60, 410]);
+  });
+
+  it("moves a whole chain of kept paragraphs", () => {
+    const l = lay([block(400), keep(block(30), { keepNext: true }), keep(block(30), { keepNext: true }), block(100)]);
+    expect(l.starts).toEqual([1]);
+  });
+
+  it("ignores keep with next when the chain starts at the top of a page (it can't do better)", () => {
+    const l = lay([keep(block(450), { keepNext: true }), block(100)]);
+    expect(l.starts).toEqual([1]);
+  });
+
+  it("keeps the paragraph when the next one only splits (its first lines stay on the page)", () => {
+    // 380 + 30 = 410 used; 10 lines of 20 split after 4 lines, which is enough.
+    const l = lay([block(380), keep(block(30), { keepNext: true }), para(10, 20, 1000)]);
+    expect(l.starts).toEqual([]);
+    expect(l.spacers).toHaveLength(1);
+  });
+
+  it("does not move a heading kept with the next one across a manual page break", () => {
+    const l = lay([block(440), keep(block(30), { keepNext: true, breakAfter: true }), block(100)]);
+    expect(l.starts).toEqual([2]);
+  });
+
+  it("moves a paragraph whose lines are kept together instead of splitting it", () => {
+    const l = lay([block(300), keep(para(10, 30, 1000), { keepLines: true })]);
+    expect(l.spacers).toEqual([]);
+    expect(l.starts).toEqual([1]);
+  });
+
+  it("still splits a kept-together paragraph that is taller than a page", () => {
+    const l = lay([keep(para(30, 20, 1000), { keepLines: true })]);
+    expect(l.pages).toBe(2);
+  });
+
+  it("moves a row that can't split to the next page whole", () => {
+    // Row 1 fits (300); row 2 (300) would split, but can't, so a spacer opens each of its cells.
+    const l = lay([
+      table([
+        { height: 300, cells: [cell(100, [text(15, 20, 1000)])] },
+        { height: 300, cantSplit: true, cells: [cell(100, [text(15, 20, 2000)]), cell(400, [text(2, 20, 3000)])] },
+      ]),
+    ]);
+    expect(l.spacers.map((x) => [x.pos, x.gapAt])).toEqual([
+      [2000, 200],
+      [3000, null],
+    ]);
+    expect(l.pages).toBe(2);
+    expect(l.fills).toEqual([AVAIL - 300]);
+  });
+
+  it("moves a table whose first row can't split whole", () => {
+    const l = lay([block(300), table([{ height: 300, cantSplit: true, cells: [cell(100, [text(15, 20, 1000)])] }])]);
+    expect(l.starts).toEqual([1]);
+    expect(l.spacers).toEqual([]);
+  });
+});
+
 // -----------------------------------------------------------------------------
 // The page view in an editor, with fake geometry (jsdom does no layout)
 // -----------------------------------------------------------------------------
@@ -246,12 +312,12 @@ describe("page view in the editor", () => {
     document.body.empty();
   });
 
-  const mount = async (blocks: ReturnType<typeof schema.nodes.paragraph.create>[]) => {
+  const mount = async (blocks: ReturnType<typeof schema.nodes.paragraph.create>[], keep?: (node: ReturnType<typeof schema.nodes.paragraph.create>) => { next: boolean; lines: boolean }) => {
     const host = document.body.createDiv();
     view = new EditorView(host, {
       state: EditorState.create({
         doc: schema.nodes.doc.create(null, blocks),
-        plugins: [pagesPlugin({ setup: () => SETUP, header: (p) => createSpan({ text: `H${p}` }), footer: (p) => createSpan({ text: `F${p}` }) })],
+        plugins: [pagesPlugin({ setup: () => SETUP, header: (p) => createSpan({ text: `H${p}` }), footer: (p) => createSpan({ text: `F${p}` }), keep })],
       }),
     });
     restore = fakeLayout(view);
@@ -295,5 +361,19 @@ describe("page view in the editor", () => {
     expect(v.dom.querySelectorAll(".docx-page-spacer, .docx-page-gap")).toHaveLength(0);
     expect(pagesKey.getState(v.state)!.pages).toBe(1);
     expect(TEXT_AREA).toBeGreaterThan(400);
+  });
+
+  it("moves a heading kept with the next paragraph, using the style's setting when the paragraph has none", async () => {
+    const heading = schema.nodes.paragraph.create({ style: "KeepStyle" }, schema.text("n:1 heading"));
+    // (A plain paragraph style: heading styles render as h1, which the fake layout doesn't measure.)
+    const v = await mount([p(42), heading, p(3)], (node) => ({ next: node.attrs.style === "KeepStyle", lines: false }));
+    const gap = v.dom.querySelector(".docx-page-gap")!;
+    expect(gap.nextElementSibling!.textContent).toContain("heading");
+  });
+
+  it("lets a paragraph's own keep with next override its style", async () => {
+    const heading = schema.nodes.paragraph.create({ style: "KeepStyle", keepNext: false }, schema.text("n:1 heading"));
+    const v = await mount([p(42), heading, p(3, "after")], (node) => ({ next: node.attrs.style === "KeepStyle", lines: false }));
+    expect(v.dom.querySelector(".docx-page-gap")!.nextElementSibling!.textContent).toContain("after");
   });
 });

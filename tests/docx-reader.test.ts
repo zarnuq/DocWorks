@@ -101,11 +101,12 @@ describe("readDocx", () => {
     expect(row1.child(0).attrs.background).toBe("#FFFF00");
   });
 
-  it("keeps content controls as read-only blocks", async () => {
+  it("reads content controls as editable blocks", async () => {
     const { doc } = await readSample();
-    const raw = doc.child(10);
-    expect(raw.type.name).toBe("raw_block");
-    expect(raw.attrs.text).toBe("Inside control");
+    const box = doc.child(10);
+    expect(box.type.name).toBe("sdt");
+    expect(box.child(0).type.name).toBe("paragraph");
+    expect(box.textContent).toBe("Inside control");
   });
 
   it("keeps unknown run content as an atom", async () => {
@@ -140,5 +141,24 @@ describe("readDocx", () => {
     const { doc } = readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null });
     expect(doc.childCount).toBe(1);
     expect(doc.child(0).type.name).toBe("paragraph");
+  });
+});
+
+describe("cell margins", () => {
+  it("pads cells by their own margins, falling back to the table's", () => {
+    const mar = (tag: string, top: number, left: number) => `<w:${tag}><w:top w:w="${top}" w:type="dxa"/><w:left w:w="${left}" w:type="dxa"/></w:${tag}>`;
+    const xml =
+      `<w:body xmlns:w="${W}"><w:tbl><w:tblPr>${mar("tblCellMar", 40, 100)}</w:tblPr><w:tr>` +
+      `<w:tc><w:tcPr>${mar("tcMar", 160, 200)}</w:tcPr><w:p/></w:tc><w:tc><w:p/></w:tc></w:tr></w:tbl></w:body>`;
+    const body = new DOMParser().parseFromString(xml, "application/xml").documentElement;
+    const { doc } = readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null });
+    const row = doc.child(0).child(0);
+    // top right bottom left, in pt; unset sides keep the stylesheet default.
+    expect(row.child(0).attrs.margins).toBe("8pt - - 10pt");
+    expect(row.child(1).attrs.margins).toBe("2pt - - 5pt");
+    const td = DOMSerializer.fromSchema(schema).serializeNode(row.child(0), { document }) as HTMLElement;
+    expect(td.style.paddingTop).toBe("8pt");
+    expect(td.style.paddingLeft).toBe("10pt");
+    expect(td.style.paddingRight).toBe("");
   });
 });

@@ -303,6 +303,17 @@
   color: #6b7280;
 }
 
+/* On pages a break is the page gap itself, and takes no room (as in Word and Google Docs). */
+.is-paged .docx-page-break {
+  display: inline;
+  margin: 0;
+  border: 0;
+}
+
+.is-paged .docx-page-break-label {
+  display: none;
+}
+
 /* Read-only content kept verbatim (content controls, fields, symbols). */
 .docx-raw-block {
   border-left: 3px solid #9ca3af;
@@ -1290,10 +1301,40 @@ textarea.pptx-notes {
   color: var(--interactive-accent);
 }
 
-.docx-editor-host .ProseMirror .docx-toc {
-  white-space: pre-wrap;
-  padding: var(--size-2-3) var(--size-4-2);
-  margin: 0.8em 0;
-  border: 1px dashed #9ca3af;
-  border-radius: var(--radius-s);
+/* A paragraph whose last tab runs to a right tab stop (table of contents lines). */
+.docx-tab-right {
+  display: flex;
+  align-items: baseline;
+}
+
+.docx-tab {
+  tab-size: 2;
+}
+
+.docx-tab-fill {
+  flex: 1;
+  min-width: 1em;
+  position: relative;
+  overflow: hidden;
+}
+
+.docx-tab-fill::after {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+.docx-leader-dot::after {
+  content: "................................................................................................................................................................................................................................................................";
+  letter-spacing: 0.15em;
+}
+
+.docx-leader-hyphen::after {
+  content: "----------------------------------------------------------------------------------------------------------------------------------------------------------------";
+}
+
+.docx-leader-underscore::after {
+  content: "________________________________________________________________________________________________________________________________________________________________";
 }
