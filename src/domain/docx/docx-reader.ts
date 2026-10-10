@@ -1,6 +1,7 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, childNS } from "../../core/utils/xml";
 import { regroup } from "./sections";
+import { placementOf } from "./drawing";
 import { docxSchema as schema, Align } from "./schema";
 
 export interface ReadContext {
@@ -332,6 +333,7 @@ class Reader {
         width: px("cx"),
         height: px("cy"),
         alt: drawing.getElementsByTagNameNS(NS.wp, "docPr")[0]?.getAttribute("descr") ?? "",
+        ...placementOf(drawing),
       },
       null,
       marks.filter((m) => m.type === schema.marks.link)

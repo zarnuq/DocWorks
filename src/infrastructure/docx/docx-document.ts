@@ -355,6 +355,16 @@ export class DocxDocument extends OoxmlPackage {
     return this.addRel(part, "image", this.storeImage("word", bytes, ext));
   }
 
+  /** Width of the last section's text area (page width less the side margins), in twips. */
+  textWidth(): number {
+    const sectPr = this.finalSectPr(false);
+    const get = (local: string, attr: string, fallback: number) => {
+      const el = Array.from(sectPr?.children ?? []).find((c) => c.localName === local);
+      return Number(el ? wVal(el, attr) : null) || fallback;
+    };
+    return get("pgSz", "w", 12240) - get("pgMar", "left", 1440) - get("pgMar", "right", 1440);
+  }
+
   /** wp:docPr ids must be unique across the document. */
   nextDocPrId(): number {
     const ids = Array.from(this.document.getElementsByTagNameNS(NS.wp, "docPr")).map((e) => Number(e.getAttribute("id")) || 0);

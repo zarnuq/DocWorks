@@ -696,6 +696,36 @@ describe("table of contents", () => {
     expect(text(st).slice(0, 2)).toEqual(["Contents", "New"]);
   });
 
+  it("fills in each heading's page from the page view, after a dot leader to a right tab", async () => {
+    const doc = s.doc.create(null, [
+      heading("Heading1", "Start"),
+      s.paragraph.create(null, [schema.text("body"), s.page_break.create()]),
+      heading("Heading2", "Detail"),
+    ]);
+    const host = document.body.appendChild(document.createElement("div"));
+    const setup = { width: 816, height: 1056, top: 96, right: 96, bottom: 96, left: 96, header: 48, footer: 48 };
+    const view = new EditorView(host, {
+      state: EditorState.create({ doc, selection: TextSelection.create(doc, 1), plugins: [...docxPlugins(ctx), pagesPlugin({ setup: () => setup, header: () => null, footer: () => null })] }),
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    cmd.insertToc(view.state, view.dispatch);
+    const toc = view.state.doc.child(1);
+    expect([1, 2].map((i) => toc.child(i).textContent)).toEqual(["Start\t1", "Detail\t2"]);
+    expect(toc.child(1).attrs.tabLeader).toBe("dot");
+    // Written as Word writes them: a right tab with a dot leader at the right margin.
+    const body = new DOMParser().parseFromString(`<w:body xmlns:w="${W}"/>`, "application/xml").documentElement;
+    writeBody(body, view.state.doc, new Map(), { nextDocPrId: () => 1, textWidth: () => 9360 });
+    const tab = body.getElementsByTagNameNS(W, "tabs")[0].firstElementChild!;
+    expect(["val", "leader", "pos"].map((k) => tab.getAttributeNS(W, k))).toEqual(["right", "dot", "9360"]);
+    view.destroy();
+  });
+
+  it("leaves page numbers out without the page view (Word fills them in when it opens the file)", () => {
+    let st = state([heading("Heading1", "Start")], 1);
+    st = run(st, cmd.insertToc);
+    expect(st.doc.child(1).child(1).textContent).toBe("Start");
+  });
+
   it("defines the TOC styles and asks Word to refresh fields on open", async () => {
     const r = await readSample();
     r.docx.prepareToc();

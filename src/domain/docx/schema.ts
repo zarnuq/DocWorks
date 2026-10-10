@@ -1,5 +1,6 @@
 import { Schema, Node as PMNode, DOMOutputSpec } from "prosemirror-model";
 import { fontStack } from "../../core/utils/fonts";
+import { Placement, placementCss, textBoxOf, Wrap } from "./drawing";
 import { mathSpec } from "./math";
 
 /**
@@ -75,6 +76,11 @@ export interface ImageAttrs {
   width: number | null;
   height: number | null;
   alt: string;
+  /** Where the picture sits (see drawing.ts). */
+  wrap: Wrap;
+  x: number;
+  y: number;
+  align: Placement["align"];
 }
 export interface XmlAttrs {
   xml: string;
@@ -85,6 +91,13 @@ export interface LinkAttrs {
   rId: string | null;
   anchor: string | null;
 }
+/** A text box: its paragraphs in a box of its size, placed like a picture. */
+function textBoxSpec(box: NonNullable<ReturnType<typeof textBoxOf>>, attrs: Record<string, string>): DOMOutputSpec {
+  const { cls, style } = placementCss(box.placement);
+  const css = [`width: ${box.width}px`, `height: ${box.height}px`, box.fill ? `background-color: ${box.fill}` : "", box.line ? `border: 1px solid ${box.line}` : "", style];
+  return ["span", { ...attrs, class: `${attrs.class} docx-textbox ${cls}`.trim(), style: css.filter(Boolean).join("; ") }, ...box.paragraphs.map((t) => ["span", { class: "docx-textbox-p" }, t] as DOMOutputSpec)];
+}
+
 export const attrsOf = <T>(n: { attrs: unknown }): T => n.attrs as T;
 
 export const docxSchema = new Schema({
@@ -236,10 +249,16 @@ export const docxSchema = new Schema({
         width: { default: null },
         height: { default: null },
         alt: { default: "" },
+        wrap: { default: "inline" },
+        x: { default: 0 },
+        y: { default: 0 },
+        align: { default: null },
       },
       toDOM: (node) => {
-        const { src, alt } = attrsOf<ImageAttrs>(node);
-        return ["img", { src, alt, class: "docx-image-node" }];
+        const { src, alt, width, height, wrap, x, y, align } = attrsOf<ImageAttrs>(node);
+        const { cls, style } = placementCss({ wrap, x, y, align });
+        const size = `${width ? `width: ${width}px; ` : ""}${height ? `height: ${height}px; ` : ""}`;
+        return ["img", { src, alt, class: `docx-image-node ${cls}`.trim(), style: size + style }];
       },
     },
 
@@ -259,6 +278,8 @@ export const docxSchema = new Schema({
         if (field) attrs["data-field"] = field;
         if (/<w:br\b[^>]*w:type="column"/.test(xml)) attrs.class += " docx-column-break";
         if (/^<m:oMath/.test(xml)) return ["span", attrs, mathSpec(xml)];
+        const box = textBoxOf(xml);
+        if (box) return textBoxSpec(box, attrs);
         return ["span", attrs, node.attrs.text];
       },
     },

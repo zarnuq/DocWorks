@@ -133,6 +133,17 @@ describe("line height follows the text, not the style", () => {
     expect(css).toContain("font-size: 11pt");
   });
 
+  it("doesn't size text with no size of its own by the paragraph mark (it keeps the style's)", () => {
+    // Word: the mark's 14pt only affects the mark; the text is 12pt from the style.
+    const [css] = render(`<w:p><w:pPr><w:rPr><w:sz w:val="28"/></w:rPr></w:pPr><w:r><w:t>Text</w:t></w:r></w:p>`);
+    expect(css).not.toContain("font-size: 14pt");
+  });
+
+  it("sizes an empty paragraph by its mark", () => {
+    const [css] = render(`<w:p><w:pPr><w:rPr><w:sz w:val="28"/></w:rPr></w:pPr></w:p>`);
+    expect(css).toContain("font-size: 14pt");
+  });
+
   it("keeps the style's size when some text has none of its own", () => {
     const [css] = render(`<w:p><w:r>${arial10}<w:t>a</w:t></w:r><w:r><w:t>b</w:t></w:r></w:p>`);
     expect(css).not.toContain("font-size: 10pt");

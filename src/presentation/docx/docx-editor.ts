@@ -13,6 +13,7 @@ import { attrsOf, docxSchema as schema, HEADING_LEVEL, Align, CellAttrs, Paragra
 import { DocxStyles, lineHeight } from "../../domain/docx/docx-styles";
 import { fontStack } from "../../core/utils/fonts";
 import { letterSpacing } from "../pptx/text-fit";
+import { pageAt } from "./docx-pages";
 import { Columns, DEFAULT_SECTPR, ONE_COLUMN, regroup, sections, sectionType, withColumns, withType } from "../../domain/docx/sections";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
@@ -225,28 +226,35 @@ export function footnoteIds(doc: PMNode): string[] {
 }
 
 /** Headings 1–3 for the table of contents. */
-export function tocEntries(doc: PMNode): { level: number; text: string }[] {
-  const out: { level: number; text: string }[] = [];
-  doc.descendants((node) => {
+export function tocEntries(doc: PMNode): { level: number; text: string; pos: number }[] {
+  const out: { level: number; text: string; pos: number }[] = [];
+  doc.descendants((node, pos) => {
     const style = node.type === schema.nodes.paragraph ? attrsOf<ParagraphAttrs>(node).style : null;
     const level = style && style !== "Title" ? HEADING_LEVEL[style] : undefined;
-    if (level && level <= 3 && node.textContent.trim()) out.push({ level, text: node.textContent.trim() });
+    if (level && level <= 3 && node.textContent.trim()) out.push({ level, text: node.textContent.trim(), pos });
     return node.type !== schema.nodes.paragraph;
   });
   return out;
 }
 
-/** A Word TOC field (\o "1-3") in a content control, with the current headings as its cached result; Word refreshes it on open. */
-function tocNode(doc: PMNode): PMNode {
-  const entries = tocEntries(doc);
-  const rows = entries.length ? entries : [{ level: 1, text: "No headings yet" }];
+/**
+ * A Word TOC field (\o "1-3") in a content control, with the current headings as its cached result; Word refreshes
+ * it on open. With the page view on, each entry ends with its heading's page after a dotted right tab.
+ */
+function tocNode(state: EditorState): PMNode {
+  const entries = tocEntries(state.doc);
+  const rows = entries.length ? entries : [{ level: 1, text: "No headings yet", pos: -1 }];
   const run = (inner: string) => opaqueXml(`<w:r xmlns:w="${NS_W}">${inner}</w:r>`);
   const begin = [run(`<w:fldChar w:fldCharType="begin"/>`), run(`<w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText>`), run(`<w:fldChar w:fldCharType="separate"/>`)];
-  const para = (style: string | null, content: PMNode[]) => schema.nodes.paragraph.create({ style }, content);
+  const para = (style: string | null, content: PMNode[], tabLeader: string | null = null) => schema.nodes.paragraph.create({ style, tabLeader }, content);
+  const page = (pos: number) => (pos < 0 ? null : pageAt(state, pos));
   const xml = `<w:sdt xmlns:w="${NS_W}"><w:sdtPr><w:docPartObj><w:docPartGallery w:val="Table of Contents"/><w:docPartUnique/></w:docPartObj></w:sdtPr></w:sdt>`;
   return schema.nodes.sdt.create({ kind: "toc", xml }, [
     para("TOCHeading", [schema.text("Contents")]),
-    ...rows.map((e, i) => para(`TOC${e.level}`, [...(i === 0 ? begin : []), schema.text(e.text)])),
+    ...rows.map((e, i) => {
+      const n = page(e.pos);
+      return para(`TOC${e.level}`, [...(i === 0 ? begin : []), schema.text(n === null ? e.text : `${e.text}\t${n}`)], n === null ? null : "dot");
+    }),
     para(null, [run(`<w:fldChar w:fldCharType="end"/>`)]),
   ]);
 }
@@ -405,7 +413,7 @@ export const cmd = {
     return true;
   }) as Command,
 
-  insertToc: ((state, dispatch) => insertBlockAfter(tocNode(state.doc))(state, dispatch)) as Command,
+  insertToc: ((state, dispatch) => insertBlockAfter(tocNode(state))(state, dispatch)) as Command,
 
   /** Rebuild every table of contents from the current headings. */
   updateToc: ((state, dispatch) => {
@@ -416,7 +424,7 @@ export const cmd = {
     if (!at.length) return false;
     if (dispatch) {
       const tr = state.tr;
-      for (const { pos, size } of at.reverse()) tr.replaceWith(pos, pos + size, tocNode(state.doc));
+      for (const { pos, size } of at.reverse()) tr.replaceWith(pos, pos + size, tocNode(state));
       dispatch(tr);
     }
     return true;
@@ -737,14 +745,18 @@ function paragraphCss(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number
   return css.filter(Boolean).join("; ");
 }
 
-/** Size and font of the paragraph mark, else of the text when every run sets a size. */
+/**
+ * Size and font Word sizes a paragraph's lines by: the text's when every run sets a size (an empty paragraph: its
+ * mark's). Otherwise the style's, since text without a size of its own takes the style's, never the mark's.
+ */
 function textFont(node: PMNode, a: ParagraphAttrs): { size: number | null; font: string | null } {
-  if (a.markSize) return { size: a.markSize, font: a.markFont };
   let size = 0;
   let font: string | null = null;
   let all = true;
+  let any = false;
   node.forEach((child) => {
     if (!child.isText) return;
+    any = true;
     const pt = child.marks.find((m) => m.type === schema.marks.size)?.attrs.pt as number | undefined;
     if (!pt) all = false;
     else if (pt > size) {
@@ -752,7 +764,8 @@ function textFont(node: PMNode, a: ParagraphAttrs): { size: number | null; font:
       font = (child.marks.find((m) => m.type === schema.marks.font)?.attrs.font as string | undefined) ?? null;
     }
   });
-  return all && size ? { size, font: font ?? a.markFont } : { size: null, font: a.markFont };
+  if (!any) return { size: a.markSize, font: a.markFont };
+  return all ? { size, font: font ?? a.markFont } : { size: null, font: null };
 }
 
 const fitCache = new Map<string, number | null>();

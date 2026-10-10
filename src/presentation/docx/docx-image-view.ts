@@ -1,6 +1,16 @@
 import { Node as PMNode } from "prosemirror-model";
 import { EditorView, NodeView } from "prosemirror-view";
 import { attrsOf, ImageAttrs } from "../../domain/docx/schema";
+import { placementCss, Wrap } from "../../domain/docx/drawing";
+
+/** Google Docs' image options, in its order. */
+const WRAPS: [Wrap, string][] = [
+  ["inline", "In line"],
+  ["square", "Wrap text"],
+  ["topBottom", "Break text"],
+  ["behind", "Behind text"],
+  ["front", "In front of text"],
+];
 
 export interface ImageActions {
   replace(pos: number): void;
@@ -14,12 +24,11 @@ export interface ImageActions {
 export class DocxImageView implements NodeView {
   dom: HTMLElement;
   private img: HTMLImageElement;
+  private wrap: HTMLSelectElement;
 
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined, actions: ImageActions) {
     this.dom = createSpan({ cls: "docx-image" });
     this.img = this.dom.createEl("img");
-    this.render();
-
     const handle = this.dom.createSpan({ cls: "docx-image-handle" });
     handle.addEventListener("mousedown", (e) => this.startResize(e));
 
@@ -32,6 +41,15 @@ export class DocxImageView implements NodeView {
         if (this.getPos() !== undefined) run();
       });
     };
+    this.wrap = bar.createEl("select", { cls: "dropdown docx-image-wrap", attr: { "aria-label": "Text wrapping" } });
+    for (const [value, label] of WRAPS) this.wrap.createEl("option", { value, text: label });
+    this.wrap.addEventListener("mousedown", (e) => e.stopPropagation());
+    this.wrap.addEventListener("change", () => {
+      const pos = this.getPos();
+      if (pos === undefined) return;
+      const wrap = this.wrap.value as Wrap;
+      this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, wrap, ...(wrap === "inline" ? { x: 0, y: 0, align: null } : {}) }));
+    });
     button("50%", () => this.scale(0.5));
     button("100%", () => this.scale(1));
     button("Alt", () => actions.editAlt(this.getPos()!, attrsOf<ImageAttrs>(this.node).alt));
@@ -40,6 +58,7 @@ export class DocxImageView implements NodeView {
       const pos = this.getPos()!;
       this.view.dispatch(this.view.state.tr.delete(pos, pos + 1));
     });
+    this.render();
   }
 
   private render(): void {
@@ -48,6 +67,12 @@ export class DocxImageView implements NodeView {
     this.img.alt = alt;
     this.img.style.width = width ? `${width}px` : "";
     this.img.style.height = height ? `${height}px` : "";
+    // Floating pictures sit where the document puts them (see drawing.ts).
+    const a = attrsOf<ImageAttrs>(this.node);
+    const { cls, style } = placementCss({ wrap: a.wrap, x: a.x, y: a.y, align: a.align });
+    this.dom.className = `docx-image ${cls}`.trim() + (this.dom.classList.contains("is-selected") ? " is-selected" : "");
+    this.dom.setAttribute("style", style);
+    if (this.wrap) this.wrap.value = a.wrap;
   }
 
   private setSize(width: number, height: number): void {

@@ -1,6 +1,7 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, escapeXml } from "../../core/utils/xml";
 import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, TableAttrs, TableBorders, XmlAttrs } from "./schema";
+import { placementOf, setPlacement } from "./drawing";
 import { bordersOf, EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
 
 export interface WriteContext {
@@ -10,6 +11,8 @@ export interface WriteContext {
   hyperlinkRel?(href: string): string;
   /** Define paragraph styles that edited paragraphs now use (headings missing from the document...). */
   ensureParagraphStyles?(ids: Iterable<string>): void;
+  /** Width of the text area in twips, where a right tab stop goes. */
+  textWidth?(): number;
 }
 
 /*
@@ -202,6 +205,16 @@ class Writer {
       if (!ind.attributes.length) ind.remove();
     }
 
+    if (a.tabLeader !== was.tabLeader) {
+      // A right tab stop at the margin, with its leader (table of contents lines).
+      this.drop(pPr, "tabs");
+      if (a.tabLeader) {
+        const tab = this.upsert(pPr, "tabs").appendChild(this.el("tab"));
+        this.set(tab, "val", "right");
+        if (a.tabLeader !== "none") this.set(tab, "leader", a.tabLeader);
+        this.set(tab, "pos", String(this.ctx.textWidth?.() ?? 9360));
+      }
+    }
     for (const key of ["keepNext", "keepLines"] as const) {
       if (a[key] === was[key]) continue;
       this.drop(pPr, key);
@@ -489,7 +502,12 @@ class Writer {
 
   private image(node: PMNode): Element {
     const { xml, rId, width, height, alt } = attrsOf<ImageAttrs>(node);
-    if (!xml) return this.import(this.newDrawingRun(rId ?? "", width ?? 300, height ?? 200, alt));
+    if (!xml) {
+      const r = this.import(this.newDrawingRun(rId ?? "", width ?? 300, height ?? 200, alt));
+      const a = attrsOf<ImageAttrs>(node);
+      if (a.wrap !== "inline") setPlacement(r, { wrap: a.wrap, x: a.x, y: a.y, align: a.align });
+      return r;
+    }
 
     const r = this.import(xml);
     const extent = r.getElementsByTagNameNS(NS.wp, "extent")[0];
@@ -511,6 +529,10 @@ class Writer {
     if (docPr && (docPr.getAttribute("descr") ?? "") !== alt) docPr.setAttribute("descr", alt);
     const blip = r.getElementsByTagNameNS(NS.a, "blip")[0];
     if (blip && rId && blip.getAttributeNS(NS.r, "embed") !== rId) blip.setAttributeNS(NS.r, "r:embed", rId);
+    const a = attrsOf<ImageAttrs>(node);
+    const now = { wrap: a.wrap, x: a.x, y: a.y, align: a.align };
+    const was = placementOf(r.getElementsByTagNameNS(NS.w, "drawing")[0] ?? null);
+    if (JSON.stringify(now) !== JSON.stringify(was)) setPlacement(r, now);
     return r;
   }
 

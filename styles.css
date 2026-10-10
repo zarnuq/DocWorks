@@ -363,6 +363,58 @@
   line-height: 0;
 }
 
+/* Floating pictures and text boxes (Word's / Google Docs' wrap options): wrapped text floats them, break text makes
+   them a block, behind / in front places them over the paragraph. */
+.docx-editor-host .ProseMirror,
+.docx-hf {
+  isolation: isolate;
+}
+
+.docx-editor-host .ProseMirror p,
+.docx-hf p {
+  position: relative;
+}
+
+.docx-image.docx-wrap,
+img.docx-wrap,
+.docx-textbox.docx-wrap {
+  margin-right: 12px;
+  margin-bottom: 4px;
+}
+
+.docx-image.docx-float,
+img.docx-float,
+.docx-textbox.docx-float {
+  position: absolute;
+  z-index: 1;
+}
+
+.docx-image.docx-behind,
+img.docx-behind,
+.docx-textbox.docx-behind {
+  z-index: -1;
+}
+
+.docx-opaque.docx-textbox {
+  opacity: 1;
+  display: inline-block;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0.05in 0.1in;
+  vertical-align: top;
+  line-height: normal;
+}
+
+.docx-textbox-p {
+  display: block;
+}
+
+.docx-image-wrap {
+  font-size: var(--font-ui-smaller);
+  height: auto;
+  padding: 0 var(--size-4-1);
+}
+
 .docx-image img {
   max-width: 100%;
 }

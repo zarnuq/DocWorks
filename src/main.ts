@@ -11,6 +11,26 @@ const NEW_FILES = [
 export default class DocWorksPlugin extends Plugin {
   settings: DocWorksSettings = { ...DEFAULT_SETTINGS };
 
+  /**
+   * Background tabs restored after the plugin (re)loads keep the placeholder title and icon Obsidian gave them while
+   * it was off (the view type, a ghost); name them after their file until they're opened.
+   */
+  private nameBackgroundTabs(): void {
+    const icons: Record<string, string> = { [VIEW_TYPE_DOCX]: "file-text", [VIEW_TYPE_PPTX]: "presentation" };
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const { type, state } = leaf.getViewState();
+      const file = state?.file;
+      // Deferred tabs exist from Obsidian 1.7.2; older versions load every tab, so there's nothing to name.
+      const deferred = (leaf as unknown as { isDeferred?: boolean }).isDeferred;
+      if (!icons[type] || !deferred || typeof file !== "string") return;
+      // ponytail: a deferred view's title / icon and updateHeader() are private API; if they change this does nothing.
+      const view = leaf.view as unknown as { title?: string; icon?: string };
+      view.title = file.split("/").pop()!.replace(/\.[^.]+$/, "");
+      view.icon = icons[type];
+      (leaf as unknown as { updateHeader?: () => void }).updateHeader?.();
+    });
+  }
+
   async onload() {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<DocWorksSettings> | null) };
     this.addSettingTab(new DocWorksSettingTab(this.app, this));
@@ -18,6 +38,7 @@ export default class DocWorksPlugin extends Plugin {
     this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf));
     this.claimExtension("docx", VIEW_TYPE_DOCX);
     this.claimExtension("pptx", VIEW_TYPE_PPTX);
+    this.app.workspace.onLayoutReady(() => this.nameBackgroundTabs());
 
     for (const [id, name, fromStart] of [
       ["start-presentation", "Start presentation from the beginning", true],

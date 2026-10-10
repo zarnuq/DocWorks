@@ -5,7 +5,7 @@
  * No Obsidian imports, so it runs under jsdom tests.
  */
 import { Node as PMNode } from "prosemirror-model";
-import { Plugin, PluginKey } from "prosemirror-state";
+import { EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
 import { Cell, layoutPages, Line, PageLayout, PageSetup, Row, Spacer, TopBlock, Unit } from "../../domain/docx/pages";
 import { sectionBreaks } from "../../domain/docx/sections";
@@ -26,6 +26,17 @@ interface PagesState {
   decorations: DecorationSet;
   /** Header / footer band heights the layout assumed. */
   bands: [number, number];
+  /** Where each page after the first starts, in document order. */
+  pageStarts: { pos: number; page: number }[];
+}
+
+/** Page number of document position `pos`, or null when the page view is off. */
+export function pageAt(state: EditorState, pos: number): number | null {
+  const pages = pagesKey.getState(state);
+  if (!pages || !pages.decorations.find().length) return null;
+  let page = 1;
+  for (const s of pages.pageStarts) if (s.pos <= pos) page = s.page;
+  return page;
 }
 
 export const pagesKey = new PluginKey<PagesState>("docx-pages");
@@ -196,7 +207,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   const gen = ++generation;
   const setup = opts.setup();
   const doc = view.state.doc;
-  if (!setup) return { pages: 1, decorations: DecorationSet.empty, bands: [0, 0] };
+  if (!setup) return { pages: 1, decorations: DecorationSet.empty, bands: [0, 0], pageStarts: [] };
   const bands = bandHeights(view, setup);
 
   view.dom.classList.add("docx-measuring");
@@ -263,7 +274,8 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
       { side: 1, key: `last-${gen}`, ignoreSelection: true }
     ),
   ];
-  return { pages, decorations: DecorationSet.create(doc, decos), bands };
+  const pageStarts = [...starts.map((i, k) => ({ pos: offsets[i], page: pageNumbers[k + 1] })), ...spacers.map((s) => ({ pos: s.pos, page: s.page + 1 }))].sort((a, b) => a.pos - b.pos);
+  return { pages, decorations: DecorationSet.create(doc, decos), bands, pageStarts };
 }
 
 /** Lays the document out on pages of the document's size, with headers, footers and page gaps. */
@@ -271,10 +283,10 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
   return new Plugin<PagesState>({
     key: pagesKey,
     state: {
-      init: () => ({ pages: 1, decorations: DecorationSet.empty, bands: [0, 0] }),
+      init: () => ({ pages: 1, decorations: DecorationSet.empty, bands: [0, 0], pageStarts: [] }),
       apply(tr, old) {
         const meta = tr.getMeta(pagesKey) as PagesState | undefined;
-        return meta ?? { ...old, decorations: old.decorations.map(tr.mapping, tr.doc) };
+        return meta ?? { ...old, decorations: old.decorations.map(tr.mapping, tr.doc), pageStarts: old.pageStarts.map((s) => ({ ...s, pos: tr.mapping.map(s.pos) })) };
       },
     },
     props: {
