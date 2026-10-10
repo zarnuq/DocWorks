@@ -100,7 +100,8 @@ class Writer {
 
   blocks(container: PMNode): Element[] {
     const out: Element[] = [];
-    container.forEach((node) => out.push(this.block(node)));
+    // A columns block is display only: its section's columns live in the section's w:sectPr.
+    container.forEach((node) => (node.type === schema.nodes.columns ? out.push(...this.blocks(node)) : out.push(this.block(node))));
     return out;
   }
 
@@ -135,10 +136,15 @@ class Writer {
     const p = this.shell("p", c);
     const base = w(c.o?.el, "pPr");
     const pPr = (base?.cloneNode(true) as Element | undefined) ?? this.el("pPr");
-    // A section break belongs to the last paragraph of a split.
-    if (!c.last) this.drop(pPr, "sectPr");
     const was = paragraphProps(base);
     const a = attrsOf<ParagraphAttrs>(node);
+    // A section break belongs to the last paragraph of a split; an edited one is written from its XML.
+    const sectPr = w(base, "sectPr");
+    const wasSect = sectPr ? new XMLSerializer().serializeToString(sectPr) : null;
+    if (!c.last || a.sectPr !== wasSect) {
+      this.drop(pPr, "sectPr");
+      if (a.sectPr && (c.last || a.sectPr !== wasSect)) pPr.insertBefore(this.import(a.sectPr), w(pPr, "pPrChange"));
+    }
 
     if (a.style !== was.style) {
       if (a.style) this.newStyles.add(a.style);
@@ -532,7 +538,11 @@ class Writer {
  * editor models. The final w:sectPr (page setup) is kept last.
  */
 export function writeBody(body: Element, doc: PMNode, origins: Origins, ctx: WriteContext): void {
-  const finalSectPr = body.lastElementChild?.localName === "sectPr" ? body.lastElementChild : null;
+  let finalSectPr = body.lastElementChild?.localName === "sectPr" ? body.lastElementChild : null;
+  const sectPr = doc.attrs.sectPr as string | null;
+  if (sectPr && (!finalSectPr || new XMLSerializer().serializeToString(finalSectPr) !== sectPr)) {
+    finalSectPr = body.ownerDocument.importNode(new DOMParser().parseFromString(sectPr, "application/xml").documentElement, true);
+  }
   const writer = new Writer(body.ownerDocument, origins, ctx, doc);
   const blocks = writer.blocks(doc);
   body.replaceChildren(...blocks, ...(finalSectPr ? [finalSectPr] : []));

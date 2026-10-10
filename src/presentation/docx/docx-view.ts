@@ -370,7 +370,18 @@ export class DocxView extends FileView {
     sep();
     action("Table ▾", "Table", () => this.tableMenu());
     action("Image", "Insert image", () => pickImage((f) => void this.insertImage(f)));
-    btn("Page break", "Insert page break (Ctrl+Enter)", cmd.insertPageBreak);
+    action("Break ▾", "Page, column and section breaks", () => {
+      // As Google Docs' Insert › Break.
+      const menu = new Menu();
+      const entry = (title: string, command: Command) => menu.addItem((i) => i.setTitle(title).onClick(() => run(command)));
+      entry("Page break", cmd.insertPageBreak);
+      entry("Column break", cmd.insertColumnBreak);
+      entry("Section break (next page)", cmd.insertSectionBreak("nextPage"));
+      entry("Section break (continuous)", cmd.insertSectionBreak("continuous"));
+      const r = this.contentEl.querySelector(".dw-toolbar")!.getBoundingClientRect();
+      menu.showAtPosition({ x: r.left + r.width / 2, y: r.bottom });
+    });
+    action("Columns…", "Columns for this section or the selection", () => this.columnsDialog());
     btn("Line", "Insert horizontal line", cmd.insertRule);
     sep();
     action("Header & footer", "Edit the header and footer", () => this.headerFooterDialog());
@@ -796,6 +807,41 @@ export class DocxView extends FileView {
       void this.saveNow();
       if (this.editor) repaginate(this.editor);
     });
+    modal.open();
+  }
+
+  /** Google Docs' Format › Columns: number, spacing and a line between. */
+  private columnsDialog(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const cols = { ...cmd.columnsAt(editor.state) };
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Columns");
+    new Setting(modal.contentEl).setName("Number of columns").addDropdown((d) =>
+      d
+        .addOptions({ "1": "1", "2": "2", "3": "3" })
+        .setValue(String(Math.min(3, cols.count)))
+        .onChange((v) => (cols.count = Number(v)))
+    );
+    new Setting(modal.contentEl)
+      .setName("Spacing (in)")
+      .addText((t) => {
+        t.inputEl.type = "number";
+        t.setValue(String(Math.round((cols.space / 1440) * 100) / 100)).onChange((v) => (cols.space = Math.max(0, Number(v) || 0) * 1440));
+      });
+    new Setting(modal.contentEl).setName("Line between columns").addToggle((t) => t.setValue(cols.sep).onChange((v) => (cols.sep = v)));
+    new Setting(modal.contentEl)
+      .addButton((b) =>
+        b
+          .setButtonText("Apply")
+          .setCta()
+          .onClick(() => {
+            cmd.setColumns(cols)(editor.state, editor.dispatch);
+            modal.close();
+            editor.focus();
+          })
+      )
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
     modal.open();
   }
 

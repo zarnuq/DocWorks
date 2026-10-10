@@ -3,7 +3,7 @@
  * editor. No Obsidian imports, so everything here runs under jsdom tests.
  */
 import { Attrs, MarkType, Node as PMNode, ResolvedPos } from "prosemirror-model";
-import { Command, EditorState, Plugin, Transaction } from "prosemirror-state";
+import { Command, EditorState, Plugin, TextSelection, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { baseKeymap, chainCommands, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
@@ -13,6 +13,7 @@ import { attrsOf, docxSchema as schema, HEADING_LEVEL, Align, CellAttrs, Paragra
 import { DocxStyles, lineHeight } from "../../domain/docx/docx-styles";
 import { fontStack } from "../../core/utils/fonts";
 import { letterSpacing } from "../pptx/text-fit";
+import { Columns, DEFAULT_SECTPR, ONE_COLUMN, regroup, sections, sectionType, withColumns, withType } from "../../domain/docx/sections";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
 
@@ -145,7 +146,9 @@ function setTableAttrs(fn: (a: TableAttrs, info: CellInfo) => Partial<TableAttrs
 function insertBlockAfter(node: PMNode): Command {
   return (state, dispatch) => {
     const $from = state.selection.$from;
-    const pos = $from.depth > 0 ? $from.after(1) : $from.pos;
+    // After the block the cursor is in; inside a column section, after the block in that section.
+    const depth = $from.depth > 1 && $from.node(1).type === schema.nodes.columns ? 2 : 1;
+    const pos = $from.depth >= depth ? $from.after(depth) : $from.pos;
     if (dispatch) dispatch(state.tr.insert(pos, node).scrollIntoView());
     return true;
   };
@@ -248,6 +251,144 @@ function tocNode(doc: PMNode): PMNode {
   ]);
 }
 
+// -----------------------------------------------------------------------------
+// Sections: columns and section breaks
+// -----------------------------------------------------------------------------
+
+/** Blocks with column sections opened up, and where each starts. */
+function unitsOf(doc: PMNode): { node: PMNode; pos: number }[] {
+  const out: { node: PMNode; pos: number }[] = [];
+  doc.forEach((n, pos) => (n.type === schema.nodes.columns ? n.forEach((c, o) => out.push({ node: c, pos: pos + 1 + o })) : out.push({ node: n, pos })));
+  return out;
+}
+
+const unitAt = (units: { pos: number }[], pos: number) => {
+  let i = 0;
+  while (i + 1 < units.length && units[i + 1].pos <= pos) i++;
+  return i;
+};
+
+const withSectPr = (node: PMNode, sectPr: string | null) => node.type.create({ ...node.attrs, sectPr }, node.content, node.marks);
+
+/** Replace the document's blocks with `units` regrouped into column sections, keeping the cursor in unit `at.unit`. */
+function rebuild(state: EditorState, units: PMNode[], finalSectPr: string | null, at: { unit: number; offset: number }): Transaction {
+  const tr = state.tr.replaceWith(0, state.doc.content.size, regroup(units, finalSectPr));
+  if (finalSectPr !== state.doc.attrs.sectPr) tr.setDocAttribute("sectPr", finalSectPr);
+  const placed = unitsOf(tr.doc);
+  const unit = placed[Math.min(at.unit, placed.length - 1)];
+  tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(unit.pos + at.offset, unit.pos + unit.node.nodeSize - 1))));
+  return tr.scrollIntoView();
+}
+
+/** Columns of the section the cursor is in. */
+export function columnsAt(state: EditorState): Columns {
+  const $from = state.selection.$from;
+  for (let d = $from.depth; d > 0; d--) {
+    const n = $from.node(d);
+    if (n.type === schema.nodes.columns) return { count: n.attrs.count as number, space: n.attrs.space as number, sep: !!n.attrs.sep };
+  }
+  return ONE_COLUMN;
+}
+
+/**
+ * Format › Columns, as in Google Docs: with nothing selected the cursor's whole section gets `cols`; a selection
+ * inside a section gets them alone, between continuous section breaks.
+ */
+function setColumns(cols: Columns): Command {
+  return (state, dispatch) => {
+    const placed = unitsOf(state.doc);
+    const nodes = placed.map((u) => u.node);
+    const { from, to, empty } = state.selection;
+    const a = unitAt(placed, from);
+    const b = unitAt(placed, to);
+    const s = sections(nodes).find((x) => a >= x.start && a <= x.end)!;
+    if (!dispatch) return true;
+    const governing = (s.at === null ? (state.doc.attrs.sectPr as string | null) : (nodes[s.at].attrs.sectPr as string)) ?? DEFAULT_SECTPR;
+    let start = a;
+    let end = b;
+    if (empty || b > s.end || (a <= s.start && b >= s.end)) [start, end] = [s.start, s.end];
+    // Section breaks sit on paragraphs: a range next to a table takes in the rest of the section.
+    if (start > s.start && nodes[start - 1].type !== schema.nodes.paragraph) start = s.start;
+    if (end < s.end && nodes[end].type !== schema.nodes.paragraph) end = s.end;
+    const units = nodes.slice();
+    let final = state.doc.attrs.sectPr as string | null;
+    const set = (i: number | null, xml: string) => (i === null ? (final = xml) : (units[i] = withSectPr(units[i], xml)));
+    if (start > s.start) set(start - 1, governing);
+    if (end < s.end) {
+      set(end, withType(withColumns(governing, cols), start > s.start ? "continuous" : sectionType(governing)));
+      set(s.at, withType(governing, "continuous"));
+    } else {
+      set(s.at, start > s.start ? withType(withColumns(governing, cols), "continuous") : withColumns(governing, cols));
+    }
+    dispatch(rebuild(state, units, final, { unit: a, offset: from - placed[a].pos }));
+    return true;
+  };
+}
+
+/** Insert › Break › Section break: the section ends at the cursor (splitting the paragraph), the next one starts as `type`. */
+function insertSectionBreak(type: "nextPage" | "continuous"): Command {
+  return (state, dispatch) => {
+    const $from = state.selection.$from;
+    const placed = unitsOf(state.doc);
+    const k = unitAt(placed, $from.pos);
+    const para = placed[k].node;
+    if (para.type !== schema.nodes.paragraph || $from.parent !== para) return false;
+    if (!dispatch) return true;
+    let units = placed.map((u) => u.node);
+    const off = $from.parentOffset;
+    let end: number;
+    let cursor: { unit: number; offset: number };
+    if (off === para.content.size && k < units.length - 1) {
+      end = k;
+      cursor = { unit: k + 1, offset: 1 };
+    } else if (off === 0 && k > 0 && units[k - 1].type === schema.nodes.paragraph && !units[k - 1].attrs.sectPr) {
+      end = k - 1;
+      cursor = { unit: k, offset: 1 };
+    } else {
+      const first = para.type.create({ ...para.attrs, sectPr: null }, para.content.cut(0, off), para.marks);
+      const second = para.type.create(para.attrs, para.content.cut(off), para.marks);
+      units = [...units.slice(0, k), first, second, ...units.slice(k + 1)];
+      end = k;
+      cursor = { unit: k + 1, offset: 1 };
+    }
+    const secs = sections(units);
+    let final = state.doc.attrs.sectPr as string | null;
+    const governingOf = (i: number | null) => (i === null ? final : (units[i].attrs.sectPr as string)) ?? DEFAULT_SECTPR;
+    const set = (i: number | null, xml: string) => (i === null ? (final = xml) : (units[i] = withSectPr(units[i], xml)));
+    if (units[end].attrs.sectPr) {
+      // Already the end of a section: the next section starts as asked.
+      const next = secs[secs.findIndex((x) => x.at === end) + 1];
+      if (next) set(next.at, withType(governingOf(next.at), type));
+    } else {
+      const s = secs.find((x) => end >= x.start && end <= x.end)!;
+      const governing = governingOf(s.at);
+      set(end, governing);
+      set(s.at, withType(governing, type));
+    }
+    dispatch(rebuild(state, units, final, cursor));
+    return true;
+  };
+}
+
+/** Split copies of a paragraph that ends a section both carry its w:sectPr; only the last one ends the section. */
+function sectionDedupe(): Plugin {
+  return new Plugin({
+    appendTransaction(trs, _old, state) {
+      if (!trs.some((t) => t.docChanged)) return null;
+      const units = unitsOf(state.doc);
+      let tr: Transaction | null = null;
+      for (let i = 0; i + 1 < units.length; i++) {
+        const [x, y] = [units[i].node, units[i + 1].node];
+        if (x.attrs.sectPr && x.attrs.sectPr === y.attrs.sectPr && x.attrs.key === y.attrs.key) {
+          tr ??= state.tr;
+          tr.setNodeMarkup(units[i].pos, undefined, { ...x.attrs, sectPr: null });
+        }
+      }
+      return tr;
+    },
+  });
+}
+
 /** Address of the link at the cursor or selection start, or null. */
 export function linkHref(state: EditorState): string | null {
   const { $from } = state.selection;
@@ -256,6 +397,14 @@ export function linkHref(state: EditorState): string | null {
 }
 
 export const cmd = {
+  setColumns,
+  columnsAt,
+  insertSectionBreak,
+  insertColumnBreak: ((state, dispatch) => {
+    if (dispatch) dispatch(state.tr.replaceSelectionWith(opaqueXml(`<w:r xmlns:w="${NS_W}"><w:br w:type="column"/></w:r>`)).scrollIntoView());
+    return true;
+  }) as Command,
+
   insertToc: ((state, dispatch) => insertBlockAfter(tocNode(state.doc))(state, dispatch)) as Command,
 
   /** Rebuild every table of contents from the current headings. */
@@ -768,5 +917,6 @@ export function docxPlugins(ctx: EditorContext, extraKeys: Record<string, Comman
       },
     }),
     findPlugin(),
+    sectionDedupe(),
   ];
 }

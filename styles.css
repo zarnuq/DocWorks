@@ -303,6 +303,31 @@
   color: #6b7280;
 }
 
+/* A section in columns (Format › Columns); measured as one column of the same width. */
+.docx-columns {
+  column-count: var(--docx-cols);
+  column-gap: var(--docx-col-gap);
+}
+
+.docx-columns-sep {
+  column-rule: 1px solid currentColor;
+}
+
+.docx-measuring .docx-columns {
+  column-count: 1;
+  width: calc((100% - (var(--docx-cols) - 1) * var(--docx-col-gap)) / var(--docx-cols));
+}
+
+.docx-columns > .docx-page-gap,
+.docx-columns .docx-page-spacer {
+  column-span: all;
+}
+
+.docx-columns .docx-column-break {
+  display: block;
+  break-after: column;
+}
+
 /* On pages a break is the page gap itself, and takes no room (as in Word and Google Docs). */
 .is-paged .docx-page-break {
   display: inline;

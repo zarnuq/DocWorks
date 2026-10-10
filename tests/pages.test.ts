@@ -248,6 +248,60 @@ describe("layoutPages: keeping things together (Word / Google Docs paragraph and
   });
 });
 
+describe("layoutPages: columns", () => {
+  const inCols = (b: TopBlock, count = 2, group = 1, extra: Partial<TopBlock> = {}): TopBlock => ({ ...b, columns: { count, group }, ...extra });
+
+  it("fits N column-heights of text on a page, and continues below the balanced columns", () => {
+    // 100 used, so each of the 2 columns has 400: room for 800 of text.
+    const l = lay([block(100), inCols(block(300)), inCols(block(300)), inCols(block(300)), block(100)]);
+    expect(l.starts).toEqual([3]);
+    // Page 1: 100 + (300 + 300) / 2 = 400 used. Page 2: 300 / 2 = 150 of columns, then the 100 block.
+    expect(l.fills).toEqual([100, AVAIL - 250]);
+  });
+
+  it("moves tables and other blocks in columns whole", () => {
+    const l = lay([inCols(block(400)), inCols(block(400)), inCols(block(400))]);
+    expect(l.spacers).toEqual([]);
+    expect(l.starts).toEqual([2]);
+  });
+
+  it("continues a paragraph that runs past a page of columns on the next page, with a spacer carrying the gap", () => {
+    // 60 lines of 20 = 1200; a page of 2 columns holds 1000: lines 0-49 there, 50-59 on page 2.
+    const l = lay([inCols(para(60, 20, 1000))]);
+    expect(l.spacers).toEqual([{ pos: 1000 + 100 * 51, height: GAP, gapAt: 0, left: 96, page: 1 }]);
+    expect(l.pages).toBe(2);
+    // Page 2: 200 of text in 2 columns.
+    expect(l.fills).toEqual([AVAIL - 100]);
+  });
+
+  it("keeps two lines of a paragraph in columns on each side of a page break", () => {
+    // 950 already in the columns: a 6-line paragraph splits 2 + 4; a 3-line one moves whole.
+    expect(lay([inCols(block(950)), inCols(para(6, 20, 1000))]).spacers).toHaveLength(1);
+    const l = lay([inCols(block(950)), inCols(para(3, 20, 1000))]);
+    expect(l.spacers).toEqual([]);
+    expect(l.starts).toEqual([1]);
+  });
+
+  it("jumps to the next column after a column break", () => {
+    // Column break after the first block: it takes a whole column (500), the next two fill column 2 and spill.
+    const l = lay([inCols(block(100), 2, 1, { columnBreak: true }), inCols(block(300)), inCols(block(300))]);
+    expect(l.starts).toEqual([2]);
+  });
+
+  it("starts a new set of columns after a page break inside them", () => {
+    const l = lay([inCols(block(100), 2, 1, { breakAfter: true }), inCols(block(100))]);
+    expect(l.starts).toEqual([1]);
+    expect(l.fills).toEqual([AVAIL - 50, AVAIL - 50]);
+  });
+
+  it("treats two column sections in a row separately", () => {
+    const l = lay([inCols(block(400), 2, 1), inCols(block(400), 3, 2)]);
+    // 200 then 400 / 3.
+    expect(l.starts).toEqual([]);
+    expect(l.fills[0]).toBeCloseTo(AVAIL - 200 - 400 / 3);
+  });
+});
+
 // -----------------------------------------------------------------------------
 // The page view in an editor, with fake geometry (jsdom does no layout)
 // -----------------------------------------------------------------------------

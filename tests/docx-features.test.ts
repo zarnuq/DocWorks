@@ -400,8 +400,7 @@ describe("section breaks", () => {
     const body = new DOMParser().parseFromString(xml, "application/xml").documentElement;
     const { doc } = readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null });
     // A section's w:type says how that section starts: section 2 is continuous, section 3 (the body's) a new page.
-    expect(doc.child(0).attrs.sectionBreak).toBe(false);
-    expect(doc.child(1).attrs.sectionBreak).toBe(true);
+    expect(doc.child(0).attrs.sectPr).toContain("sectPr");
     const host = document.body.appendChild(document.createElement("div"));
     const setup = { width: 816, height: 1056, top: 96, right: 96, bottom: 96, left: 96, header: 48, footer: 48 };
     const view = new EditorView(host, {

@@ -1,5 +1,6 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, childNS } from "../../core/utils/xml";
+import { regroup } from "./sections";
 import { docxSchema as schema, Align } from "./schema";
 
 export interface ReadContext {
@@ -186,18 +187,7 @@ class Reader {
   /** Complex fields (w:fldChar begin ... end) the reader is inside, innermost last; fields can span paragraphs. */
   private fields: { instr: string; result: boolean }[] = [];
 
-  /** Paragraphs that end a section followed by one starting on a new page. */
-  private sectionBreaks = new Set<Element>();
-
-  constructor(private ctx: ReadContext, body?: Element) {
-    // A section's w:type says how it starts, so a break follows a section's last paragraph when the *next* section isn't continuous.
-    const sects = Array.from(body?.getElementsByTagNameNS(NS.w, "sectPr") ?? []).filter((s) => ["pPr", "body"].includes(s.parentElement?.localName ?? ""));
-    sects.forEach((s, i) => {
-      const p = s.parentElement?.localName === "pPr" ? s.parentElement.parentElement : null;
-      const next = sects[i + 1];
-      if (p && wVal(w(next, "type")) !== "continuous") this.sectionBreaks.add(p);
-    });
-  }
+  constructor(private ctx: ReadContext) {}
 
   private keyed(el: Element, make: (key: string) => PMNode): PMNode {
     const key = `k${this.nextKey++}`;
@@ -247,7 +237,8 @@ class Reader {
     }
     const inline: PMNode[] = [];
     this.inline(p, [], inline);
-    return this.keyed(p, (key) => schema.nodes.paragraph.create({ key, ...paragraphProps(pPr), sectionBreak: this.sectionBreaks.has(p) }, inline));
+    const sectPr = w(pPr, "sectPr");
+    return this.keyed(p, (key) => schema.nodes.paragraph.create({ key, ...paragraphProps(pPr), sectPr: sectPr ? xmlOf(sectPr) : null }, inline));
   }
 
   private inline(container: Element, marks: readonly Mark[], out: PMNode[]): void {
@@ -384,8 +375,10 @@ class Reader {
 
 /** Read <w:body> into a ProseMirror doc plus the origins needed to write it back losslessly. */
 export function readDocx(body: Element, ctx: ReadContext): { doc: PMNode; origins: Origins } {
-  const reader = new Reader(ctx, body);
-  const blocks = reader.blocks(body);
-  const doc = schema.nodes.doc.create(null, blocks.length ? blocks : schema.nodes.paragraph.create());
+  const reader = new Reader(ctx);
+  const final = Array.from(body.children).filter((c) => c.namespaceURI === NS.w && c.localName === "sectPr").pop();
+  const sectPr = final ? xmlOf(final) : null;
+  const blocks = regroup(reader.blocks(body), sectPr);
+  const doc = schema.nodes.doc.create({ sectPr }, blocks.length ? blocks : schema.nodes.paragraph.create());
   return { doc, origins: reader.origins };
 }

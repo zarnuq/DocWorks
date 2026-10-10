@@ -41,8 +41,8 @@ export interface ParagraphAttrs {
   /** Size (pt) and font of the paragraph mark, which Word sizes the lines by (display only). */
   markSize: number | null;
   markFont: string | null;
-  /** The paragraph ends a section and the next one starts on a new page (display only). */
-  sectionBreak: boolean;
+  /** The w:sectPr XML when the paragraph ends a section. */
+  sectPr: string | null;
   /** Keep with next / keep lines together; null = from the style. */
   keepNext: boolean | null;
   keepLines: boolean | null;
@@ -89,7 +89,19 @@ export const attrsOf = <T>(n: { attrs: unknown }): T => n.attrs as T;
 
 export const docxSchema = new Schema({
   nodes: {
-    doc: { content: "block+" },
+    /** sectPr: the body's own w:sectPr XML (the last section). */
+    doc: { content: "block+", attrs: { sectPr: { default: null } } },
+
+    /** A section in two or more columns (display; the columns themselves are saved in the section's w:sectPr). */
+    columns: {
+      group: "block",
+      content: "block+",
+      attrs: { count: { default: 2 }, space: { default: 720 }, sep: { default: false } },
+      toDOM(node): DOMOutputSpec {
+        const { count, space, sep } = node.attrs as { count: number; space: number; sep: boolean };
+        return ["div", { class: sep ? "docx-columns docx-columns-sep" : "docx-columns", style: `--docx-cols: ${count}; --docx-col-gap: ${space / 1440}in` }, 0];
+      },
+    },
 
     paragraph: {
       group: "block",
@@ -109,7 +121,7 @@ export const docxSchema = new Schema({
         tabLeader: { default: null },
         markSize: { default: null },
         markFont: { default: null },
-        sectionBreak: { default: false },
+        sectPr: { default: null },
         keepNext: { default: null },
         keepLines: { default: null },
       },
@@ -245,6 +257,7 @@ export const docxSchema = new Schema({
         // Page number fields are filled in by the page view.
         const field = /w:instr="\s*(PAGE|NUMPAGES)\b/.exec(node.attrs.xml as string)?.[1];
         if (field) attrs["data-field"] = field;
+        if (/<w:br\b[^>]*w:type="column"/.test(xml)) attrs.class += " docx-column-break";
         if (/^<m:oMath/.test(xml)) return ["span", attrs, mathSpec(xml)];
         return ["span", attrs, node.attrs.text];
       },

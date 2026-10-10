@@ -8,6 +8,7 @@ import { Node as PMNode } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
 import { Cell, layoutPages, Line, PageLayout, PageSetup, Row, Spacer, TopBlock, Unit } from "../../domain/docx/pages";
+import { sectionBreaks } from "../../domain/docx/sections";
 import { docxSchema as schema } from "../../domain/docx/schema";
 
 export interface PagesOptions {
@@ -37,8 +38,8 @@ export function repaginate(view: EditorView): void {
   schedulers.get(view)?.();
 }
 
-function hasPageBreak(node: PMNode): boolean {
-  let found = !!node.attrs.sectionBreak;
+function hasPageBreak(node: PMNode, sectionEnds: Set<PMNode>): boolean {
+  let found = sectionEnds.has(node);
   node.descendants((n) => {
     if (n.type === schema.nodes.page_break) found = true;
     return !found;
@@ -134,25 +135,39 @@ function measureRows(view: EditorView, table: PMNode, tablePos: number, origin: 
 }
 
 /** The blocks pages break between: top-level blocks, with content controls opened up. */
-function flowBlocks(doc: PMNode): { node: PMNode; pos: number }[] {
-  const out: { node: PMNode; pos: number }[] = [];
-  const walk = (parent: PMNode, start: number) =>
+/** The blocks pages break between: top-level blocks, with content controls and column sections opened up. */
+function flowBlocks(doc: PMNode): { node: PMNode; pos: number; columns?: { count: number; group: number } }[] {
+  const out: { node: PMNode; pos: number; columns?: { count: number; group: number } }[] = [];
+  let group = 0;
+  const walk = (parent: PMNode, start: number, columns?: { count: number; group: number }) =>
     parent.forEach((node, offset) => {
-      if (node.type === schema.nodes.sdt) walk(node, start + offset + 1);
-      else out.push({ node, pos: start + offset });
+      if (node.type === schema.nodes.sdt) walk(node, start + offset + 1, columns);
+      else if (node.type === schema.nodes.columns) walk(node, start + offset + 1, { count: node.attrs.count as number, group: ++group });
+      else out.push({ node, pos: start + offset, columns });
     });
   walk(doc, 0);
   return out;
 }
 
+const COLUMN_BREAK = /<w:br\b[^>]*w:type="column"/;
+function hasColumnBreak(node: PMNode): boolean {
+  let found = false;
+  node.descendants((n) => {
+    if (n.type === schema.nodes.opaque && COLUMN_BREAK.test(n.attrs.xml as string)) found = true;
+    return !found;
+  });
+  return found;
+}
+
 function measure(view: EditorView, opts: PagesOptions): TopBlock[] {
   const origin = view.dom.getBoundingClientRect();
-  const items: { node: PMNode; pos: number; el: HTMLElement | null; top: number }[] = [];
-  flowBlocks(view.state.doc).forEach(({ node, pos }) => {
+  const items: { node: PMNode; pos: number; el: HTMLElement | null; top: number; columns?: { count: number; group: number } }[] = [];
+  flowBlocks(view.state.doc).forEach(({ node, pos, columns }) => {
     const el = view.nodeDOM(pos);
     const dom = el instanceof HTMLElement ? el : null;
-    items.push({ node, pos, el: dom, top: dom ? dom.getBoundingClientRect().top : NaN });
+    items.push({ node, pos, el: dom, top: dom ? dom.getBoundingClientRect().top : NaN, columns });
   });
+  const sectionEnds = sectionBreaks(view.state.doc);
   return items.map((it, i) => {
     let height = 0;
     if (it.el) {
@@ -160,11 +175,13 @@ function measure(view: EditorView, opts: PagesOptions): TopBlock[] {
       height = next ? next.top - it.top : it.el.getBoundingClientRect().height + px(getComputedStyle(it.el).marginBottom);
     }
     const unit = it.el ? measureUnit(view, it.node, it.pos, it.el, height, origin) : { kind: "block" as const, height, pos: it.pos };
-    if (it.node.type !== schema.nodes.paragraph) return { unit, breakAfter: hasPageBreak(it.node) };
+    const breakAfter = hasPageBreak(it.node, sectionEnds);
+    if (it.columns) return { unit, breakAfter, columns: it.columns, columnBreak: hasColumnBreak(it.node) };
+    if (it.node.type !== schema.nodes.paragraph) return { unit, breakAfter };
     // The paragraph's own setting wins over its style's.
     const style = opts.keep?.(it.node) ?? { next: false, lines: false };
     const a = it.node.attrs as { keepNext: boolean | null; keepLines: boolean | null };
-    return { unit, breakAfter: hasPageBreak(it.node), keepNext: a.keepNext ?? style.next, keepLines: a.keepLines ?? style.lines };
+    return { unit, breakAfter, keepNext: a.keepNext ?? style.next, keepLines: a.keepLines ?? style.lines };
   });
 }
 
