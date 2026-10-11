@@ -241,10 +241,11 @@ describe("DocxView switching files", () => {
 describe("DocxView page size setting", () => {
   it("lays out an A4 document on Letter pages when the setting says so, and switches live", async () => {
     const docx = await DocxDocument.load(fixture("sample.docx"));
-    const sectPr = Array.from(docx.body.children).filter((c) => c.localName === "sectPr").pop()!;
-    const pgSz = sectPr.getElementsByTagNameNS(W, "pgSz")[0];
-    pgSz.setAttributeNS(W, "w:w", "11906");
-    pgSz.setAttributeNS(W, "w:h", "16838");
+    // Every section on A4 (the sample has several).
+    for (const pgSz of Array.from(docx.body.getElementsByTagNameNS(W, "pgSz"))) {
+      pgSz.setAttributeNS(W, "w:w", "11906");
+      pgSz.setAttributeNS(W, "w:h", "16838");
+    }
     const bytes = await docx.save();
     const settings: DocWorksSettings = { pageSize: "letter", author: "" };
     const app = new App();
@@ -499,6 +500,25 @@ describe("slide authoring additions",()=>{
   v.undo();expect(v.currentSlideXml().getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main","sp").length).toBe(before);
   await view.onUnloadFile(file);
  });
+ it("inserts a formatted chart: stacked bars with a title and no legend, then changes it to a pie",async()=>{
+  const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
+  Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Chart")!.click();
+  let modal=document.querySelector<HTMLElement>(".test-modal")!;
+  const set=(label:string,value:string|boolean)=>{const el=modal.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;if(typeof value==="boolean")el.checked=value;else el.value=value;el.dispatchEvent(new Event(el.tagName==="SELECT"||el.type==="checkbox"?"change":"input"));};
+  set("Chart type","bar:stacked");set("Chart title","Sales");set("Legend","none");set("Data labels",true);
+  Array.from(modal.querySelectorAll("button")).find(b=>b.textContent==="Insert chart")!.click();
+  await vi.waitFor(()=>expect(v.model.shapes.find((s:any)=>s.chart)).toBeTruthy());
+  expect(v.model.shapes.find((s:any)=>s.chart).chart.format).toMatchObject({kind:"bar",stacking:"stacked",title:"Sales",legend:"none",labels:true,category:{reversed:true}});
+  expect(view.contentEl.querySelector(".chart-title")?.textContent).toBe("Sales");
+  modal.remove();
+  v.editChart(v.model.shapes.find((s:any)=>s.chart).chart.path);
+  modal=document.querySelector<HTMLElement>(".test-modal")!;
+  expect(modal.querySelector<HTMLSelectElement>('[aria-label="Chart type"]')!.value).toBe("bar:stacked");
+  set("Chart type","pie:none");
+  Array.from(modal.querySelectorAll("button")).find(b=>b.textContent==="Apply")!.click();
+  await vi.waitFor(()=>expect(v.model.shapes.find((s:any)=>s.chart).chart.format.kind).toBe("pie"));
+  await view.onUnloadFile(file);
+ });
  it("inserts an editable chart from its data grid and supports undo",async()=>{
   const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
   Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Chart")!.click();
@@ -508,7 +528,7 @@ describe("slide authoring additions",()=>{
   await vi.waitFor(()=>expect(v.model.shapes.find((s:any)=>s.chart)?.chart.data.series[0].values[0]).toBe(42));
   expect(view.contentEl.querySelector('svg[aria-label="Chart"]')).not.toBeNull();
   const shape=v.model.shapes.find((s:any)=>s.chart);v.setSelection([shape.el]);
-  expect(view.contentEl.textContent).toContain("Edit chart data");
+  expect(view.contentEl.textContent).toContain("Edit chart");
   v.undo();expect(v.model.shapes.some((s:any)=>s.chart)).toBe(false);
   await view.onUnloadFile(file);
  });

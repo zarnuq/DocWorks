@@ -30,6 +30,9 @@ describe("where a picture sits (Word's / Google Docs' wrap options)", () => {
   });
   it("uses the actual column width and page/margin origins for placement", () => {
     expect(placementCss({ wrap: "square", x: 180, y: 0, align: null }, 100, { columnWidth: 300 }).style).toContain("margin-right: 20px");
+    // Mid-column with room on both sides: laid over the text, which wraps on both sides.
+    expect(placementCss({ wrap: "square", x: 200, y: 10, align: null }, 150, { columnWidth: 624 })).toEqual({ cls: "docx-float docx-both", style: "left: 200px; top: 10px" });
+    expect(placementCss({ wrap: "square", x: 0, y: 0, align: "center" }, 150, { columnWidth: 624 }).cls).toBe("docx-float docx-both");
     expect(placementCss({ wrap: "front", x: 100, y: 200, align: null, hRelative: "page", vRelative: "page" }, 100,
       { columnWidth: 624, pageLeft: 96, paragraphTop: 120 }).style).toContain("left: 4px; top: 80px");
   });
@@ -81,7 +84,8 @@ describe("where a picture sits (Word's / Google Docs' wrap options)", () => {
     const img = doc.child(0).child(0);
     expect(img.attrs).toMatchObject({ wrap: "square", x: 81 });
     const dom = DOMSerializer.fromSchema(schema).serializeNode(img, { document }) as HTMLElement;
-    expect(dom.style.float).toBe("left");
+    // 81 px from the column edge leaves room for text on its left too: both sides.
+    expect(dom.className).toContain("docx-both");
     // Unchanged: written back as it was. Changed to in line: rewritten.
     const before = new XMLSerializer().serializeToString(body);
     writeBody(body, doc, origins, { nextDocPrId: () => 1 });

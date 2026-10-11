@@ -40,9 +40,8 @@ Not done yet: charts (preserved), comments/notes (preserved), conditional format
 ## Open ideas (not started)
 
 - Extend animation effect authoring beyond the basic presets; compound timing and motion paths are editable.
-- Improve wrapping on both sides of floating pictures and fidelity of complex mixed section layouts.
-- Suggestions: paragraph split/join, table column insert/delete, cell merge and header/footer edits are now recorded (2026-10-10). Still open: charts formatting (next: chart-format module for type/stacking/title/legend/labels/axes/colors + renderer), mixed page sizes, both-sides picture wrap.
-- Chart data is editable; SmartArt data editing and advanced chart formatting remain open. For spreadsheets see "Not done yet" above.
+- Done 2026-10-11: structural / header-footer suggestions, chart formatting (`domain/pptx/chart-format.ts` + renderer), per-section page sizes (`sectionSetups`, `sectionWidthsPlugin`; every page is drawn as wide as the widest, narrower ones shaded), text on both sides of pictures (`domain/docx/wrap.ts`, `presentation/docx/docx-wrap.ts`). Justified lines beside pictures are spread per side; several pictures are planned together; narrower pages get their own edge.
+- SmartArt data editing and combo / 3-D / scatter chart editing remain open. For spreadsheets see "Not done yet" above.
 
 ## Handy dev facts
 

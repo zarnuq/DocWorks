@@ -387,6 +387,23 @@ img.docx-float,
   z-index: 1;
 }
 
+/* Blank space that keeps a line's text off a picture wrapped on both sides (docx-wrap.ts). */
+.docx-wrap-gap {
+  display: inline-block;
+  width: var(--docx-wrap-gap, 0);
+  height: 1px;
+}
+
+.docx-wrap-sandbox {
+  position: absolute;
+  top: 0;
+  left: var(--docx-sandbox-left, 0);
+  width: var(--docx-sandbox-width, auto);
+  box-sizing: border-box;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .docx-image.docx-behind,
 img.docx-behind,
 .docx-textbox.docx-behind {
@@ -1730,6 +1747,27 @@ textarea.pptx-notes {
 
 .dw-chart-grid input {
   width: 120px;
+}
+
+.dw-chart-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+}
+
+.dw-chart-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 8px 0;
+}
+
+.dw-chart-colors label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ---------------------------------------------------------------------------

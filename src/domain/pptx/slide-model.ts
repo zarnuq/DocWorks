@@ -1,5 +1,6 @@
 import { readMedia, SlideMedia } from "./media";
 import { chartData, ChartModel, CHART_NS } from "./chart";
+import { chartPalette, readChartFormat } from "./chart-format";
 import { NS, childNS } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { ColorContext, resolveColor } from "./color";
@@ -651,7 +652,7 @@ class SlideParser {
       const rid = el.getElementsByTagNameNS(CHART_NS, "chart")[0]?.getAttributeNS(NS.r,"id");
       const path = rid && this.doc.relTarget(part,rid);
       const chart = path && this.doc.xml(path);
-      if (path && chart) model.chart = { path, type: Array.from(chart.getElementsByTagNameNS(CHART_NS,"plotArea")[0]?.children??[]).find(e=>e.localName.endsWith("Chart"))?.localName ?? "unknown", data: chartData(chart) };
+      if (path && chart) model.chart = { path, type: Array.from(chart.getElementsByTagNameNS(CHART_NS,"plotArea")[0]?.children??[]).find(e=>e.localName.endsWith("Chart"))?.localName ?? "unknown", data: chartData(chart), format: readChartFormat(chart, this.colors), palette: chartPalette(this.colors) };
       const styles = this.doc.xml(this.doc.relOfType("ppt/presentation.xml", "tableStyles") ?? "");
       model.table = tbl ? readTable(tbl, styles, this.colors) : null;
       model.fill = null;
@@ -722,4 +723,9 @@ function cellTextStyle(cell: TableCell): Element | null {
 
 export function parseSlide(doc: PptxDocument, slidePath: string): SlideModel {
   return new SlideParser(doc, slidePath).parse();
+}
+
+/** The theme colours a slide (or layout / master) resolves scheme colours with. */
+export function slideColors(doc: PptxDocument, slidePath: string): ColorContext {
+  return new SlideParser(doc, slidePath).colors;
 }

@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { layoutPages, PageLayout, TopBlock, Unit } from "../src/domain/docx/pages";
+import { layoutPages, PageLayout, pageSetup, sectionSetups, TopBlock, Unit } from "../src/domain/docx/pages";
 import { docxSchema as schema } from "../src/domain/docx/schema";
-import { pagesKey, pagesPlugin, printPages } from "../src/presentation/docx/docx-pages";
+import { pagesKey, pagesPlugin, printPages, sectionWidthsPlugin } from "../src/presentation/docx/docx-pages";
 
 const GAP = 30;
 const AVAIL = 500;
@@ -50,6 +50,48 @@ describe("layoutPages: between blocks", () => {
     const l = lay([block(1200), block(10)]);
     expect(l.fills.every((f) => f >= 0)).toBe(true);
     expect(l.starts).toEqual([1]);
+  });
+});
+
+describe("mixed page sizes", () => {
+  it("gives each page the text height of the section that starts it", () => {
+    // Portrait section (500 px of text), then a landscape one (300 px) after a section break.
+    const tall = (h: number) => ({ ...block(h), avail: 500 });
+    const wide = (h: number) => ({ ...block(h), avail: 300 });
+    const l = lay([tall(400), { ...tall(10), breakAfter: true }, wide(200), wide(200), wide(200)]);
+    expect(l.starts).toEqual([2, 3, 4]);
+    expect(l.fills).toEqual([90, 100, 100, 100]);
+  });
+
+  it("splits a paragraph at the bottom of a shorter landscape page", () => {
+    const l = lay([{ ...block(10, true), avail: 500 }, { ...para(20, 20), avail: 300 }]);
+    expect(l.spacers[0].pos).toBe(1600);
+  });
+
+  it("reads each section's page size and margins, landscape sections included", () => {
+    const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const portrait = `<w:sectPr xmlns:w="${W}"><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720"/></w:sectPr>`;
+    const landscape = `<w:sectPr xmlns:w="${W}"><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360"/></w:sectPr>`;
+    const body = new DOMParser().parseFromString(`<w:body xmlns:w="${W}">${portrait}</w:body>`, "application/xml").documentElement;
+    const final = pageSetup(body);
+    const doc = schema.nodes.doc.create({ sectPr: portrait }, [
+      schema.nodes.paragraph.create(null, schema.text("a")),
+      schema.nodes.paragraph.create({ sectPr: landscape }, schema.text("b")),
+      schema.nodes.paragraph.create(null, schema.text("c")),
+    ]);
+    const setups = sectionSetups(doc, final);
+    expect(setups.map((s) => [s.width, s.height, s.left])).toEqual([[1056, 816, 48], [1056, 816, 48], [816, 1056, 96]]);
+    expect(sectionSetups(doc, final, "letter").every((s) => s === final)).toBe(true);
+    // In the editor (as wide as the landscape page) each section's blocks get their own text width.
+    const wide = { ...final, width: 1056 };
+    const view = new EditorView(document.body.createDiv(), { state: EditorState.create({ doc, plugins: [sectionWidthsPlugin(() => wide, () => final, () => "document")] }) });
+    const styles = Array.from(view.dom.children).map((p) => (p as HTMLElement).getAttribute("style") ?? "");
+    // Text widths: landscape 1056 - 96 = 960, portrait 624, editor 1056 - 192 = 864.
+    expect(styles[0]).toContain("translate: -48px 0");
+    expect(styles[0]).toMatch(/margin-right: calc\((0pt - )?-?96px\)/);
+    expect(styles[2]).toMatch(/margin-right: calc\((0pt - -)?240px\)/);
+    expect(styles[2]).not.toContain("translate");
+    view.destroy();
   });
 });
 

@@ -7,7 +7,7 @@
 import { Node as PMNode } from "prosemirror-model";
 import { EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
-import { Cell, layoutPages, Line, PageLayout, PageSetup, Row, Spacer, TopBlock, Unit } from "../../domain/docx/pages";
+import { Cell, layoutPages, Line, PageLayout, PageSetup, PageSize, Row, sectionSetups, Spacer, TopBlock, Unit } from "../../domain/docx/pages";
 import { sectionBreaks } from "../../domain/docx/sections";
 import { docxSchema as schema } from "../../domain/docx/schema";
 
@@ -19,6 +19,8 @@ export interface PagesOptions {
   /** Keep with next / keep lines together for a paragraph, with its style applied; default: its own settings only. */
   keep?(node: PMNode): { next: boolean; lines: boolean };
   footer(page: number, total: number): Node | null;
+  /** The page size setting, for sections with their own page size (default: the document's). */
+  pageSize?(): PageSize;
 }
 
 interface PagesState {
@@ -217,7 +219,16 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   let layout: PageLayout;
   try {
     bands = bandHeights(view, setup);
-    layout = layoutPages(measure(view, opts), setup.height - bands[0] - bands[1], bands[1] + PAGE_SPACE + bands[0]);
+    const blocks = measure(view, opts);
+    // Sections with their own page size (a landscape section): pages they start get their own text height.
+    const setups = sectionSetups(doc, setup, opts.pageSize?.() ?? "document");
+    if (setups.some((st) => st !== setup)) {
+      flowBlocks(doc).forEach(({ pos }, k) => {
+        const st = setups[doc.resolve(pos).index(0)] ?? setup;
+        blocks[k].avail = st.height - Math.max(st.top, bands[0]) - Math.max(st.bottom, bands[1]);
+      });
+    }
+    layout = layoutPages(blocks, setup.height - bands[0] - bands[1], bands[1] + PAGE_SPACE + bands[0]);
   } finally {
     view.dom.classList.remove("docx-measuring");
     view.dom.style.zoom = zoom;
@@ -285,6 +296,82 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   return { pages, decorations: DecorationSet.create(doc, decos), bands, pageStarts };
 }
 
+/**
+ * Text columns of sections with their own page size, in the page view: the editor is as wide as the widest page
+ * (`setup`), and each block is moved and narrowed or widened to its section's margins. Set without touching the
+ * paragraph's own margins (its indents): a shift with `translate` and a width change through the right margin.
+ */
+// ponytail: every page is drawn as wide as the widest one; a portrait page next to landscape ones shows extra white.
+export function sectionWidthsPlugin(setup: () => PageSetup | null, final: () => PageSetup | null, size: () => PageSize): Plugin {
+  const key = sectionWidthsKey;
+  const build = (doc: PMNode) => {
+    const page = setup(), base = final();
+    if (!page || !base) return DecorationSet.empty;
+    const setups = sectionSetups(doc, base, size());
+    if (setups.every((st) => st === base) && page.width === base.width) return DecorationSet.empty;
+    const textWidth = page.width - base.left - base.right;
+    const decos: Decoration[] = [];
+    doc.forEach((node, pos, i) => {
+      const st = setups[i];
+      const dx = st.left - base.left;
+      const dw = st.width - st.left - st.right - textWidth;
+      if (!dx && !dw) return;
+      const right = node.attrs.rightIndent as number | null | undefined;
+      const style = `${dx ? `translate: ${dx}px 0;` : ""}${dw ? `margin-right: calc(${right ?? 0}pt - ${dw}px);` : ""}`;
+      decos.push(Decoration.node(pos, pos + node.nodeSize, { style }));
+    });
+    return DecorationSet.create(doc, decos);
+  };
+  return new Plugin<DecorationSet>({
+    key,
+    state: { init: (_, state) => build(state.doc), apply: (tr, old) => (tr.docChanged || tr.getMeta(key) ? build(tr.doc) : old) },
+    props: { decorations: (state) => key.getState(state) },
+  });
+}
+
+/** Rebuild the section widths after the page setup changed. */
+export function refreshSectionWidths(view: EditorView): void {
+  if (sectionWidthsKey.getState(view.state)) view.dispatch(view.state.tr.setMeta(sectionWidthsKey, true).setMeta("addToHistory", false));
+}
+const sectionWidthsKey = new PluginKey<DecorationSet>("docx-section-widths");
+
+/**
+ * The editor is as wide as the widest page; a narrower page (portrait among landscape ones) gets the workspace
+ * colour painted over the strip to its right, as layered background gradients.
+ */
+function shadeNarrowPages(view: EditorView, opts: PagesOptions): void {
+  const setup = opts.setup();
+  const doc = view.state.doc;
+  const setups = setup && opts.pageSize ? sectionSetups(doc, setup, opts.pageSize()) : [];
+  const layers: { y: number; h: number; w: number }[] = [];
+  if (setup && setups.some((st) => st.width < setup.width)) {
+    const zoom = Number.parseFloat(view.dom.style.zoom) || 1;
+    const box = view.dom.getBoundingClientRect();
+    const gaps = Array.from(view.dom.querySelectorAll(".docx-page-space")).map((g) => g.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+    const tops = [0, ...gaps.map((g) => (g.bottom - box.top) / zoom)];
+    const bottoms = [...gaps.map((g) => (g.top - box.top) / zoom), box.height / zoom];
+    const starts = pagesKey.getState(view.state)?.pageStarts ?? [];
+    tops.forEach((top, k) => {
+      const pos = k === 0 ? 0 : starts.find((s) => s.page === k + 1)?.pos;
+      if (pos === undefined) return;
+      const st = setups[doc.resolve(Math.min(pos, doc.content.size)).index(0)] ?? setup;
+      if (st.width < setup.width) layers.push({ y: top, h: bottoms[k] - top, w: setup.width - st.width });
+    });
+  }
+  // The editor's shadow outlines the widest page; with narrower pages each gets a thin edge of its own instead.
+  const fill = "linear-gradient(var(--background-secondary), var(--background-secondary))";
+  const edge = "linear-gradient(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2))";
+  const total = setup?.width ?? 0;
+  view.dom.setCssStyles({
+    boxShadow: layers.length ? "none" : "",
+    backgroundImage: layers.flatMap(() => [edge, fill]).join(", "),
+    backgroundRepeat: "no-repeat",
+    // The strip runs a little past the editor's edge (clipped there): a fractional width would leave a white sliver.
+    backgroundSize: layers.flatMap((l) => [`1px ${l.h}px`, `${l.w + 4}px ${l.h}px`]).join(", "),
+    backgroundPosition: layers.flatMap((l) => [`left ${total - l.w}px top ${l.y}px`, `left ${total - l.w + 1}px top ${l.y}px`]).join(", "),
+  });
+}
+
 /** Lays the document out on pages of the document's size, with headers, footers and page gaps. */
 export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
   return new Plugin<PagesState>({
@@ -309,6 +396,7 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
         const scrollTop = scroller?.scrollTop ?? 0;
         const next = pageDecorations(view, opts);
         view.dispatch(view.state.tr.setMeta(pagesKey, next).setMeta("addToHistory", false));
+        shadeNarrowPages(view, opts);
         if (scroller) scroller.scrollTop = scrollTop;
         // The header / footer just drawn may be taller than the margins assumed: lay out again once with their real size.
         const setup = opts.setup();

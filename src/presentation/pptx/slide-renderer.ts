@@ -289,7 +289,7 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
         }
       });
     } else if (shape.chart) {
-      renderChart(el, shape.chart);
+      renderChart(el, shape.chart, { w: shape.rect.w / EMU_PER_PT, h: shape.rect.h / EMU_PER_PT });
     } else if (shape.kind === "frame" && !shape.diagram) {
       el.createDiv().className = "pptx-frame-label";
       el.lastElementChild!.textContent = "Chart or diagram (view only)";

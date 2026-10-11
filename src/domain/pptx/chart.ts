@@ -4,6 +4,7 @@ import { NS, escapeXml } from "../../core/utils/xml";
 import { parseXml, resolvePath } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { nextShapeId } from "./slide-edit";
+import { axesXml, ChartFormat, readChartFormat, setChartFormat } from "./chart-format";
 export const CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 export interface ChartData {
@@ -17,6 +18,9 @@ export interface ChartModel {
   path: string;
   type: string;
   data: ChartData;
+  format?: ChartFormat;
+  /** Default series colours (the theme's accents). */
+  palette?: string[];
 }
 const elements = (e: Element | Document, name: string) => Array.from(e.getElementsByTagNameNS(CHART_NS, name));
 const first = (e: Element | Document, name: string) => elements(e, name)[0];
@@ -46,7 +50,8 @@ export async function chartWorkbook(data: ChartData): Promise<Uint8Array> {
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 const cache = (values: (string | number)[], numeric: boolean) => `<c:${numeric ? "numCache" : "strCache"}>${numeric ? '<c:formatCode>General</c:formatCode>' : ''}<c:ptCount val="${values.length}"/>${values.map((v, i) => `<c:pt idx="${i}"><c:v>${escapeXml(String(v))}</c:v></c:pt>`).join("")}</c:${numeric ? "numCache" : "strCache"}>`;
-export function addChart(doc: PptxDocument, slide: string, data: ChartData, type: string, workbook: Uint8Array): Element {
+/** Add a chart of `type` (c:barChart...) to `slide`, then apply `format` (kind, stacking, title...) on top. */
+export function addChart(doc: PptxDocument, slide: string, data: ChartData, type: string, workbook: Uint8Array, format?: (f: ChartFormat) => void): Element {
   validate(data);
   if (!["barChart", "lineChart", "pieChart", "doughnutChart", "areaChart"].includes(type))
     throw new Error("Unsupported chart type");
@@ -56,8 +61,14 @@ export function addChart(doc: PptxDocument, slide: string, data: ChartData, type
   const rid = doc.addSlideRel(path, "package", book);
   const ser = data.series.map((s, i) => `<c:ser><c:idx val="${i}"/><c:order val="${i}"/><c:tx><c:strRef><c:f>Sheet1!$${col(i + 1)}$1</c:f>${cache([s.name], false)}</c:strRef></c:tx><c:cat><c:strRef><c:f>Sheet1!$A$2:$A$${data.categories.length + 1}</c:f>${cache(data.categories, false)}</c:strRef></c:cat><c:val><c:numRef><c:f>Sheet1!$${col(i + 1)}$2:$${col(i + 1)}$${data.categories.length + 1}</c:f>${cache(s.values, true)}</c:numRef></c:val></c:ser>`).join("");
   const axes = type === "pieChart" || type === "doughnutChart" ? "" : '<c:axId val="1"/><c:axId val="2"/>';
-  const axisXml = axes ? '<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="b"/><c:numFmt formatCode="General" sourceLinked="0"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/><c:crosses val="autoZero"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="l"/><c:numFmt formatCode="General" sourceLinked="1"/><c:tickLblPos val="nextTo"/><c:crossAx val="1"/><c:crosses val="autoZero"/></c:valAx>' : '';
+  const axisXml = axes ? axesXml(1, 2) : '';
   doc.putXml(path, parseXml(`<c:chartSpace xmlns:c="${CHART_NS}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart><c:plotArea><c:layout/><c:${type}>${type === "barChart" ? '<c:barDir val="col"/><c:grouping val="clustered"/>' : type === "lineChart" || type === "areaChart" ? '<c:grouping val="standard"/>' : ''}${ser}${type === "doughnutChart" ? '<c:holeSize val="50"/>' : ''}${axes}</c:${type}>${axisXml}</c:plotArea><c:legend><c:legendPos val="b"/><c:layout/></c:legend><c:plotVisOnly val="1"/></c:chart><c:externalData r:id="${rid}"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`)!, "application/vnd.openxmlformats-officedocument.drawingml.chart+xml");
+  if (format) {
+    const xml = doc.xml(path)!;
+    const f = readChartFormat(xml);
+    format(f);
+    setChartFormat(xml, f);
+  }
   const xml = doc.xml(slide)!;
   const id = nextShapeId(xml);
   const chartRel = doc.addSlideRel(slide, "chart", path);

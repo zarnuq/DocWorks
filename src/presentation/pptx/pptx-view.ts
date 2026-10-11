@@ -1,8 +1,9 @@
 import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from "../../domain/pptx/media";
 import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
+import { chartPalette, ChartFormat, ChartKind, LegendPos, setChartFormat, Stacking } from "../../domain/pptx/chart-format";
 import { Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
-import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel } from "../../domain/pptx/slide-model";
+import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
 import {
   CONNECTORS,
   Glue,
@@ -806,7 +807,7 @@ export class PptxView extends FileView {
         }
       }
       if (rs.shape.chart) {
-        const button = this.propsEl.createEl("button", { text: "Edit chart data" });
+        const button = this.propsEl.createEl("button", { text: "Edit chart" });
         button.addEventListener("click", () => this.editChart(rs.shape.chart!.path));
       }
     } else {
@@ -1784,20 +1785,72 @@ export class PptxView extends FileView {
       return;
     const doc = this.doc;
     const slide = this.editPart ?? doc.slides()[this.index].path;
-    const imported = path ? parseSlide(doc, slide).shapes.find(s => s.chart?.path === path)?.chart?.data : undefined;
+    const model = path ? parseSlide(doc, slide).shapes.find(s => s.chart?.path === path)?.chart : undefined;
+    const imported = model?.data;
     const data: ChartData = imported ? structuredClone(imported) : { categories: ["Category 1", "Category 2", "Category 3"], series: [{ name: "Series 1", values: [10, 20, 15] }] };
     if (path && !imported)
       return;
+    const axis = { title: "", visible: true, gridlines: false, min: null, max: null, reversed: false, format: null };
+    const format: ChartFormat = model?.format ? structuredClone(model.format) : { kind: "column", stacking: "none", title: "", legend: "b", labels: false, colors: [], category: { ...axis }, value: { ...axis, gridlines: true } };
+    const colors = slideColors(doc, slide);
+    const palette = chartPalette(colors);
     const modal = new Modal(this.app);
-    modal.titleEl.setText(path ? "Edit chart data" : "Insert chart");
+    modal.titleEl.setText(path ? "Edit chart" : "Insert chart");
     const host = modal.contentEl;
-    let type = "barChart";
-    if (!path) {
-      const picker = host.createEl("select", { cls: "dropdown", attr: { "aria-label": "Chart type" } });
-      for (const [text, value] of [["Column", "barChart"], ["Line", "lineChart"], ["Pie", "pieChart"], ["Doughnut", "doughnutChart"], ["Area", "areaChart"]])
-        picker.createEl("option", { text, value });
-      picker.addEventListener("change", () => { type = picker.value; });
+    const field = (label: string) => { const row = host.createDiv({ cls: "dw-chart-option" }); row.createSpan({ text: label }); return row; };
+
+    // Chart type, as Google's chart editor lists them (stacking is part of the type).
+    const types: [string, ChartKind, Stacking][] = [["Column", "column", "none"], ["Stacked column", "column", "stacked"], ["100% stacked column", "column", "percent"], ["Bar", "bar", "none"], ["Stacked bar", "bar", "stacked"], ["100% stacked bar", "bar", "percent"], ["Line", "line", "none"], ["Area", "area", "none"], ["Stacked area", "area", "stacked"], ["100% stacked area", "area", "percent"], ["Pie", "pie", "none"], ["Doughnut", "doughnut", "none"]];
+    const picker = field("Chart type").createEl("select", { cls: "dropdown", attr: { "aria-label": "Chart type" } });
+    for (const [text, kind, stacking] of types)
+      picker.createEl("option", { text, value: `${kind}:${stacking}` });
+    if (!types.some(([, k, st]) => k === format.kind && st === format.stacking))
+      picker.createEl("option", { text: "Other (kept as is)", value: `${format.kind}:${format.stacking}` });
+    picker.value = `${format.kind}:${format.stacking}`;
+    picker.addEventListener("change", () => {
+      const [kind, stacking] = picker.value.split(":") as [ChartKind, Stacking];
+      // Google lists a bar chart's first category at the top.
+      if ((kind === "bar") !== (format.kind === "bar")) format.category.reversed = kind === "bar";
+      format.kind = kind;
+      format.stacking = stacking;
+      format.colors = [];
+      renderColors();
+    });
+    const text = (label: string, value: string, set: (v: string) => void) => {
+      const input = field(label).createEl("input", { type: "text", value, attr: { "aria-label": label } });
+      input.addEventListener("input", () => set(input.value));
+    };
+    text("Chart title", format.title, v => { format.title = v; });
+    const legend = field("Legend").createEl("select", { cls: "dropdown", attr: { "aria-label": "Legend" } });
+    for (const [label, value] of [["Bottom", "b"], ["Top", "t"], ["Left", "l"], ["Right", "r"], ["None", "none"]])
+      legend.createEl("option", { text: label, value });
+    legend.value = format.legend;
+    legend.addEventListener("change", () => { format.legend = legend.value as LegendPos; });
+    const check = (label: string, value: boolean, set: (v: boolean) => void) => {
+      const box = field(label).createEl("input", { type: "checkbox", attr: { "aria-label": label } });
+      box.checked = value;
+      box.addEventListener("change", () => set(box.checked));
+    };
+    check("Data labels", format.labels, v => { format.labels = v; });
+    check("Gridlines", format.value.gridlines, v => { format.value.gridlines = v; });
+    text("Category axis title", format.category.title, v => { format.category.title = v; });
+    text("Value axis title", format.value.title, v => { format.value.title = v; });
+    for (const end of ["min", "max"] as const) {
+      const input = field(end === "min" ? "Value axis minimum" : "Value axis maximum").createEl("input", { type: "number", value: format.value[end] === null ? "" : String(format.value[end]), attr: { "aria-label": end === "min" ? "Value axis minimum" : "Value axis maximum", placeholder: "Auto", step: "any" } });
+      input.addEventListener("input", () => { format.value[end] = input.value === "" || !Number.isFinite(Number(input.value)) ? null : Number(input.value); });
     }
+    const colorRow = host.createDiv({ cls: "dw-chart-colors" });
+    /** One colour per series, or per slice on a pie. */
+    const renderColors = () => {
+      colorRow.replaceChildren();
+      const pie = format.kind === "pie" || format.kind === "doughnut";
+      (pie ? data.categories : data.series.map(s => s.name)).forEach((name, i) => {
+        const label = colorRow.createEl("label", { text: name });
+        const input = label.createEl("input", { type: "color", value: (format.colors[i] ?? palette[i % palette.length]).slice(0, 7).toLowerCase(), attr: { "aria-label": `Colour of ${name}` } });
+        input.addEventListener("input", () => { format.colors[i] = input.value.toUpperCase(); });
+      });
+    };
+
     const grid = host.createDiv({ cls: "dw-chart-grid" });
     const render = () => {
       grid.replaceChildren();
@@ -1814,18 +1867,20 @@ export class PptxView extends FileView {
         remove.disabled = data.categories.length === 1;
         remove.addEventListener("click", () => { data.categories.splice(i, 1); data.series.forEach(s => s.values.splice(i, 1)); render(); });
       });
+      renderColors();
     };
     render();
     host.createEl("button", { text: "Add row" }).addEventListener("click", () => { data.categories.push(`Category ${data.categories.length + 1}`); data.series.forEach(s => s.values.push(0)); render(); });
     if (!path)
       host.createEl("button", { text: "Add series" }).addEventListener("click", () => { data.series.push({ name: `Series ${data.series.length + 1}`, values: data.categories.map(() => 0) }); render(); });
     const error = host.createDiv({ cls: "pptx-props-hint" });
-    const apply = host.createEl("button", { text: path ? "Apply chart data" : "Insert chart", cls: "mod-cta" });
+    const apply = host.createEl("button", { text: path ? "Apply" : "Insert chart", cls: "mod-cta" });
     apply.addEventListener("click", () => {
       void (async () => {
         apply.disabled = true;
         try {
           const update = path ? await prepareChartEdit(doc, path, data) : null;
+          if (update) setChartFormat(update.xml, format, colors);
           const workbook = path ? null : await chartWorkbook(data);
           if (this.doc !== doc || (this.editPart ?? doc.slides()[this.index].path) !== slide) {
             error.setText("Return to the slide where this editor was opened.");
@@ -1837,7 +1892,7 @@ export class PptxView extends FileView {
               d.putBinary(update.workbookPath, update.workbook);
           }
           else
-            addChart(d, slide, data, type, workbook!); });
+            addChart(d, slide, data, "barChart", workbook!, f => Object.assign(f, structuredClone(format))); });
           modal.close();
         }
         catch (err) {

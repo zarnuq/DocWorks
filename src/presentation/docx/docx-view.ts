@@ -12,12 +12,13 @@ import { docxSchema as schema, Align } from "../../domain/docx/schema";
 import { FONTS, PaperTheme, promptText, showValue, Toolbar } from "../common/toolbar";
 import { pickImage } from "../common/images";
 import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, styleRenderedParagraphs } from "./docx-editor";
-import { pagesPlugin, printPages, repaginate } from "./docx-pages";
+import { pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
+import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
 import { latexToOmml, mathSpec } from "../../domain/docx/math";
 import { exportPdf } from "../common/pdf";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
-import { headerFooterType, pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
+import { headerFooterType, pageSetup, PageSetup, PageSize, sectionSetups } from "../../domain/docx/pages";
 import { attrsOf, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView } from "./docx-image-view";
 import { TextBoxView } from "./docx-textbox-view";
@@ -98,6 +99,8 @@ export class DocxView extends FileView {
   private syncTheme: ((t: PaperTheme) => void) | null = null;
   private ctx: EditorContext | null = null;
   private setup: PageSetup | null = null;
+  /** The body's own page setup (`setup` is as wide as the widest section's page). */
+  private finalSetup: PageSetup | null = null;
   private pageView = this.app.loadLocalStorage(PAGE_VIEW_KEY) !== "off";
   private hostEl: HTMLElement | null = null;
   private wordsEl: HTMLElement | null = null;
@@ -226,7 +229,7 @@ export class DocxView extends FileView {
       if (pos !== undefined) this.equationDialog(pos);
     });
     this.editor = new EditorView(host, {
-      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin()] }),
+      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize)] }),
       nodeViews: {
         image: (node, view, getPos) =>
           new DocxImageView(node, view, getPos, {
@@ -312,8 +315,11 @@ export class DocxView extends FileView {
     if (!this.docx || !this.hostEl) return;
     const finalSectPr = this.editor?.state.doc.attrs.sectPr as string | null | undefined;
     const body = finalSectPr ? new DOMParser().parseFromString(`<body>${finalSectPr}</body>`, "application/xml").documentElement : this.docx.body;
-    const st = (this.setup = pageSetup(body, this.settings.pageSize));
-    this.pageWidth = st.width - st.left - st.right;
+    const st = (this.finalSetup = pageSetup(body, this.settings.pageSize));
+    // A section with its own page size (landscape pages): the editor is as wide as the widest page.
+    const widest = this.editor ? Math.max(...sectionSetups(this.editor.state.doc, st, this.settings.pageSize).map((x) => x.width), st.width) : st.width;
+    this.setup = { ...st, width: widest };
+    this.pageWidth = widest - st.left - st.right;
     this.hostEl.setCssProps({
       "--docx-page-width": `${this.pageWidth}px`,
       "--docx-m-top": `${st.top}px`,
@@ -323,7 +329,10 @@ export class DocxView extends FileView {
       "--docx-hf-header": `${st.header}px`,
       "--docx-hf-footer": `${st.footer}px`,
     });
-    if (this.editor) repaginate(this.editor);
+    if (this.editor) {
+      refreshSectionWidths(this.editor);
+      repaginate(this.editor);
+    }
     this.fitDocument();
   }
 
@@ -339,6 +348,7 @@ export class DocxView extends FileView {
     if (this.ruler) this.ruler.dom.style.zoom = value;
     this.ruler?.align();
     if (changed) repaginate(editor);
+    rewrap(editor);
   }
 
   /** Force an immediate save, e.g. before Obsidian quits. */
@@ -965,6 +975,7 @@ export class DocxView extends FileView {
   private pagesPlugin(): Plugin {
     return pagesPlugin({
       setup: () => (this.pageView ? this.setup : null),
+      pageSize: () => this.settings.pageSize,
       header: (page, total) => this.renderHF("header", page, total),
       footer: (page, total) => this.renderHF("footer", page, total),
       keep: (node) => this.ctx?.styles.keep(attrsOf<ParagraphAttrs>(node).style) ?? { next: false, lines: false },
@@ -1085,7 +1096,10 @@ export class DocxView extends FileView {
     this.pageView = on;
     this.contentEl.querySelector('[aria-label^="Page view"]')?.toggleClass("is-active", on);
     this.hostEl?.toggleClass("is-paged", on);
-    if (this.editor) repaginate(this.editor);
+    if (this.editor) {
+      refreshSectionWidths(this.editor);
+      repaginate(this.editor);
+    }
   }
 
   /** Save the document as a PDF, laid out on its pages as in the page view. */

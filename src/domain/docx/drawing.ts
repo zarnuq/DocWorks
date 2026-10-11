@@ -3,6 +3,7 @@
  * above and below it, or not at all (behind / in front of the text) - Word's and Google Docs' wrap options.
  */
 import { NS } from "../../core/utils/xml";
+import { wrapsBothSides } from "./wrap";
 
 export type Wrap = "inline" | "square" | "topBottom" | "behind" | "front";
 
@@ -64,6 +65,8 @@ export function placementCss(p: Placement, width = 0, geometry: PlacementGeometr
   p = { ...p, x: p.x - (p.hRelative === "page" ? geometry.pageLeft ?? 0 : p.hRelative === "margin" ? geometry.marginLeft ?? 0 : 0),
     y: p.y - (p.vRelative === "page" ? geometry.paragraphTop ?? 0 : p.vRelative === "margin" ? (geometry.paragraphTop ?? 0) - (geometry.pageTop ?? 0) : 0) };
   const result = placementBaseCss(p, width, column);
+  // Text on both sides: the picture sits over the text, which the page view keeps clear of it (wrap.ts).
+  if (result.cls.includes("docx-both")) return result;
   if (p.distances && p.wrap !== "inline") {
     const d = p.distances;
     result.style += `; padding: ${d.top}px ${d.right}px ${d.bottom}px ${d.left}px; box-sizing: content-box; margin-right: 0; margin-bottom: 0`;
@@ -75,6 +78,10 @@ function placementBaseCss(p: Placement, width: number, column: number): { cls: s
     case "inline":
       return { cls: "", style: "" };
     case "square":
+      if (width && wrapsBothSides(p.x, width, column, p.align)) {
+        const left = p.align === "center" ? "left: 50%; transform: translateX(-50%)" : `left: ${p.x}px`;
+        return { cls: "docx-float docx-both", style: `${left}; top: ${p.y}px` };
+      }
       if (p.align === "center") return { cls: "docx-wrap", style: "display: block; margin-left: auto; margin-right: auto" };
       if (p.align === "right") return { cls: "docx-wrap", style: `float: right; margin-top: ${p.y}px` };
       if (!p.align && width && p.x + width / 2 > column / 2) return { cls: "docx-wrap", style: `float: right; margin-right: ${Math.max(0, column - p.x - width)}px; margin-top: ${p.y}px` };

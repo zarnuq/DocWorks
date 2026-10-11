@@ -1,4 +1,5 @@
 /** Page geometry and the editor's page layout (an estimate of Word's: breaks fall between lines and inside table rows). */
+import type { Node as PMNode } from "prosemirror-model";
 
 const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
@@ -34,6 +35,35 @@ export function pageSetup(body: Element, size: PageSize = "document"): PageSetup
     header: get("pgMar", "header", 720),
     footer: get("pgMar", "footer", 720),
   };
+}
+
+/**
+ * Page geometry of each top-level block's section: a paragraph's w:sectPr ends its section, the body's (`final`)
+ * governs the last one. With `letter` forced, every section uses `final`.
+ */
+export function sectionSetups(doc: PMNode, final: PageSetup, size: PageSize = "document"): PageSetup[] {
+  const out: PageSetup[] = [];
+  const cache = new Map<string, PageSetup>();
+  const setupOf = (sectPr: string) => {
+    let st = cache.get(sectPr);
+    if (!st) {
+      const body = new DOMParser().parseFromString(`<body>${sectPr}</body>`, "application/xml").documentElement;
+      cache.set(sectPr, (st = pageSetup(body)));
+    }
+    return st;
+  };
+  let current = final;
+  for (let i = doc.childCount - 1; i >= 0; i--) {
+    const child = doc.child(i);
+    let last: string | null = (child.attrs.sectPr as string | null | undefined) ?? null;
+    child.descendants((n) => {
+      if (n.type.name === "paragraph" && n.attrs.sectPr) last = n.attrs.sectPr as string;
+      return n.type.name !== "paragraph";
+    });
+    if (last && size === "document") current = setupOf(last);
+    out[i] = current;
+  }
+  return out;
 }
 
 /** Which header / footer page `page` shows, given the section's "different first page" and "different odd & even" options. */
@@ -85,6 +115,8 @@ export interface TopBlock {
   columns?: { count: number; group: number };
   /** Contains a column break: what follows starts the next column. */
   columnBreak?: boolean;
+  /** Text height of a page this block's section starts (its own page size); default: the layout's. */
+  avail?: number;
 }
 
 /** Blank space inserted at `pos` that ends a page inside a paragraph or table cell; `gapAt` is where the drawn gap starts (once per page break). */
@@ -118,8 +150,10 @@ type Flow = { used: number; page: number };
  * Lay blocks out on pages of `avail` px of text, breaking between blocks, between the lines of a paragraph, and
  * inside table rows (each cell continues at the top of the next page). `gap` is the height of a drawn page gap.
  */
-export function layoutPages(blocks: TopBlock[], avail: number, gap: number): PageLayout {
+export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number): PageLayout {
   const out: PageLayout = { starts: [], pageNumbers: [1], fills: [], spacers: [], pages: 1 };
+  // Sections with another page size start on a new page; the block starting a page sets its text height.
+  let avail = blocks[0]?.avail ?? baseAvail;
   const shown = new Set<number>();
   let columnFlow: { count: number; base: number; firstPage: number } | null = null;
   const capacity = (page: number) => columnFlow ? columnFlow.count * (avail - (page === columnFlow.firstPage ? columnFlow.base : 0)) : avail;
@@ -208,6 +242,7 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
   let page = 1;
   const newPage = (i: number) => {
     out.fills.push(Math.max(0, avail - used));
+    avail = blocks[i]?.avail ?? baseAvail;
     out.starts.push(i);
     out.pageNumbers.push(++page);
     used = 0;
