@@ -260,7 +260,7 @@ export function buildShapePanel(host: HTMLElement, shape: ShapeModel, ctl: Panel
   }
 
   // --- Crop ------------------------------------------------------------------
-  if (shape.kind === "pic") {
+  if (shape.kind === "pic" && !shape.media) {
     const s = section("Crop");
     const crop = shape.crop ?? { l: 0, t: 0, r: 0, b: 0 };
     for (const [label, key] of [["Crop left %", "l"], ["Crop top %", "t"], ["Crop right %", "r"], ["Crop bottom %", "b"]] as const) {

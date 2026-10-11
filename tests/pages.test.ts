@@ -3,7 +3,7 @@ import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { layoutPages, PageLayout, TopBlock, Unit } from "../src/domain/docx/pages";
 import { docxSchema as schema } from "../src/domain/docx/schema";
-import { pagesKey, pagesPlugin } from "../src/presentation/docx/docx-pages";
+import { pagesKey, pagesPlugin, printPages } from "../src/presentation/docx/docx-pages";
 
 const GAP = 30;
 const AVAIL = 500;
@@ -250,6 +250,21 @@ describe("layoutPages: keeping things together (Word / Google Docs paragraph and
 
 describe("layoutPages: columns", () => {
   const inCols = (b: TopBlock, count = 2, group = 1, extra: Partial<TopBlock> = {}): TopBlock => ({ ...b, columns: { count, group }, ...extra });
+  it("continues a long table across pages of columns instead of moving the whole table", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ height: 100, cantSplit: true, cells: [cell(96, [text(2, 50, i * 1000)])] }));
+    const l = lay([block(100), inCols(table(rows)), block(100)]);
+    expect(l.pages).toBe(2);
+    expect(l.starts).toEqual([]);
+    expect(l.spacers.map(s => s.pos)).toEqual([8000]);
+    expect(l.fills).toEqual([200]);
+  });
+  it("splits an oversized row inside columns and draws one gap for its cells", () => {
+    const l = lay([inCols(table([{ height: 1400, cells: [cell(96, [text(28, 50, 1000)]), cell(300, [text(28, 50, 5000)])] }]))]);
+    expect(l.pages).toBe(2);
+    expect(l.spacers).toHaveLength(2);
+    expect(l.spacers.filter(s => s.gapAt !== null)).toHaveLength(1);
+    expect(l.fills).toEqual([300]);
+  });
 
   it("fits N column-heights of text on a page, and continues below the balanced columns", () => {
     // 100 used, so each of the 2 columns has 400: room for 800 of text.
@@ -429,5 +444,43 @@ describe("page view in the editor", () => {
     const heading = schema.nodes.paragraph.create({ style: "KeepStyle", keepNext: false }, schema.text("n:1 heading"));
     const v = await mount([p(42), heading, p(3, "after")], (node) => ({ next: node.attrs.style === "KeepStyle", lines: false }));
     expect(v.dom.querySelector(".docx-page-gap")!.nextElementSibling!.textContent).toContain("after");
+  });
+});
+
+describe("printPages", () => {
+  const rect = (el: Element, top: number, bottom: number) => (el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect);
+
+  it("cuts the paged document into one box per page, each showing its own stretch", () => {
+    const host = document.createElement("div");
+    host.className = "docx-editor-host is-paged";
+    host.innerHTML = `<div class="ProseMirror"><p>one</p><div class="docx-page-gap"><div class="docx-page-space"></div></div><p>two</p><div class="docx-page-spacer"><div class="docx-page-gap-float"><div class="docx-page-space"></div></div></div><p>three</p></div>`;
+    const pm = host.firstElementChild!;
+    rect(pm, 50, 3300);
+    const [a, b] = Array.from(pm.querySelectorAll(".docx-page-space"));
+    rect(a, 1110, 1134);
+    rect(b, 2164, 2188);
+    const pages = printPages(host, 1056);
+    expect(pages).toHaveLength(3);
+    const view = (p: HTMLElement) => p.querySelector<HTMLElement>(".dw-print-clip")!;
+    const copy = (p: HTMLElement) => p.querySelector<HTMLElement>(".docx-editor-host")!;
+    expect(pages.map((p) => copy(p).style.getPropertyValue("--dw-print-top"))).toEqual(["0px", "-1084px", "-2138px"]);
+    // Each page shows up to the next gap, and no more than a page.
+    expect(pages.map((p) => view(p).style.getPropertyValue("--dw-print-height"))).toEqual(["1056px", "1030px", "1056px"]);
+    expect(copy(pages[1]).textContent).toContain("two");
+  });
+
+  it("is empty without an editor", () => {
+    expect(printPages(document.createElement("div"), 1056)).toEqual([]);
+  });
+  it("prints at full size when the editor is scaled to fit beside review panels", () => {
+    const host = document.createElement("div");
+    host.className = "docx-editor-host is-paged";
+    host.innerHTML = `<div class="ProseMirror" style="zoom: 0.5"><p>one</p><div class="docx-page-gap"><div class="docx-page-space"></div></div><p>two</p></div>`;
+    rect(host.firstElementChild!, 50, 1100);
+    rect(host.querySelector(".docx-page-space")!, 578, 590);
+    const pages = printPages(host, 1056);
+    expect(pages).toHaveLength(2);
+    expect(pages[1].querySelector<HTMLElement>(".docx-editor-host")!.style.getPropertyValue("--dw-print-top")).toBe("-1080px");
+    expect(pages[0].querySelector<HTMLElement>(".ProseMirror")!.style.zoom).toBe("1");
   });
 });

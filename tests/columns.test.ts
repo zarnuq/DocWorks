@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { describe, it, expect } from "vitest";
 import { EditorState, TextSelection, Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
@@ -71,7 +73,16 @@ describe("reading sections in columns", () => {
     expect(el.style.getPropertyValue("--docx-cols")).toBe("2");
     expect(el.style.getPropertyValue("--docx-col-gap")).toBe("0.5in");
     expect(el.classList.contains("docx-columns-sep")).toBe(true);
+    // Set inline: the plugin directory's CSS lint flags multi-column properties in styles.css.
+    expect(el.style.getPropertyValue("column-count")).toBe("var(--docx-col-count, 2)");
+    expect(el.style.getPropertyValue("column-gap")).toBe("0.5in");
+    expect(el.style.getPropertyValue("column-rule")).toContain("solid");
     view.destroy();
+  });
+
+  it("keeps multi-column properties out of styles.css", () => {
+    const css = readFileSync(join(__dirname, "..", "styles.css"), "utf8");
+    expect(css).not.toMatch(/(^|[\s;{])(column-(count|gap|rule|span|width|fill)|columns)\s*:|break-(after|before|inside)\s*:\s*column/);
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { nextVisible, ShowDeck, Slideshow } from "../src/presentation/pptx/slideshow";
+import { nextVisible, ShowDeck, SlideEffects, Slideshow } from "../src/presentation/pptx/slideshow";
+import type { Behavior, Effect } from "../src/domain/pptx/animation";
 
 const deck = (hidden: boolean[] = [false, false, false, false]): ShowDeck => ({
   size: { cx: 1600, cy: 900 },
@@ -112,5 +113,170 @@ describe("Slideshow", () => {
     show.open();
     key(overlay(), "p");
     expect(overlay().querySelector(".dw-show-notes")!.textContent).toBe("No notes for this slide.");
+  });
+});
+
+describe("Slideshow animations", () => {
+  let show: Slideshow;
+  const overlay = () => document.querySelector<HTMLElement>(".dw-show")!;
+  const shape = (id: string) => overlay().querySelector<HTMLElement>(`[data-spids~="${id}"]`)!;
+  const vis = (b: Behavior[] = []) => [{ type: "visibility" as const, visible: true, start: 0, dur: 1 }, ...b];
+  const enter = (spid: string, para: [number, number] | null = null, start = 0): Effect => ({ spid, para, cls: "entr", start, dur: 500, behaviors: vis() });
+  const exitFx = (spid: string): Effect => ({ spid, para: null, cls: "exit", start: 0, dur: 500, behaviors: [{ type: "visibility", visible: false, start: 499, dur: 1 }] });
+  const animDeck = (effects: (i: number) => SlideEffects, count = 2): ShowDeck => ({
+    ...deck(Array(count).fill(false)),
+    render: (host, i) => {
+      host.innerHTML = `<div class="pptx-slide"><div class="pptx-shape" data-spids="3"><div class="pptx-text"><p>a</p><p>b</p></div></div><div class="pptx-shape" data-spids="4 9">s${i}</div></div>`;
+    },
+    effects,
+  });
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    show?.close();
+    vi.useRealTimers();
+  });
+
+  it("hides shapes that enter later and shows them one click at a time", () => {
+    show = new Slideshow(animDeck((i) => ({ transition: null, steps: i ? [] : [{ auto: false, effects: [enter("3")] }, { auto: false, effects: [enter("4")] }] })), 0, vi.fn());
+    show.open();
+    expect(shape("3").style.visibility).toBe("hidden");
+    expect(shape("4").style.visibility).toBe("hidden");
+    key(overlay(), "ArrowRight");
+    expect(show.index).toBe(0);
+    expect(shape("3").style.visibility).toBe("visible");
+    expect(shape("4").style.visibility).toBe("hidden");
+    vi.advanceTimersByTime(1000);
+    key(overlay(), "ArrowRight");
+    expect(shape("4").style.visibility).toBe("visible");
+    vi.advanceTimersByTime(1000);
+    key(overlay(), "ArrowRight");
+    expect(show.index).toBe(1);
+  });
+
+  it("animates the shapes inside an animated group", () => {
+    show = new Slideshow(animDeck(() => ({ transition: null, steps: [{ auto: false, effects: [enter("9")] }] })), 0, vi.fn());
+    show.open();
+    expect(shape("4").style.visibility).toBe("hidden");
+  });
+
+  it("builds text paragraph by paragraph", () => {
+    show = new Slideshow(animDeck(() => ({ transition: null, steps: [{ auto: false, effects: [enter("3", [1, 1])] }] })), 0, vi.fn());
+    show.open();
+    const [a, b] = Array.from(shape("3").querySelectorAll("p"));
+    expect(a.style.visibility).toBe("");
+    expect(b.style.visibility).toBe("hidden");
+    key(overlay(), "ArrowRight");
+    expect(b.style.visibility).toBe("visible");
+  });
+
+  it("plays delayed and exit effects on time", () => {
+    show = new Slideshow(animDeck(() => ({ transition: null, steps: [{ auto: false, effects: [enter("4", null, 1000), exitFx("3")] }] })), 0, vi.fn());
+    show.open();
+    expect(shape("3").style.visibility).toBe("");
+    key(overlay(), "ArrowRight");
+    expect(shape("4").style.visibility).toBe("hidden");
+    vi.advanceTimersByTime(600);
+    expect(shape("3").style.visibility).toBe("hidden");
+    vi.advanceTimersByTime(500);
+    expect(shape("4").style.visibility).toBe("visible");
+  });
+
+  it("finishes a playing step on click instead of skipping ahead", () => {
+    show = new Slideshow(animDeck(() => ({ transition: null, steps: [{ auto: false, effects: [enter("4", null, 1000)] }, { auto: false, effects: [enter("3")] }] })), 0, vi.fn());
+    show.open();
+    key(overlay(), "ArrowRight");
+    key(overlay(), "ArrowRight");
+    expect(shape("4").style.visibility).toBe("visible");
+    expect(shape("3").style.visibility).toBe("hidden");
+  });
+
+  it("plays automatic steps when the slide starts and after the previous step", () => {
+    show = new Slideshow(animDeck((i) => ({ transition: null, steps: i ? [] : [{ auto: true, effects: [enter("3")] }, { auto: true, effects: [enter("4")] }] })), 0, vi.fn());
+    show.open();
+    expect(shape("3").style.visibility).toBe("visible");
+    vi.advanceTimersByTime(500);
+    expect(shape("4").style.visibility).toBe("visible");
+  });
+
+  it("continues automatic effects when fullscreen resizing redraws a playing slide", () => {
+    show = new Slideshow(animDeck(() => ({ transition: null, steps: [{ auto: false, effects: [enter("3")] }, { auto: true, effects: [exitFx("3")] }] })), 0, vi.fn());
+    show.open();
+    key(overlay(), "ArrowRight");
+    window.dispatchEvent(new Event("resize"));
+    vi.advanceTimersByTime(500);
+    expect(shape("3").style.visibility).toBe("hidden");
+  });
+
+  it("continues automatic effects after a click finishes the playing step", () => {
+    show = new Slideshow(animDeck(() => ({ transition: null, steps: [{ auto: false, effects: [enter("3")] }, { auto: true, effects: [exitFx("3")] }] })), 0, vi.fn());
+    show.open();
+    key(overlay(), "ArrowRight");
+    key(overlay(), "ArrowRight");
+    vi.advanceTimersByTime(500);
+    expect(shape("3").style.visibility).toBe("hidden");
+  });
+
+  it("goes back one step, then to the previous slide fully built", () => {
+    show = new Slideshow(animDeck(() => ({ transition: null, steps: [{ auto: false, effects: [enter("3")] }] })), 0, vi.fn());
+    show.open();
+    key(overlay(), "ArrowRight");
+    key(overlay(), "ArrowLeft");
+    expect(shape("3").style.visibility).toBe("hidden");
+    key(overlay(), "ArrowRight");
+    vi.advanceTimersByTime(1000);
+    key(overlay(), "ArrowRight");
+    expect(show.index).toBe(1);
+    key(overlay(), "ArrowLeft");
+    expect(show.index).toBe(0);
+    expect(shape("3").style.visibility).toBe("visible");
+  });
+
+  it("advances by itself after the slide's timing", () => {
+    show = new Slideshow(animDeck((i) => ({ transition: i ? null : { type: "fade", dir: null, dur: 500, advanceAfter: 2000 }, steps: [] })), 0, vi.fn());
+    show.open();
+    vi.advanceTimersByTime(1999);
+    expect(show.index).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(show.index).toBe(1);
+  });
+
+  it("keeps the previous slide on screen while the next slide's transition plays", () => {
+    const anims: { finish: () => void }[] = [];
+    const proto = HTMLElement.prototype as unknown as { animate?: unknown };
+    proto.animate = function () {
+      let done = () => {};
+      const finished = new Promise<void>((r) => (done = r));
+      const a = { finished, cancel: () => {}, finish: () => done() };
+      anims.push(a);
+      return a;
+    };
+    try {
+      show = new Slideshow(animDeck((i) => ({ transition: i ? { type: "push", dir: "l", dur: 500, advanceAfter: null } : null, steps: [] })), 0, vi.fn());
+      show.open();
+      key(overlay(), "ArrowRight");
+      expect(overlay().querySelectorAll(".pptx-slide")).toHaveLength(2);
+      expect(anims.length).toBeGreaterThan(0);
+    } finally {
+      delete proto.animate;
+    }
+  });
+
+  it("previews the current slide's entry transition before playing automatic effects", () => {
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel: vi.fn() }));
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      show = new Slideshow(animDeck(() => ({ transition: { type: "fade", dir: null, dur: 800, advanceAfter: null }, steps: [{ auto: true, effects: [enter("3")] }] })), 0, vi.fn());
+      show.open(true);
+      expect(animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 800 }));
+      expect(shape("3").style.visibility).toBe("hidden");
+      vi.advanceTimersByTime(800);
+      expect(shape("3").style.visibility).toBe("visible");
+    } finally {
+      delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, escapeXml } from "../../core/utils/xml";
 import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, TableAttrs, TableBorders, XmlAttrs } from "./schema";
-import { placementOf, setPlacement } from "./drawing";
+import { placementAttrs, placementOf, setPlacement } from "./drawing";
 import { bordersOf, EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
 
 export interface WriteContext {
@@ -181,12 +181,31 @@ class Writer {
     if (a.indent !== was.indent) {
       const ind = this.upsert(pPr, "ind");
       ind.removeAttributeNS(NS.w, "start");
-      if (a.indent > 0) this.set(ind, "left", String(a.indent * 720));
+      if (a.indent !== 0) this.set(ind, "left", String(Math.round(a.indent * 720)));
       else ind.removeAttributeNS(NS.w, "left");
       if (!ind.attributes.length) ind.remove();
     }
 
     const twips = (v: number) => String(Math.round(v * 20));
+    if (a.rightIndent !== was.rightIndent) {
+      const ind = this.upsert(pPr, "ind");
+      ind.removeAttributeNS(NS.w, "end");
+      if (a.rightIndent !== null) this.set(ind, "right", twips(a.rightIndent));
+      else ind.removeAttributeNS(NS.w, "right");
+      if (!ind.attributes.length) ind.remove();
+    }
+    if (JSON.stringify(a.tabs) !== JSON.stringify(was.tabs)) {
+      this.drop(pPr, "tabs");
+      if (a.tabs?.length) {
+        const tabs = this.upsert(pPr, "tabs");
+        for (const stop of a.tabs) {
+          const tab = tabs.appendChild(this.el("tab"));
+          this.set(tab, "val", stop.align);
+          this.set(tab, "pos", twips(stop.pt));
+          if (stop.leader) this.set(tab, "leader", stop.leader);
+        }
+      }
+    }
     for (const side of ["spaceBefore", "spaceAfter"] as const) {
       if (a[side] === was[side]) continue;
       const attr = side === "spaceBefore" ? "before" : "after";
@@ -205,7 +224,7 @@ class Writer {
       if (!ind.attributes.length) ind.remove();
     }
 
-    if (a.tabLeader !== was.tabLeader) {
+    if (a.tabLeader !== was.tabLeader && JSON.stringify(a.tabs) === JSON.stringify(was.tabs)) {
       // A right tab stop at the margin, with its leader (table of contents lines).
       this.drop(pPr, "tabs");
       if (a.tabLeader) {
@@ -505,7 +524,7 @@ class Writer {
     if (!xml) {
       const r = this.import(this.newDrawingRun(rId ?? "", width ?? 300, height ?? 200, alt));
       const a = attrsOf<ImageAttrs>(node);
-      if (a.wrap !== "inline") setPlacement(r, { wrap: a.wrap, x: a.x, y: a.y, align: a.align });
+      if (a.wrap !== "inline") setPlacement(r, placementAttrs(a));
       return r;
     }
 
@@ -530,7 +549,7 @@ class Writer {
     const blip = r.getElementsByTagNameNS(NS.a, "blip")[0];
     if (blip && rId && blip.getAttributeNS(NS.r, "embed") !== rId) blip.setAttributeNS(NS.r, "r:embed", rId);
     const a = attrsOf<ImageAttrs>(node);
-    const now = { wrap: a.wrap, x: a.x, y: a.y, align: a.align };
+    const now = placementAttrs(a);
     const was = placementOf(r.getElementsByTagNameNS(NS.w, "drawing")[0] ?? null);
     if (JSON.stringify(now) !== JSON.stringify(was)) setPlacement(r, now);
     return r;

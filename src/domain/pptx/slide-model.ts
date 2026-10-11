@@ -1,3 +1,5 @@
+import { readMedia, SlideMedia } from "./media";
+import { chartData, ChartModel, CHART_NS } from "./chart";
 import { NS, childNS } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { ColorContext, resolveColor } from "./color";
@@ -108,6 +110,9 @@ export interface ShapeModel {
   image: string | null;
   /** Pictures: the part of the image cut away on each side (a:srcRect). */
   crop?: Crop | null;
+  diagram?: boolean;
+  chart?: ChartModel;
+  media?: SlideMedia;
   table: TableModel | null;
   /** For kind "cell": the cell, with its style-resolved fill and borders. */
   cell?: TableCell;
@@ -364,7 +369,7 @@ class SlideParser {
 
   constructor(private doc: PptxDocument, private slidePath: string) {
     const layoutPath = doc.layoutOf(slidePath);
-    const masterPath = layoutPath && doc.masterOf(layoutPath);
+    const masterPath = (layoutPath && doc.masterOf(layoutPath)) || doc.masterOf(slidePath) || (doc.xml(slidePath)?.documentElement.localName === "sldMaster" ? slidePath : null);
     const themePath = masterPath && doc.themeOf(masterPath);
     this.layout = layoutPath ? doc.xml(layoutPath) : null;
     this.master = masterPath ? doc.xml(masterPath) : null;
@@ -391,7 +396,7 @@ class SlideParser {
   parse(): SlideModel {
     const slide = this.doc.xml(this.slidePath)!;
     const layoutPath = this.doc.layoutOf(this.slidePath);
-    const masterPath = layoutPath && this.doc.masterOf(layoutPath);
+    const masterPath = (layoutPath && this.doc.masterOf(layoutPath)) || this.doc.masterOf(this.slidePath);
     const showMaster = (d: Document | null) => d?.documentElement.getAttribute("showMasterSp") !== "0";
 
     this.bg = this.background([
@@ -462,7 +467,11 @@ class SlideParser {
       if (el.namespaceURI !== NS.p && el.namespaceURI !== NS.dsp) continue;
       // Layout/master placeholders are prompts for the slide, not slide content.
       if (inherited && phOf(el)) continue;
-      if (el.localName === "graphicFrame" && this.diagram(el, part, t)) continue;
+      if (el.localName === "graphicFrame" && this.diagram(el, part, t)) {
+        const proxy = this.shape(el, part, inherited);
+        if (proxy) { proxy.diagram = true; proxy.rect = applyTransform(proxy.rect, t); proxy.grouped = grouped; this.shapes.push(proxy); }
+        continue;
+      }
 
       if (el.localName === "grpSp") {
         const xfrm = kid(kid(el, el.namespaceURI, "grpSpPr"), NS.a, "xfrm");
@@ -624,6 +633,7 @@ class SlideParser {
       model.kind = "pic";
       model.image = this.blipImage(part, kid(kid(el, ns, "blipFill"), NS.a, "blip"));
       model.crop = readCrop(el);
+      model.media = readMedia(this.doc, part, el) ?? undefined;
       model.fill = null;
       return model;
     }
@@ -638,6 +648,10 @@ class SlideParser {
     if (el.localName === "graphicFrame") {
       const tbl = el.getElementsByTagNameNS(NS.a, "tbl")[0];
       model.kind = tbl ? "table" : "frame";
+      const rid = el.getElementsByTagNameNS(CHART_NS, "chart")[0]?.getAttributeNS(NS.r,"id");
+      const path = rid && this.doc.relTarget(part,rid);
+      const chart = path && this.doc.xml(path);
+      if (path && chart) model.chart = { path, type: Array.from(chart.getElementsByTagNameNS(CHART_NS,"plotArea")[0]?.children??[]).find(e=>e.localName.endsWith("Chart"))?.localName ?? "unknown", data: chartData(chart) };
       const styles = this.doc.xml(this.doc.relOfType("ppt/presentation.xml", "tableStyles") ?? "");
       model.table = tbl ? readTable(tbl, styles, this.colors) : null;
       model.fill = null;

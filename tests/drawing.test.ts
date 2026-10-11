@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { DOMSerializer } from "prosemirror-model";
 import { EditorState, NodeSelection } from "prosemirror-state";
 import { INLINE, placementCss, placementOf, setPlacement } from "../src/domain/docx/drawing";
@@ -18,6 +18,21 @@ const pos = (h: string, v = `<wp:positionV relativeFrom="paragraph"><wp:posOffse
 const drawingEl = (xml: string) => new DOMParser().parseFromString(`<w:r ${NSS}>${xml}</w:r>`, "application/xml").documentElement.firstElementChild!;
 
 describe("where a picture sits (Word's / Google Docs' wrap options)", () => {
+  it("keeps page-relative offsets and tight-wrap geometry when a picture is moved", () => {
+    const run = new DOMParser().parseFromString(`<w:r ${NSS}>${anchor(pos(`<wp:posOffset>952500</wp:posOffset>`, `<wp:positionV relativeFrom="page"><wp:posOffset>1905000</wp:posOffset></wp:positionV>`).replace('relativeFrom="column"', 'relativeFrom="page"') + common + `<wp:wrapTight wrapText="bothSides"><wp:wrapPolygon edited="0"><wp:start x="0" y="0"/><wp:lineTo x="100" y="100"/></wp:wrapPolygon></wp:wrapTight>` + graphic)}</w:r>`, "application/xml").documentElement;
+    const p = placementOf(run);
+    expect(p).toMatchObject({ x: 100, y: 200, hRelative: "page", vRelative: "page" });
+    const polygon = run.getElementsByTagNameNS(WP, "wrapPolygon")[0].outerHTML;
+    setPlacement(run, { ...p, x: 150, y: 250 });
+    expect(placementOf(run)).toMatchObject({ x: 150, y: 250, hRelative: "page", vRelative: "page" });
+    expect(run.getElementsByTagNameNS(WP, "wrapPolygon")[0].outerHTML).toBe(polygon);
+    expect(run.getElementsByTagNameNS(WP, "anchor")[0].getAttribute("relativeHeight")).toBe("5");
+  });
+  it("uses the actual column width and page/margin origins for placement", () => {
+    expect(placementCss({ wrap: "square", x: 180, y: 0, align: null }, 100, { columnWidth: 300 }).style).toContain("margin-right: 20px");
+    expect(placementCss({ wrap: "front", x: 100, y: 200, align: null, hRelative: "page", vRelative: "page" }, 100,
+      { columnWidth: 624, pageLeft: 96, paragraphTop: 120 }).style).toContain("left: 4px; top: 80px");
+  });
   it("reads in-line pictures as in line", () => {
     expect(placementOf(drawingEl(`<w:drawing><wp:inline>${common}${graphic}</wp:inline></w:drawing>`))).toEqual(INLINE);
   });
@@ -100,6 +115,55 @@ describe("text boxes", () => {
 });
 
 describe("picture options in the editor", () => {
+  it("keeps page-relative placement and resizing in document units when the page is scaled", async () => {
+    const { EditorView } = await import("prosemirror-view");
+    const { DocxImageView } = await import("../src/presentation/docx/docx-image-view");
+    const img = schema.nodes.image.create({ src: "data:,", width: 100, height: 50, wrap: "front", x: 200, y: 300, hRelative: "page", vRelative: "page" });
+    let picture: InstanceType<typeof DocxImageView>;
+    const view = new EditorView(document.body.appendChild(document.createElement("div")), {
+      state: EditorState.create({ doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, img)) }),
+      nodeViews: { image: (n, v, pos) => picture = new DocxImageView(n, v, pos, { replace: () => {}, editAlt: () => {} }) },
+    });
+    Object.defineProperty(view.dom, "offsetWidth", { value: 800 });
+    vi.spyOn(view.dom, "getBoundingClientRect").mockReturnValue({ width: 400, left: 0, top: 0 } as DOMRect);
+    vi.spyOn(view.dom.querySelector("p")!, "getBoundingClientRect").mockReturnValue({ left: 48, top: 60 } as DOMRect);
+    picture!.update(view.state.doc.firstChild!.firstChild!);
+    expect(picture!.dom.style.left).toBe("104px");
+    expect(picture!.dom.style.top).toBe("180px");
+    const image = picture!.dom.querySelector("img")!;
+    Object.defineProperty(image, "offsetWidth", { value: 100 });
+    Object.defineProperty(image, "offsetHeight", { value: 50 });
+    picture!.dom.querySelector(".docx-image-handle")!.dispatchEvent(new MouseEvent("mousedown", { clientX: 100, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 125 }));
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    expect(view.state.doc.firstChild!.firstChild!.attrs).toMatchObject({ width: 150, height: 75 });
+    view.destroy();
+  });
+  it("drags a floating picture in one transaction and cancels with Escape", async () => {
+    const { EditorView } = await import("prosemirror-view");
+    const { DocxImageView } = await import("../src/presentation/docx/docx-image-view");
+    const img = schema.nodes.image.create({ src: "data:,", width: 100, height: 50, wrap: "front", x: 40, y: 20 });
+    const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, img));
+    let edits = 0;
+    const view = new EditorView(document.body.appendChild(document.createElement("div")), {
+      state: EditorState.create({ doc }),
+      dispatchTransaction: tr => { edits++; view.updateState(view.state.apply(tr)); },
+      nodeViews: { image: (node, v, getPos) => new DocxImageView(node, v, getPos, { replace: () => {}, editAlt: () => {} }) },
+    });
+    const handle = view.dom.querySelector<HTMLElement>('[aria-label="Move image"]')!;
+    handle.dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 100, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 130, clientY: 150 }));
+    expect(edits).toBe(0);
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    expect(edits).toBe(1);
+    expect(view.state.doc.firstChild!.firstChild!.attrs).toMatchObject({ x: 70, y: 70 });
+    handle.dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 100, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 200, clientY: 200 }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    expect(edits).toBe(1);
+    view.destroy();
+  });
   it("places the picture and changes its wrap from the picture's bar, as Google Docs' image options", async () => {
     const { EditorView } = await import("prosemirror-view");
     const { DocxImageView } = await import("../src/presentation/docx/docx-image-view");

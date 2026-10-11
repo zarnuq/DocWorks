@@ -97,6 +97,31 @@ describe("inserts", () => {
     expect(st.doc.child(0).child(1).type.name).toBe("page_break");
   });
 
+  it("inserts an equation at the cursor and edits it in place", () => {
+    const M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+    let st = run(state([para("ab")], 2), cmd.setEquation(null, "x^2"));
+    const eq = st.doc.child(0).child(1);
+    expect(eq.type.name).toBe("opaque");
+    expect(eq.attrs.xml).toMatch(/^<m:oMath /);
+    expect(eq.attrs.text).toBe("x2");
+    st = run(st, cmd.setEquation(2, "\\frac{1}{2}"));
+    const edited = st.doc.child(0).child(1);
+    expect(edited.attrs.xml).toContain("<m:f>");
+    expect(edited.attrs.text).toBe("12");
+    expect(cmd.equationAt(st, 2)).toBe("\\frac{1}{2}");
+    // A display equation stays one.
+    st = st.apply(st.tr.setNodeMarkup(2, undefined, { ...edited.attrs, xml: `<m:oMathPara xmlns:m="${M}"><m:oMath><m:r><m:t>y</m:t></m:r></m:oMath></m:oMathPara>` }));
+    st = run(st, cmd.setEquation(2, "z"));
+    expect(st.doc.child(0).child(1).attrs.xml).toMatch(/^<m:oMathPara /);
+  });
+
+  it("removes an equation edited to nothing", () => {
+    let st = run(state([para("ab")], 2), cmd.setEquation(null, "x"));
+    st = run(st, cmd.setEquation(2, "  "));
+    expect(st.doc.child(0).textContent).toBe("ab");
+    expect(st.doc.child(0).childCount).toBe(1);
+  });
+
   it("inserts a horizontal rule after the paragraph", () => {
     const st = run(state([para("ab")], 2), cmd.insertRule);
     expect(st.doc.child(1).type.name).toBe("raw_block");

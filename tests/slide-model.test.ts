@@ -183,7 +183,7 @@ describe("SmartArt", () => {
 
   it("renders the cached diagram drawing instead of a placeholder frame", async () => {
     const s = await slide(2);
-    expect(s.shapes.some((x) => x.name === "Diagram")).toBe(false);
+    expect(s.shapes.find((x) => x.name === "Diagram")?.diagram).toBe(true);
     expect(await diagram()).toHaveLength(2);
   });
 

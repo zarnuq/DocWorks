@@ -181,6 +181,19 @@ export class DocxStyles {
     return own ? bordersOf(own.parentElement) : "none";
   }
 
+  /** CSS variables for the cell padding a table style sets (w:tblCellMar, nearest style first); "" when it sets none. */
+  cellPaddingCss(styleId: string | null): string {
+    if (!styleId) return "";
+    const mars = this.chain(styleId).map((s) => w(w(s, "tblPr"), "tblCellMar"));
+    return [["top"], ["right", "end"], ["bottom"], ["left", "start"]]
+      .map((names) => {
+        const side = mars.map((m) => names.map((n) => w(m, n)).find(Boolean)).find((el) => el && (wVal(el, "type") ?? "dxa") === "dxa");
+        return side ? `--docx-cell-${names[0]}: ${Number(wVal(side, "w")) / 20}pt` : null;
+      })
+      .filter(Boolean)
+      .join("; ");
+  }
+
   /** Whether a paragraph style keeps with the next paragraph / keeps its lines together. */
   keep(styleId: string | null): { next: boolean; lines: boolean } {
     const pPrs = this.chain(styleId).map((s) => w(s, "pPr"));

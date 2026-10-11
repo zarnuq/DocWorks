@@ -24,9 +24,23 @@ export class TFile {
 }
 export class TFolder {}
 
+/** The vault's local storage behind App.loadLocalStorage / saveLocalStorage, shared by every App. */
+export const localData = new Map<string, unknown>();
+
 export class App {
   scope = new Scope();
-  vault = { readBinary: async (_f: TFile): Promise<ArrayBuffer> => new ArrayBuffer(0), modifyBinary: async (_f: TFile, _d: ArrayBuffer) => {} };
+  loadLocalStorage(key: string): unknown {
+    return localData.get(key) ?? null;
+  }
+  saveLocalStorage(key: string, data: unknown): void {
+    if (data === null || data === undefined) localData.delete(key);
+    else localData.set(key, data);
+  }
+  vault = {
+    readBinary: async (_f: TFile): Promise<ArrayBuffer> => new ArrayBuffer(0),
+    modifyBinary: async (_f: TFile, _d: ArrayBuffer) => {},
+    on: (_name: string, _cb: Fn) => ({}),
+  };
 }
 
 export class WorkspaceLeaf {
@@ -42,6 +56,7 @@ export class FileView {
   constructor(public leaf: WorkspaceLeaf) {
     this.app = leaf.app;
   }
+  registerEvent(_ref: unknown) {}
 }
 
 export class Notice {
@@ -65,8 +80,8 @@ export class Modal {
   contentEl = createDiv();
   onClose() {}
   constructor(public app: App) {}
-  open() {}
-  close() { this.onClose(); }
+  open() { this.modalEl.addClass("test-modal"); this.modalEl.append(this.titleEl,this.contentEl); document.body.append(this.modalEl); }
+  close() { this.modalEl.remove(); this.onClose(); }
 }
 
 export class Setting {

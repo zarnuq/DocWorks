@@ -41,6 +41,8 @@ export function pageAt(state: EditorState, pos: number): number | null {
 
 export const pagesKey = new PluginKey<PagesState>("docx-pages");
 const schedulers = new WeakMap<EditorView, () => void>();
+/** Page gaps cross every column of a column section (set inline: the directory's CSS lint flags multi-column properties). */
+const SPAN_ALL = { "column-span": "all" };
 /** Height of the grey space between two pages (.docx-page-space). */
 const PAGE_SPACE = 24;
 
@@ -208,14 +210,17 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   const setup = opts.setup();
   const doc = view.state.doc;
   if (!setup) return { pages: 1, decorations: DecorationSet.empty, bands: [0, 0], pageStarts: [] };
-  const bands = bandHeights(view, setup);
-
+  const zoom = view.dom.style.zoom;
+  view.dom.setCssProps({ zoom: "1" });
+  let bands: [number, number];
   view.dom.classList.add("docx-measuring");
   let layout: PageLayout;
   try {
+    bands = bandHeights(view, setup);
     layout = layoutPages(measure(view, opts), setup.height - bands[0] - bands[1], bands[1] + PAGE_SPACE + bands[0]);
   } finally {
     view.dom.classList.remove("docx-measuring");
+    view.dom.style.zoom = zoom;
   }
   const { starts, pageNumbers, fills, spacers, pages } = layout;
   const offsets = flowBlocks(doc).map((b) => b.pos);
@@ -239,6 +244,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   };
   const spacer = (s: Spacer) => {
     const el = createDiv({ cls: "docx-page-spacer", attr: { contenteditable: "false" } });
+    el.setCssProps(SPAN_ALL);
     el.setCssProps({ "--docx-spacer": `${s.height}px` });
     if (s.gapAt !== null) {
       const gap = el.createDiv({ cls: "docx-page-gap docx-page-gap-float" });
@@ -255,6 +261,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
         offsets[i],
         () => {
           const gap = createDiv({ cls: "docx-page-gap", attr: { contenteditable: "false" } });
+          gap.setCssProps(SPAN_ALL);
           gap.appendChild(fill(k));
           gapParts(gap, pageNumbers[k + 1] - 1);
           return gap;
@@ -305,7 +312,13 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
         if (scroller) scroller.scrollTop = scrollTop;
         // The header / footer just drawn may be taller than the margins assumed: lay out again once with their real size.
         const setup = opts.setup();
-        if (setup && bandHeights(view, setup).some((h, i) => h !== next.bands[i])) schedule();
+        if (setup) {
+          const zoom = view.dom.style.zoom;
+          view.dom.setCssProps({ zoom: "1" });
+          const bands = bandHeights(view, setup);
+          view.dom.style.zoom = zoom;
+          if (bands.some((h, i) => h !== next.bands[i])) schedule();
+        }
       };
       // A timer rather than requestAnimationFrame: frames stop while the window is in the background.
       const schedule = () => {
@@ -320,5 +333,32 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
         destroy: () => window.clearTimeout(frame),
       };
     },
+  });
+}
+
+/**
+ * The paged document cut into page boxes for printing to PDF. Drawn pages can be a few px off the page height,
+ * so each box shows a copy of the editor moved up to where its page starts, clipped where the next gap begins.
+ */
+export function printPages(host: HTMLElement, pageHeight: number): HTMLElement[] {
+  const pm = host.querySelector<HTMLElement>(".ProseMirror");
+  if (!pm) return [];
+  const top = pm.getBoundingClientRect().top;
+  const zoom = Number.parseFloat(pm.style.zoom) || 1;
+  const gaps = Array.from(pm.querySelectorAll(".docx-page-space"))
+    .map((e) => e.getBoundingClientRect())
+    .sort((a, b) => a.top - b.top);
+  const starts = [0, ...gaps.map((r) => (r.bottom - top) / zoom)];
+  const ends = [...gaps.map((r) => (r.top - top) / zoom), Infinity];
+  // ponytail: one copy of the whole document per page; fine for typical documents, heavy past a few hundred pages.
+  return starts.map((start, k) => {
+    const page = createDiv({ cls: "dw-print-page" });
+    const clip = page.createDiv({ cls: "dw-print-clip" });
+    clip.setCssProps({ "--dw-print-height": `${Math.min(pageHeight, ends[k] - start)}px` });
+    const copy = clip.appendChild(host.cloneNode(true) as HTMLElement);
+    const editor = copy.querySelector<HTMLElement>(".ProseMirror");
+    if (editor) editor.setCssProps({ zoom: "1" });
+    copy.setCssProps({ "--dw-print-top": `${-start}px` });
+    return page;
   });
 }

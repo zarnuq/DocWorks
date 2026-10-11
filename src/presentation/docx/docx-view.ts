@@ -12,13 +12,17 @@ import { docxSchema as schema, Align } from "../../domain/docx/schema";
 import { FONTS, PaperTheme, promptText, showValue, Toolbar } from "../common/toolbar";
 import { pickImage } from "../common/images";
 import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, styleRenderedParagraphs } from "./docx-editor";
-import { pagesPlugin, repaginate } from "./docx-pages";
+import { pagesPlugin, printPages, repaginate } from "./docx-pages";
+import { latexToOmml, mathSpec } from "../../domain/docx/math";
+import { exportPdf } from "../common/pdf";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
 import { headerFooterType, pageSetup, PageSetup, PageSize } from "../../domain/docx/pages";
 import { attrsOf, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView } from "./docx-image-view";
 import { TextBoxView } from "./docx-textbox-view";
+import { suggestTransaction } from "../../domain/docx/suggestions";
+import { DocxRuler, outlineEntries } from "./docx-ruler";
 
 export interface DocWorksSettings {
   /** "document": pages use the document's own size; "letter": always 8.5 x 11 in. */
@@ -40,6 +44,19 @@ const STYLES: [string, string][] = [
   ["Heading 3", "Heading3"],
   ["Heading 4", "Heading4"],
   ["Quote", "Quote"],
+];
+
+/** Open a toolbar menu under its button. */
+const showBelow = (menu: Menu, button: HTMLElement) => {
+  const r = button.getBoundingClientRect();
+  menu.showAtPosition({ x: r.left, y: r.bottom });
+};
+
+/** Equation palette rows: label, LaTeX to insert. */
+const EQUATION_PALETTE: [string, string][][] = [
+  [["a/b", "\\frac{}{}"], ["√", "\\sqrt{}"], ["ⁿ√", "\\sqrt[]{}"], ["xⁿ", "^{}"], ["xₙ", "_{}"], ["∑", "\\sum_{}^{}{}"], ["∫", "\\int_{}^{}{}"], ["lim", "\\lim_{}{}"], ["( )", "\\left(\\right)"], ["[ ]", "\\left[\\right]"], ["x̂", "\\hat{}"], ["x̄", "\\overline{}"], ["vec", "\\vec{}"], ["▦", "\\begin{matrix}{}&\\\\&\\end{matrix}"]],
+  [["α", "\\alpha "], ["β", "\\beta "], ["γ", "\\gamma "], ["δ", "\\delta "], ["ε", "\\varepsilon "], ["θ", "\\theta "], ["λ", "\\lambda "], ["μ", "\\mu "], ["π", "\\pi "], ["σ", "\\sigma "], ["φ", "\\varphi "], ["ω", "\\omega "], ["Δ", "\\Delta "], ["Σ", "\\Sigma "], ["Ω", "\\Omega "]],
+  [["±", "\\pm "], ["×", "\\times "], ["÷", "\\div "], ["·", "\\cdot "], ["∞", "\\infty "], ["∂", "\\partial "], ["∇", "\\nabla "], ["≤", "\\leq "], ["≥", "\\geq "], ["≠", "\\neq "], ["≈", "\\approx "], ["≡", "\\equiv "], ["∈", "\\in "], ["⊂", "\\subset "], ["∪", "\\cup "], ["∩", "\\cap "], ["∀", "\\forall "], ["∃", "\\exists "], ["→", "\\to "], ["⇒", "\\Rightarrow "], ["⇔", "\\Leftrightarrow "]],
 ];
 
 const PAGE_VIEW_KEY = "doc-works-page-view";
@@ -81,7 +98,7 @@ export class DocxView extends FileView {
   private syncTheme: ((t: PaperTheme) => void) | null = null;
   private ctx: EditorContext | null = null;
   private setup: PageSetup | null = null;
-  private pageView = window.localStorage.getItem(PAGE_VIEW_KEY) !== "off";
+  private pageView = this.app.loadLocalStorage(PAGE_VIEW_KEY) !== "off";
   private hostEl: HTMLElement | null = null;
   private wordsEl: HTMLElement | null = null;
   private wordsTimer: number | null = null;
@@ -95,8 +112,13 @@ export class DocxView extends FileView {
   /** rId -> data URL for pictures in the header and footer parts. */
   private hfUrls = new Map<HFPart, Map<string, string>>();
   private reviewEl: HTMLElement | null = null;
-  private reviewOpen = window.localStorage.getItem(REVIEW_KEY) === "on";
+  private reviewOpen = this.app.loadLocalStorage(REVIEW_KEY) === "on";
   private reviewTimer: number | null = null;
+  private suggesting = false;
+  private ruler: DocxRuler | null = null;
+  private rulerViewport: HTMLElement | null = null;
+  private outlineEl: HTMLElement | null = null;
+  private outlineOpen = this.app.loadLocalStorage("doc-works-outline") === "on";
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -109,6 +131,11 @@ export class DocxView extends FileView {
       this.openFind();
       return false;
     });
+  }
+
+  onPaneMenu(menu: Menu, source: string): void {
+    super.onPaneMenu(menu, source);
+    menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
   }
 
   getViewType(): string {
@@ -172,7 +199,13 @@ export class DocxView extends FileView {
 
     const toolbar = this.contentEl.createDiv({ cls: "dw-toolbar" });
     const body = this.contentEl.createDiv({ cls: "docx-body" });
-    const host = (this.hostEl = body.createDiv({ cls: "docx-editor-host" }));
+    this.outlineEl = body.createDiv({ cls: "docx-outline", attr: { "aria-label": "Document outline" } });
+    this.outlineEl.toggle(this.outlineOpen);
+    const pane = body.createDiv({ cls: "docx-editor-pane" });
+    const rulerViewport = this.rulerViewport = pane.createDiv({ cls: "docx-ruler-viewport" });
+    const host = (this.hostEl = pane.createDiv({ cls: "docx-editor-host" }));
+    this.ruler = new DocxRuler(rulerViewport, () => this.editor, () => { this.applyPageSize(); if (this.editor) repaginate(this.editor); });
+    host.addEventListener("scroll", () => this.ruler?.align());
     this.reviewEl = body.createDiv({ cls: "docx-review" });
     this.reviewEl.toggle(this.reviewOpen);
     this.applyPageSize();
@@ -182,6 +215,15 @@ export class DocxView extends FileView {
     // Double-click a page's header or footer to edit it, as in Word.
     host.addEventListener("dblclick", (e) => {
       if ((e.target as HTMLElement).closest(".docx-page-first, .docx-page-head, .docx-page-foot")) this.headerFooterDialog();
+    });
+    // Click an equation to edit it, as in Google Docs.
+    host.addEventListener("click", (e) => {
+      const el = (e.target as HTMLElement).closest(".docx-math")?.parentElement;
+      const editor = this.editor;
+      if (!el || !editor || !editor.dom.contains(el)) return;
+      const at = editor.posAtDOM(el, 0);
+      const pos = [at, at - 1].find((p) => p >= 0 && cmd.equationAt(editor.state, p) !== null);
+      if (pos !== undefined) this.equationDialog(pos);
     });
     this.editor = new EditorView(host, {
       state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin()] }),
@@ -200,13 +242,19 @@ export class DocxView extends FileView {
       },
       dispatchTransaction: (tr) => {
         if (!this.editor) return;
-        this.editor.updateState(this.editor.state.apply(tr));
-        if (tr.docChanged) this.markDirty();
-        if (tr.docChanged || tr.selectionSet) {
+        if (this.suggesting) tr = suggestTransaction(tr, this.origins, docx,
+          { imageSrc: id => this.imageSrc(id) ?? urls.get(id) ?? null, hyperlinkHref: id => docx.hyperlinkHref(id) }, this.settings.author);
+        const applied = this.editor.state.applyTransaction(tr);
+        this.editor.updateState(applied.state);
+        const changed = applied.transactions.some(t => t.docChanged);
+        if (changed) this.markDirty();
+        if (changed || tr.selectionSet) {
           this.scheduleWordCount();
           this.updateFormatControls();
+          this.ruler?.update();
+          this.renderOutline();
         }
-        if (tr.docChanged) this.scheduleReview();
+        if (changed) this.scheduleReview();
       },
       handleDOMEvents: {
         click: (_view, event) => {
@@ -234,10 +282,15 @@ export class DocxView extends FileView {
     this.buildToolbar(toolbar, ctx);
     this.setPaperTheme(this.paperTheme);
     window.addEventListener("blur", this.onWindowBlur);
-    this.resizeObserver = new ResizeObserver(() => this.editor && repaginate(this.editor));
+    this.resizeObserver = new ResizeObserver(() => {
+      this.fitDocument();
+    });
     this.resizeObserver.observe(host);
     this.updateWordCount();
     this.renderReview();
+    this.ruler.update();
+    this.fitDocument();
+    this.renderOutline();
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
@@ -248,6 +301,8 @@ export class DocxView extends FileView {
     await this.requestSave();
     await this.saving;
     this.editor?.destroy();
+    this.ruler?.destroy();
+    this.ruler = null;
     this.editor = null;
     this.docx = null;
   }
@@ -255,7 +310,9 @@ export class DocxView extends FileView {
   /** Page geometry from the document, or Letter when the page size setting says so; re-lays out open pages. */
   applyPageSize(): void {
     if (!this.docx || !this.hostEl) return;
-    const st = (this.setup = pageSetup(this.docx.body, this.settings.pageSize));
+    const finalSectPr = this.editor?.state.doc.attrs.sectPr as string | null | undefined;
+    const body = finalSectPr ? new DOMParser().parseFromString(`<body>${finalSectPr}</body>`, "application/xml").documentElement : this.docx.body;
+    const st = (this.setup = pageSetup(body, this.settings.pageSize));
     this.pageWidth = st.width - st.left - st.right;
     this.hostEl.setCssProps({
       "--docx-page-width": `${this.pageWidth}px`,
@@ -267,6 +324,21 @@ export class DocxView extends FileView {
       "--docx-hf-footer": `${st.footer}px`,
     });
     if (this.editor) repaginate(this.editor);
+    this.fitDocument();
+  }
+
+  private fitDocument(): void {
+    const editor = this.editor, host = this.hostEl, setup = this.setup;
+    if (!editor || !host || !setup) return;
+    const padding = getComputedStyle(host);
+    const available = host.clientWidth - (Number.parseFloat(padding.paddingLeft) || 0) - (Number.parseFloat(padding.paddingRight) || 0);
+    const zoom = this.pageView && available > 0 ? Math.min(1, available / setup.width) : 1;
+    const value = String(zoom);
+    const changed = editor.dom.style.zoom !== value;
+    editor.dom.style.zoom = value;
+    if (this.ruler) this.ruler.dom.style.zoom = value;
+    this.ruler?.align();
+    if (changed) repaginate(editor);
   }
 
   /** Force an immediate save, e.g. before Obsidian quits. */
@@ -342,6 +414,34 @@ export class DocxView extends FileView {
     const sep = () => tb.gap();
     const m = schema.marks;
 
+    const mode = tb.select("Editing mode", "Mode", [["Editing", "editing"], ["Suggesting", "suggesting"]], value => void (async () => {
+      if (value === "suggesting" && !await this.author()) { mode.value = "editing"; return; }
+      this.suggesting = value === "suggesting";
+      this.contentEl.toggleClass("is-suggesting", this.suggesting);
+      if (this.suggesting) this.setReview(true);
+      this.editor?.focus();
+    })());
+    mode.value = this.suggesting ? "suggesting" : "editing";
+    const outline = tb.icon("list-tree", "Document outline", () => {
+      this.outlineOpen = !this.outlineOpen;
+      this.app.saveLocalStorage("doc-works-outline", this.outlineOpen ? "on" : "off");
+      this.outlineEl?.toggle(this.outlineOpen);
+      outline.toggleClass("is-active", this.outlineOpen);
+      this.renderOutline();
+      this.fitDocument();
+    });
+    outline.toggleClass("is-active", this.outlineOpen);
+    const ruler = tb.icon("ruler", "Show ruler", () => {
+      if (!this.ruler) return;
+      const shown = this.rulerViewport?.style.display !== "none";
+      this.rulerViewport?.toggle(!shown);
+      ruler.toggleClass("is-active", !shown);
+      this.app.saveLocalStorage("doc-works-ruler", shown ? "off" : "on");
+    });
+    const showRuler = this.app.loadLocalStorage("doc-works-ruler") !== "off";
+    this.rulerViewport?.toggle(showRuler);
+    ruler.toggleClass("is-active", showRuler);
+
     btn("↶", "Undo (Ctrl+Z)", undo);
     btn("↷", "Redo (Ctrl+Y)", redo);
     sep();
@@ -371,9 +471,9 @@ export class DocxView extends FileView {
     action("Paragraph…", "Spacing and indents", () => this.paragraphDialog());
     tb.icon("link", "Add, change or remove a link (Ctrl+K; Ctrl+click follows it)", () => void this.editLink());
     sep();
-    action("Table ▾", "Table", () => this.tableMenu());
+    const tableBtn = action("Table ▾", "Table", () => this.tableMenu(tableBtn));
     action("Image", "Insert image", () => pickImage((f) => void this.insertImage(f)));
-    action("Break ▾", "Page, column and section breaks", () => {
+    const breakBtn = action("Break ▾", "Page, column and section breaks", () => {
       // As Google Docs' Insert › Break.
       const menu = new Menu();
       const entry = (title: string, command: Command) => menu.addItem((i) => i.setTitle(title).onClick(() => run(command)));
@@ -381,23 +481,20 @@ export class DocxView extends FileView {
       entry("Column break", cmd.insertColumnBreak);
       entry("Section break (next page)", cmd.insertSectionBreak("nextPage"));
       entry("Section break (continuous)", cmd.insertSectionBreak("continuous"));
-      const r = this.contentEl.querySelector(".dw-toolbar")!.getBoundingClientRect();
-      menu.showAtPosition({ x: r.left + r.width / 2, y: r.bottom });
+      showBelow(menu, breakBtn);
     });
     action("Columns…", "Columns for this section or the selection", () => this.columnsDialog());
     btn("Line", "Insert horizontal line", cmd.insertRule);
+    action("Equation", "Insert an equation", () => this.equationDialog(null));
     sep();
     action("Header & footer", "Edit the header and footer", () => this.headerFooterDialog());
     const pagesBtn = tb.icon("book-open", "Page view: show page breaks, headers and footers", () => {
-      this.pageView = !this.pageView;
-      window.localStorage.setItem(PAGE_VIEW_KEY, this.pageView ? "on" : "off");
-      pagesBtn.toggleClass("is-active", this.pageView);
-      this.hostEl?.toggleClass("is-paged", this.pageView);
-      if (this.editor) repaginate(this.editor);
+      this.setPageView(!this.pageView);
+      this.app.saveLocalStorage(PAGE_VIEW_KEY, this.pageView ? "on" : "off");
     });
     pagesBtn.toggleClass("is-active", this.pageView);
     tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
-    action("Contents ▾", "Table of contents", () => {
+    const tocBtn = action("Contents ▾", "Table of contents", () => {
       const menu = new Menu();
       menu.addItem((i) => i.setTitle("Insert table of contents").onClick(() => {
         this.docx?.prepareToc();
@@ -406,8 +503,7 @@ export class DocxView extends FileView {
       menu.addItem((i) => i.setTitle("Update table of contents").onClick(() => {
         if (this.editor && !cmd.updateToc(this.editor.state, this.editor.dispatch)) new Notice("This document has no table of contents.");
       }));
-      const r = this.contentEl.querySelector(".dw-toolbar")!.getBoundingClientRect();
-      menu.showAtPosition({ x: r.left + r.width / 2, y: r.bottom });
+      showBelow(menu, tocBtn);
     });
     action("Comment", "Comment on the selected text", () => void this.addComment());
     action("Footnote", "Insert a footnote at the cursor", () => void this.addFootnote());
@@ -429,6 +525,29 @@ export class DocxView extends FileView {
   // ---------------------------------------------------------------------------
 
   /** Font and Size show what's at the cursor: the text's own formatting, else its paragraph (and table) style. */
+  private renderOutline(): void {
+    const editor = this.editor, panel = this.outlineEl;
+    if (!editor || !panel || !this.outlineOpen) return;
+    panel.empty();
+    panel.createDiv({ cls: "docx-review-title", text: "Document outline" });
+    const entries = outlineEntries(editor.state.doc);
+    if (!entries.length) panel.createDiv({ cls: "docx-review-empty", text: "Headings appear here." });
+    const active = [...entries].reverse().find(e => e.pos <= editor.state.selection.from)?.pos;
+    for (const entry of entries) {
+      const button = panel.createEl("button", { text: entry.text, cls: "docx-outline-entry", attr: { title: entry.text } });
+      button.style.paddingLeft = `${8 + (entry.level - 1) * 12}px`;
+      button.toggleClass("is-active", entry.pos === active);
+      button.addEventListener("click", () => {
+        editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, entry.pos)));
+        editor.focus();
+        const heading = editor.nodeDOM(entry.pos - 1);
+        if (heading instanceof HTMLElement && this.hostEl) {
+          this.hostEl.scrollTop = Math.max(0, this.hostEl.scrollTop + heading.getBoundingClientRect().top - this.hostEl.getBoundingClientRect().top - 16);
+        }
+      });
+    }
+  }
+
   private updateFormatControls(): void {
     const editor = this.editor;
     if (!editor || !this.ctx || !this.fontSelect || !this.sizeSelect) return;
@@ -573,9 +692,10 @@ export class DocxView extends FileView {
   private setReview(open: boolean): void {
     this.reviewOpen = open;
     this.reviewEl?.toggle(open);
-    window.localStorage.setItem(REVIEW_KEY, open ? "on" : "off");
+    this.app.saveLocalStorage(REVIEW_KEY, open ? "on" : "off");
     this.contentEl.querySelector('[aria-label^="Review panel"]')?.toggleClass("is-active", open);
     this.renderReview();
+    this.fitDocument();
   }
 
   /** Write the editor into the XML, change the XML, and load the result back (undo history restarts). */
@@ -631,11 +751,27 @@ export class DocxView extends FileView {
     const ranges = commentRanges(doc);
     const comments = docx.comments();
     if (!comments.length) panel.createDiv({ cls: "docx-review-empty", text: "Select text and use Comment to add one." });
-    for (const c of comments) {
+    for (const c of comments.filter(c => !c.parentId)) {
+      const thread = panel.createDiv({ cls: `docx-comment-thread${c.resolved ? " is-resolved" : ""}` });
       const range = ranges.get(c.id);
       const quote = range ? doc.textBetween(range.from, range.to, " ").slice(0, 60) : "";
-      card(panel, `${c.author}${c.date ? ` · ${new Date(c.date).toLocaleDateString()}` : ""}${quote ? ` · “${quote}”` : ""}`, c.text, (t) => docx.setCommentText(c.id, t), [
+      card(thread, `${c.resolved ? "Resolved · " : ""}${c.author}${c.date ? ` · ${new Date(c.date).toLocaleDateString()}` : ""}${quote ? ` · “${quote}”` : ""}`, c.text, (t) => docx.setCommentText(c.id, t), [
         ...(range ? ([["Go to", () => goTo(range.from, range.to)]] as [string, () => void][]) : []),
+        [c.resolved ? "Reopen" : "Resolve", () => {
+          docx.setCommentResolved(c.id, !c.resolved);
+          this.markDirty();
+          this.renderReview();
+        }],
+        ["Reply", () => void (async () => {
+          const text = await promptText(this.app, "Reply to comment", "");
+          if (!text?.trim()) return;
+          const author = await this.author();
+          if (!author || this.docx !== docx) return;
+          docx.replyToComment(c.id, text.trim(), author);
+          docx.setCommentResolved(c.id, false);
+          this.markDirty();
+          this.renderReview();
+        })()],
         [
           "Delete",
           () => {
@@ -646,6 +782,15 @@ export class DocxView extends FileView {
           },
         ],
       ]);
+      for (const reply of comments.filter(r => r.parentId === c.id)) {
+        const replies = thread.createDiv({ cls: "docx-comment-reply" });
+        card(replies, `${reply.author}${reply.date ? ` · ${new Date(reply.date).toLocaleDateString()}` : ""}`, reply.text,
+          text => docx.setCommentText(reply.id, text), [["Delete reply", () => {
+            docx.deleteComment(reply.id);
+            this.markDirty();
+            this.renderReview();
+          }]]);
+      }
     }
 
     // Footnotes, in reference order
@@ -848,7 +993,85 @@ export class DocxView extends FileView {
     modal.open();
   }
 
-  private tableMenu(): void {
+  /** Insert an equation (`pos` null) or edit the one at `pos`, typed as LaTeX with a live preview. */
+  private equationDialog(pos: number | null): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText(pos === null ? "Insert equation" : "Edit equation");
+    modal.modalEl.addClass("docx-equation-modal");
+    const input = modal.contentEl.createEl("textarea", {
+      cls: "docx-equation-input",
+      attr: { rows: "3", spellcheck: "false", placeholder: "Type LaTeX, e.g. \\frac{a}{b}, x^2, \\alpha, \\sum_{i=1}^{n}" },
+    });
+    input.value = pos === null ? "" : (cmd.equationAt(editor.state, pos) ?? "");
+    const preview = modal.contentEl.createDiv({ cls: "docx-equation-preview" });
+    const draw = () => preview.replaceChildren(DOMSerializer.renderSpec(document, mathSpec(latexToOmml(input.value))).dom);
+    input.addEventListener("input", draw);
+    // Symbols and structures, as in Google Docs' equation toolbar; the cursor lands in the first empty box.
+    const insert = (text: string) => {
+      const at = input.selectionStart;
+      input.setRangeText(text, at, input.selectionEnd, "end");
+      const box = text.indexOf("{}");
+      if (box >= 0) input.setSelectionRange(at + box + 1, at + box + 1);
+      input.focus();
+      draw();
+    };
+    const palette = modal.contentEl.createDiv({ cls: "docx-equation-palette" });
+    for (const row of EQUATION_PALETTE) {
+      const line = palette.createDiv({ cls: "docx-equation-row" });
+      for (const [label, text] of row) line.createEl("button", { text: label, attr: { "aria-label": text.trim() } }).addEventListener("click", () => insert(text));
+    }
+    const apply = (latex: string) => {
+      cmd.setEquation(pos, latex)(editor.state, editor.dispatch);
+      modal.close();
+      editor.focus();
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        apply(input.value);
+      }
+    });
+    const buttons = new Setting(modal.contentEl).addButton((b) =>
+      b
+        .setButtonText(pos === null ? "Insert" : "Save")
+        .setCta()
+        .onClick(() => apply(input.value))
+    );
+    if (pos !== null) buttons.addButton((b) => b.setButtonText("Delete").onClick(() => apply("")));
+    buttons.addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.open();
+    draw();
+    input.focus();
+  }
+
+  private setPageView(on: boolean): void {
+    this.pageView = on;
+    this.contentEl.querySelector('[aria-label^="Page view"]')?.toggleClass("is-active", on);
+    this.hostEl?.toggleClass("is-paged", on);
+    if (this.editor) repaginate(this.editor);
+  }
+
+  /** Save the document as a PDF, laid out on its pages as in the page view. */
+  async exportPdf(): Promise<void> {
+    if (!this.editor || !this.hostEl || !this.file || !this.setup) return;
+    const paged = this.pageView;
+    if (!paged) {
+      this.setPageView(true);
+      // ponytail: waits for the page layout's timer (60 ms, run twice when the header / footer size changes).
+      await new Promise((r) => window.setTimeout(r, 400));
+    }
+    try {
+      const { width, height } = this.setup;
+      const pages = printPages(this.hostEl, height);
+      await exportPdf(this.app, this.file, pages, { width, height }, "docx-theme-light");
+    } finally {
+      if (!paged) this.setPageView(false);
+    }
+  }
+
+  private tableMenu(anchor: HTMLElement): void {
     const menu = new Menu();
     const item = (title: string, command: Command) =>
       menu.addItem((i) =>
@@ -905,8 +1128,7 @@ export class DocxView extends FileView {
     item("Delete row", cmd.deleteRow);
     item("Delete column", cmd.deleteColumn);
     item("Delete table", cmd.deleteTable);
-    const rect = this.contentEl.querySelector(".dw-toolbar")!.getBoundingClientRect();
-    menu.showAtPosition({ x: rect.left + rect.width / 2, y: rect.bottom });
+    showBelow(menu, anchor);
   }
 
   // ---------------------------------------------------------------------------

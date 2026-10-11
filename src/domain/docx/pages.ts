@@ -121,8 +121,11 @@ type Flow = { used: number; page: number };
 export function layoutPages(blocks: TopBlock[], avail: number, gap: number): PageLayout {
   const out: PageLayout = { starts: [], pageNumbers: [1], fills: [], spacers: [], pages: 1 };
   const shown = new Set<number>();
+  let columnFlow: { count: number; base: number; firstPage: number } | null = null;
+  const capacity = (page: number) => columnFlow ? columnFlow.count * (avail - (page === columnFlow.firstPage ? columnFlow.base : 0)) : avail;
   const addSpacer = (pos: number, used: number, left: number, page: number) => {
-    const blank = Math.max(0, avail - used);
+    const drawnUsed = columnFlow ? used / columnFlow.count + (page === columnFlow.firstPage ? columnFlow.base : 0) : used;
+    const blank = Math.max(0, avail - drawnUsed);
     out.spacers.push({ pos, height: blank + gap, gapAt: shown.has(page) ? null : blank, left, page });
     shown.add(page);
   };
@@ -130,13 +133,13 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
   /** Flow a paragraph from `used` on `page`; null when it has to move to the next page whole. */
   const flowText = (u: Extract<Unit, { kind: "text" }>, used: number, page: number, keepLines = false): Flow | null => {
     const lines = u.lines;
-    if (keepLines && used > 0 && used + u.height > avail && lines.some((l) => used + l.bottom > avail)) return null;
+    if (keepLines && used > 0 && used + u.height > capacity(page) && lines.some((l) => used + l.bottom > capacity(page))) return null;
     let start = 0;
     let startTop = 0;
     let base = used;
-    while (base + u.height - startTop > avail) {
+    while (base + u.height - startTop > capacity(page)) {
       let k = start;
-      while (k < lines.length && base + lines[k].bottom - startTop <= avail) k++;
+      while (k < lines.length && base + lines[k].bottom - startTop <= capacity(page)) k++;
       if (k >= lines.length) break; // only the spacing after it overflows
       const nice = lines.length - start >= 2 * MIN_LINES;
       if (nice) k = Math.min(k, lines.length - MIN_LINES);
@@ -159,7 +162,7 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
     let moved = false;
     cell.children.forEach((child, i) => {
       // Tables inside a cell move whole.
-      const r = child.kind === "text" ? flowText(child, cu, page) : cu > 0 && cu + child.height > avail ? null : { used: cu + child.height, page };
+      const r = child.kind === "text" ? flowText(child, cu, page) : cu > 0 && cu + child.height > capacity(page) ? null : { used: cu + child.height, page };
       if (r) return ({ used: cu, page } = r);
       if (i === 0) moved = true;
       addSpacer(child.pos, cu, cell.left, page++);
@@ -172,11 +175,11 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
 
   const flowTable = (u: Extract<Unit, { kind: "table" }>, used: number, page: number): Flow | null => {
     for (const [i, row] of u.rows.entries()) {
-      if (used + row.height <= avail) {
+      if (used + row.height <= capacity(page)) {
         used += row.height;
         continue;
       }
-      if (row.cantSplit && used > 0 && row.height <= avail) {
+      if (row.cantSplit && used > 0 && row.height <= capacity(page)) {
         // The whole row moves: a spacer opens each of its cells.
         if (i === 0) return null;
         for (const c of row.cells) if (c.children.length) addSpacer(c.children[0].pos, used + c.padTop, c.left, page);
@@ -236,34 +239,25 @@ export function layoutPages(blocks: TopBlock[], avail: number, gap: number): Pag
       };
       if (j > first && blocks[j - 1].breakAfter) end();
       const u = b.unit;
-      let startTop = 0;
-      if (u.kind === "text") {
-        // A paragraph runs on to the next page of columns, keeping two lines on each side (a spacer carries the gap).
-        let start = 0;
-        while (text + u.height - startTop > count * column) {
-          const lines = u.lines;
-          let k = start;
-          while (k < lines.length && text + lines[k].bottom - startTop <= count * column) k++;
-          if (k >= lines.length) break;
-          const nice = lines.length - start >= 2 * MIN_LINES;
-          if (nice) k = Math.min(k, lines.length - MIN_LINES);
-          if (!nice || k - start < MIN_LINES) {
-            if (start === 0 && (text > 0 || used > 0)) {
-              end();
-              continue;
-            }
-            k = Math.max(k, start + 1);
-            if (k >= lines.length) break;
-          }
-          addSpacer(lines[k].pos, used + (text + lines[k].top - startTop) / count, u.left, page++);
-          used = 0;
-          column = avail;
-          text = 0;
-          startTop = lines[k].top;
-          start = k;
+      const startTop = 0;
+      if (u.kind === "text" || u.kind === "table") {
+        columnFlow = { count, base: used, firstPage: page };
+        const run = () => u.kind === "text" ? flowText(u, text, page, b.keepLines) : flowTable(u, text, page);
+        let result = run();
+        if (!result) {
+          columnFlow = null;
+          end();
+          columnFlow = { count, base: 0, firstPage: page };
+          result = run()!;
         }
-      } else if (text + u.height > count * column && (text > 0 || used > 0)) end();
-      text += u.height - startTop;
+        if (result.page !== page) { used = 0; column = avail; }
+        page = result.page;
+        text = result.used;
+        columnFlow = null;
+      } else {
+        if (text + u.height > count * column && (text > 0 || used > 0)) end();
+        text += u.height - startTop;
+      }
       if (b.columnBreak && text % column) text = Math.min(count * column, Math.ceil(text / column) * column);
     }
     used += text / count;

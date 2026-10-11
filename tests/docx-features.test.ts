@@ -588,6 +588,24 @@ describe("word tables", () => {
 });
 
 describe("comments", () => {
+  it("round-trips replies and resolution, retaining thread identities when text changes", async () => {
+    const docx = await DocxDocument.load(await blankDocx());
+    const parent = docx.addComment("Question", "Ada");
+    const reply = docx.replyToComment(parent, "Answer", "Bob");
+    docx.setCommentResolved(parent, true);
+    docx.setCommentText(parent, "Question\nupdated");
+    docx.setCommentText(reply, "Answer\nupdated");
+    let back = await DocxDocument.load(await docx.save());
+    expect(back.comments().find(c => c.id === parent)?.resolved).toBe(true);
+    expect(back.comments().find(c => c.id === reply)?.parentId).toBe(parent);
+    back.setCommentResolved(parent, false);
+    back = await DocxDocument.load(await back.save());
+    expect(back.comments().find(c => c.id === parent)?.resolved).toBe(false);
+    back.deleteComment(parent);
+    expect(back.comments()).toEqual([]);
+    expect(back.xml("word/commentsExtended.xml")!.documentElement.children).toHaveLength(0);
+  });
+
   it("adds, edits and deletes comments in comments.xml", async () => {
     const docx = await DocxDocument.load(await blankDocx());
     expect(docx.comments()).toEqual([]);
@@ -851,7 +869,7 @@ describe("display fidelity", () => {
     expect(math.attrs.text).toBe("K5");
     const dom = ser(math);
     expect(dom.textContent).toBe("K5");
-    expect(dom.querySelector("sub")?.textContent).toBe("5");
+    expect(dom.querySelector("msub")?.lastElementChild?.textContent).toBe("5");
   });
 });
 

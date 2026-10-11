@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
-import { App, TFile, WorkspaceLeaf } from "./obsidian-stub";
+import { App, localData, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { PptxView } from "../src/presentation/pptx/pptx-view";
 import { DocxView, DocWorksSettings } from "../src/presentation/docx/docx-view";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
+import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
+import { readAnimations, readTransition } from "../src/domain/pptx/animation";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 import { fixture } from "./helpers";
@@ -28,6 +30,62 @@ afterEach(() => {
   document.body.empty();
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("PptxView motion editor", () => {
+  it("keeps slide creation in the Slide dropdown without a duplicate toolbar button", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "motion.pptx");
+    const labels = Array.from(view.contentEl.querySelectorAll(".dw-toolbar button")).map((b) => b.textContent);
+    expect(labels).toContain("Slide ▾");
+    expect(labels).not.toContain("New slide");
+    await view.onUnloadFile(file);
+  });
+  it("adds animations from the toolbar, supports undo/redo and persists them for present mode", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const saved = vi.spyOn(view.app.vault, "modifyBinary");
+    const file = await open(view, "motion.pptx");
+    const v = view as any;
+    v.setSelection([v.rendered.find((r: any) => !r.shape.inherited && r.shape.kind === "sp").shape.el]);
+    const button = (name: string) => Array.from(view.contentEl.querySelectorAll("button")).find((b) => b.textContent === name)!;
+    button("Motion").click();
+    expect(saved).not.toHaveBeenCalled();
+    expect(button("Add animation").disabled).toBe(false);
+    button("Add animation").click();
+    expect(readAnimations(v.currentSlideXml())).toHaveLength(1);
+    expect(view.contentEl.querySelector(".pptx-props-heading")!.textContent).toBe("Motion");
+    v.undo();
+    expect(readAnimations(v.currentSlideXml())).toEqual([]);
+    v.redo();
+    expect(readAnimations(v.currentSlideXml())).toHaveLength(1);
+    await view.requestSave();
+    expect(saved).toHaveBeenCalled();
+    const bytes = saved.mock.calls.at(-1)![1];
+    const reloaded = await PptxDocument.load(bytes);
+    expect(readAnimations(reloaded.xml(reloaded.slides()[0].path)!)).toHaveLength(1);
+    view.startPresentation(false);
+    const overlay = document.querySelector<HTMLElement>(".dw-show")!;
+    expect(overlay.querySelector<HTMLElement>(".pptx-shape[style*='hidden']")).not.toBeNull();
+    overlay.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    overlay.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await view.onUnloadFile(file);
+  });
+
+  it("sets transitions, applies only their visual settings to all slides and undoes in one step", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "motion.pptx");
+    const v = view as any;
+    v.openMotion();
+    const field = view.contentEl.querySelector<HTMLSelectElement>('[data-field="Transition"]')!;
+    field.value = "push";
+    field.dispatchEvent(new Event("change"));
+    expect(readTransition(v.currentSlideXml())).toMatchObject({ type: "push", dur: 500 });
+    Array.from(view.contentEl.querySelectorAll("button")).find((b) => b.textContent === "Apply to all slides")!.click();
+    expect(v.doc.slides().every((s: any) => readTransition(v.doc.xml(s.path))?.type === "push")).toBe(true);
+    v.undo();
+    expect(readTransition(v.doc.xml(v.doc.slides()[1].path))).toBeNull();
+    await view.onUnloadFile(file);
+  });
 });
 
 describe("PptxView switching files", () => {
@@ -149,9 +207,21 @@ describe("PptxView fit", () => {
   });
 });
 
+describe("view preferences", () => {
+  it("keep the panels' open state in the vault's storage, not the browser's", async () => {
+    const view = mount(DocxView, "sample.docx");
+    await open(view, "a.docx");
+    (view as any).setReview(true);
+    expect(localData.get("doc-works-review-panel")).toBe("on");
+    expect(window.localStorage.getItem("doc-works-review-panel")).toBeNull();
+    expect((mount(DocxView, "sample.docx") as any).reviewOpen).toBe(true);
+    localData.clear();
+  });
+});
+
 describe("DocxView switching files", () => {
   it("pending word-count and review timers don't fire after unload", async () => {
-    window.localStorage.setItem("doc-works-review-panel", "on");
+    localData.set("doc-works-review-panel", "on");
     const view = mount(DocxView, "sample.docx");
     const a = await open(view, "a.docx");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -164,7 +234,7 @@ describe("DocxView switching files", () => {
     vi.runAllTimers();
     expect(words).not.toHaveBeenCalled();
     expect(review).not.toHaveBeenCalled();
-    window.localStorage.removeItem("doc-works-review-panel");
+    localData.delete("doc-works-review-panel");
   });
 });
 
@@ -259,6 +329,44 @@ describe("DocxView header and footer", () => {
 });
 
 describe("DocxView comment author", () => {
+  it("records editor suggestions and persists them, and displays navigable headings and a ruler", async () => {
+    const app = new App();
+    app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
+    const saved = vi.spyOn(app.vault, "modifyBinary");
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { pageSize: "document", author: "Ada" });
+    document.body.appendChild(view.containerEl);
+    const file = await open(view, "suggestions.docx");
+    const v = view as any;
+    const mode = view.contentEl.querySelector<HTMLSelectElement>('[aria-label="Editing mode"]')!;
+    expect(mode.value).toBe("editing");
+    expect(saved).not.toHaveBeenCalled();
+    mode.value = "suggesting";
+    mode.dispatchEvent(new Event("change"));
+    await Promise.resolve();
+    await Promise.resolve();
+    v.editor.dispatch(v.editor.state.tr.insertText("Proposed ", 1));
+    v.renderReview();
+    expect(view.contentEl.querySelector(".docx-review")!.textContent).toContain("Inserted by Ada");
+    expect(view.contentEl.querySelector('[aria-label="Document ruler"]')).not.toBeNull();
+    const host = view.contentEl.querySelector(".docx-editor-host")!;
+    expect(host.querySelector(".docx-ruler")).toBeNull();
+    expect(host.previousElementSibling!.className).toBe("docx-ruler-viewport");
+    const outline = view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Document outline"]');
+    // Toolbar icons use title rather than aria-label.
+    (outline ?? view.contentEl.querySelector<HTMLButtonElement>('button[title="Document outline"]'))!.click();
+    expect(view.contentEl.querySelectorAll(".docx-outline-entry").length).toBeGreaterThan(0);
+    const heading = v.editor.dom.querySelector("p");
+    vi.spyOn(v.editor, "nodeDOM").mockReturnValue(heading);
+    vi.spyOn(heading, "getBoundingClientRect").mockReturnValue({ top: 1000 } as DOMRect);
+    vi.spyOn(host, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+    host.scrollTop = 50;
+    view.contentEl.querySelector<HTMLButtonElement>(".docx-outline-entry")!.click();
+    expect(host.scrollTop).toBe(934);
+    await view.requestSave();
+    const back = await DocxDocument.load(saved.mock.calls.at(-1)![1]);
+    expect(back.body.getElementsByTagNameNS(W, "ins")[0].textContent).toBe("Proposed ");
+    await view.onUnloadFile(file);
+  });
   it("signs comments with the author name from settings", async () => {
     const settings: DocWorksSettings = { pageSize: "document", author: "Ada Lovelace" };
     const app = new App();
@@ -327,4 +435,32 @@ describe("current font and size in the toolbar", () => {
     expect(font.value).toBe("Calibri");
     expect(size.value).toBe("44");
   });
+});
+
+describe("slide authoring additions",()=>{
+ it("edits the master canvas and theme without saving on open",async()=>{
+  const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
+  const saved=vi.spyOn(view.app.vault,"modifyBinary");
+  Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Theme")!.click();expect(saved).not.toHaveBeenCalled();
+  const select=view.contentEl.querySelector<HTMLSelectElement>('[aria-label="Edit master or layout"]')!;
+  select.value=select.options[1].value;select.dispatchEvent(new Event("change"));
+  const before=v.currentSlideXml().getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main","sp").length;
+  Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Text box")!.click();
+  expect(v.currentSlideXml().getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main","sp").length).toBe(before+1);
+  v.undo();expect(v.currentSlideXml().getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main","sp").length).toBe(before);
+  await view.onUnloadFile(file);
+ });
+ it("inserts an editable chart from its data grid and supports undo",async()=>{
+  const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
+  Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Chart")!.click();
+  const modal=document.querySelector<HTMLElement>(".test-modal")!;
+  const field=modal.querySelector<HTMLInputElement>('input[aria-label="Series 1, row 1"]')!;field.value="42";field.dispatchEvent(new Event("input"));
+  Array.from(modal.querySelectorAll("button")).find(b=>b.textContent==="Insert chart")!.click();
+  await vi.waitFor(()=>expect(v.model.shapes.find((s:any)=>s.chart)?.chart.data.series[0].values[0]).toBe(42));
+  expect(view.contentEl.querySelector('svg[aria-label="Chart"]')).not.toBeNull();
+  const shape=v.model.shapes.find((s:any)=>s.chart);v.setSelection([shape.el]);
+  expect(view.contentEl.textContent).toContain("Edit chart data");
+  v.undo();expect(v.model.shapes.some((s:any)=>s.chart)).toBe(false);
+  await view.onUnloadFile(file);
+ });
 });

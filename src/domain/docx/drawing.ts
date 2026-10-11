@@ -13,6 +13,10 @@ export interface Placement {
   y: number;
   /** Horizontal alignment instead of an offset. */
   align: "left" | "right" | "center" | null;
+  hRelative?: string | null;
+  vRelative?: string | null;
+  /** Distance between the picture and surrounding text, in px. */
+  distances?: { top: number; right: number; bottom: number; left: number } | null;
 }
 
 export const INLINE: Placement = { wrap: "inline", x: 0, y: 0, align: null };
@@ -34,23 +38,46 @@ export function placementOf(drawing: Element | null): Placement {
   const wrap: Wrap = has("wrapSquare") || has("wrapTight") || has("wrapThrough") ? "square" : has("wrapTopAndBottom") ? "topBottom" : behind ? "behind" : "front";
   const offset = (local: string) => Math.round(Number(kid(kid(frame, NS.wp, local), NS.wp, "posOffset")?.textContent ?? 0) / EMU_PER_PX);
   const align = kid(kid(frame, NS.wp, "positionH"), NS.wp, "align")?.textContent?.trim();
-  // ponytail: offsets from the page or margin are taken from the column / paragraph; fine for the usual Word and Docs output.
-  return { wrap, x: offset("positionH"), y: offset("positionV"), align: align === "left" || align === "right" || align === "center" ? align : null };
+  const hRelative = kid(frame, NS.wp, "positionH")?.getAttribute("relativeFrom");
+  const vRelative = kid(frame, NS.wp, "positionV")?.getAttribute("relativeFrom");
+  const distances = Object.fromEntries(["top", "right", "bottom", "left"].map(side => [side, Number(frame.getAttribute(`dist${side[0].toUpperCase()}`) ?? 0) / EMU_PER_PX])) as NonNullable<Placement["distances"]>;
+  return { wrap, x: offset("positionH"), y: offset("positionV"), align: align === "left" || align === "right" || align === "center" ? align : null,
+    ...(hRelative && hRelative !== "column" ? { hRelative } : {}), ...(vRelative && vRelative !== "paragraph" ? { vRelative } : {}),
+    ...(distances.top || distances.bottom || distances.left !== 12 || distances.right !== 12 ? { distances } : {}) };
+}
+
+/** Omit schema defaults so a size/alt edit cannot accidentally rewrite an imported anchor. */
+export function placementAttrs(p: Placement): Placement {
+  return { wrap: p.wrap, x: p.x, y: p.y, align: p.align,
+    ...(p.hRelative && p.hRelative !== "column" ? { hRelative: p.hRelative } : {}),
+    ...(p.vRelative && p.vRelative !== "paragraph" ? { vRelative: p.vRelative } : {}),
+    ...(p.distances ? { distances: p.distances } : {}) };
 }
 
 /** Width of the usual text column (6.5 in), for deciding which side a wrapped picture floats to. */
 const COLUMN = 624;
 
 /** CSS for a placement: floats for wrapped text, a block for break text, absolute for behind / in front. */
-export function placementCss(p: Placement, width = 0): { cls: string; style: string } {
+export interface PlacementGeometry { columnWidth?: number; pageLeft?: number; marginLeft?: number; pageTop?: number; paragraphTop?: number; }
+export function placementCss(p: Placement, width = 0, geometry: PlacementGeometry = {}): { cls: string; style: string } {
+  const column = geometry.columnWidth ?? COLUMN;
+  p = { ...p, x: p.x - (p.hRelative === "page" ? geometry.pageLeft ?? 0 : p.hRelative === "margin" ? geometry.marginLeft ?? 0 : 0),
+    y: p.y - (p.vRelative === "page" ? geometry.paragraphTop ?? 0 : p.vRelative === "margin" ? (geometry.paragraphTop ?? 0) - (geometry.pageTop ?? 0) : 0) };
+  const result = placementBaseCss(p, width, column);
+  if (p.distances && p.wrap !== "inline") {
+    const d = p.distances;
+    result.style += `; padding: ${d.top}px ${d.right}px ${d.bottom}px ${d.left}px; box-sizing: content-box; margin-right: 0; margin-bottom: 0`;
+  }
+  return result;
+}
+function placementBaseCss(p: Placement, width: number, column: number): { cls: string; style: string } {
   switch (p.wrap) {
     case "inline":
       return { cls: "", style: "" };
     case "square":
       if (p.align === "center") return { cls: "docx-wrap", style: "display: block; margin-left: auto; margin-right: auto" };
       if (p.align === "right") return { cls: "docx-wrap", style: `float: right; margin-top: ${p.y}px` };
-      // ponytail: a 6.5 in column is assumed; text wraps on one side only (CSS floats), Word wraps both.
-      if (!p.align && width && p.x + width / 2 > COLUMN / 2) return { cls: "docx-wrap", style: `float: right; margin-right: ${Math.max(0, COLUMN - p.x - width)}px; margin-top: ${p.y}px` };
+      if (!p.align && width && p.x + width / 2 > column / 2) return { cls: "docx-wrap", style: `float: right; margin-right: ${Math.max(0, column - p.x - width)}px; margin-top: ${p.y}px` };
       return { cls: "docx-wrap", style: `float: left; margin-left: ${p.align ? 0 : p.x}px; margin-top: ${p.y}px` };
     case "topBottom":
       if (p.align === "center") return { cls: "docx-wrap", style: "display: block; margin-left: auto; margin-right: auto" };
@@ -75,6 +102,21 @@ export function setPlacement(run: Element, p: Placement): void {
     if (text !== undefined) e.textContent = text;
     return e;
   };
+  const was = placementOf(run);
+  if (frame.localName === "anchor" && p.wrap === was.wrap) {
+    if (p.x !== was.x || p.align !== was.align || (p.hRelative ?? "column") !== (was.hRelative ?? "column")) {
+      const h = kid(frame, NS.wp, "positionH")!;
+      h.setAttribute("relativeFrom", p.hRelative ?? "column");
+      h.replaceChildren(p.align ? el("align", {}, p.align) : el("posOffset", {}, String(Math.round(p.x * EMU_PER_PX))));
+    }
+    if (p.y !== was.y || (p.vRelative ?? "paragraph") !== (was.vRelative ?? "paragraph")) {
+      const v = kid(frame, NS.wp, "positionV")!;
+      v.setAttribute("relativeFrom", p.vRelative ?? "paragraph");
+      v.replaceChildren(el("posOffset", {}, String(Math.round(p.y * EMU_PER_PX))));
+    }
+    if (p.distances) for (const [side, value] of Object.entries(p.distances)) frame.setAttribute(`dist${side[0].toUpperCase()}`, String(Math.round(value * EMU_PER_PX)));
+    return;
+  }
   const keep = ["extent", "effectExtent", "docPr", "cNvGraphicFramePr"].map((l) => kid(frame, NS.wp, l)).filter(Boolean) as Element[];
   const graphic = Array.from(frame.children).find((c) => c.localName === "graphic") ?? null;
   const [extent, ...rest] = keep;
@@ -100,10 +142,11 @@ export function setPlacement(run: Element, p: Placement): void {
       allowOverlap: "1",
     });
     if (wasAnchor) for (const a of ["distT", "distB", "distL", "distR"]) next.setAttribute(a, frame.getAttribute(a) ?? next.getAttribute(a)!);
+    if (p.distances) for (const [side, value] of Object.entries(p.distances)) next.setAttribute(`dist${side[0].toUpperCase()}`, String(Math.round(value * EMU_PER_PX)));
     next.appendChild(el("simplePos", { x: "0", y: "0" }));
-    const h = next.appendChild(el("positionH", { relativeFrom: "column" }));
+    const h = next.appendChild(el("positionH", { relativeFrom: p.hRelative ?? was.hRelative ?? "column" }));
     h.appendChild(p.align ? el("align", {}, p.align) : el("posOffset", {}, String(Math.round(p.x * EMU_PER_PX))));
-    next.appendChild(el("positionV", { relativeFrom: "paragraph" })).appendChild(el("posOffset", {}, String(Math.round(p.y * EMU_PER_PX))));
+    next.appendChild(el("positionV", { relativeFrom: p.vRelative ?? was.vRelative ?? "paragraph" })).appendChild(el("posOffset", {}, String(Math.round(p.y * EMU_PER_PX))));
     for (const e of [extent, effect]) if (e) next.appendChild(e);
     next.appendChild(p.wrap === "square" ? el("wrapSquare", { wrapText: "bothSides" }) : p.wrap === "topBottom" ? el("wrapTopAndBottom") : el("wrapNone"));
     for (const e of [...tail, graphic]) if (e) next.appendChild(e);

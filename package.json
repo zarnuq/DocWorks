@@ -1,7 +1,7 @@
 {
   "name": "obsidian-doc-works",
-  "version": "0.8.0",
-  "description": "View and edit Word (.docx) and PowerPoint (.pptx) files, with faithful slide rendering and lossless saving.",
+  "version": "0.9.0",
+  "description": "View and edit Word (.docx), PowerPoint (.pptx) and Excel (.xlsx) files, with faithful rendering, live formulas and lossless saving.",
   "author": "zarnuq",
   "main": "main.js",
   "scripts": {

@@ -1,5 +1,7 @@
+import { renderChart } from "./chart-renderer";
 import type { ShapeModel, SlideModel } from "../../domain/pptx/slide-model";
 import { fillCss } from "../../domain/pptx/shape-style";
+import { shapeIds } from "../../domain/pptx/animation";
 import { renderParagraphs } from "./text-html";
 
 export interface RenderOptions {
@@ -11,6 +13,7 @@ export interface RenderOptions {
   imageUrl: (mediaPath: string) => string | null;
   /** 1-based number shown by slide-number fields. */
   slideNumber?: number;
+  playMedia?: boolean;
 }
 
 export interface RenderedShape {
@@ -208,11 +211,25 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     const el = slide.createDiv();
     el.className = `pptx-shape pptx-kind-${shape.kind}`;
     el.classList.toggle("is-inherited", shape.inherited);
+    el.classList.toggle("pptx-diagram-proxy", !!shape.diagram);
+    el.classList.toggle("pptx-chart", !!shape.chart);
     el.dataset.index = String(index);
+    if (!shape.inherited) el.dataset.spids = shapeIds(shape.el).join(" ");
     Object.assign(el.style, { left: px(shape.rect.x), top: px(shape.rect.y), width: px(shape.rect.w), height: px(shape.rect.h) });
     if (shape.rot) el.style.transform = `rotate(${shape.rot}deg)`;
     const shadow = shadowCss(shape, scale);
-    if (shape.image) {
+    if (shape.media) {
+      if (opts.playMedia && !shape.media.external) {
+        const media = shape.media.kind === "video" ? el.createEl("video") : el.createEl("audio");
+        media.src = opts.imageUrl(shape.media.path) ?? "";
+        media.controls = true; media.autoplay = shape.media.autoPlay; media.loop = shape.media.loop; media.preload = "metadata";
+        media.addClass("pptx-media-player");
+        for (const event of ["click", "pointerdown", "keydown"]) media.addEventListener(event, e => e.stopPropagation());
+      } else {
+        if (shape.media.kind === "video" && shape.image) { const poster=el.createEl("img");poster.src=opts.imageUrl(shape.image)??"";poster.addClass("pptx-media-poster"); }
+        el.createDiv({cls:"pptx-media-label",text: `${shape.media.kind === "audio" ? "♫ Audio" : "▶ Video"} · ${shape.name}`});
+      }
+    } else if (shape.image) {
       const img = el.createEl("img");
       img.src = opts.imageUrl(shape.image) ?? "";
       img.draggable = false;
@@ -269,7 +286,9 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
           cellEls.set(cell.el, td);
         }
       });
-    } else if (shape.kind === "frame") {
+    } else if (shape.chart) {
+      renderChart(el, shape.chart);
+    } else if (shape.kind === "frame" && !shape.diagram) {
       el.createDiv().className = "pptx-frame-label";
       el.lastElementChild!.textContent = "Chart or diagram (view only)";
     }

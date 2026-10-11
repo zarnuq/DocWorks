@@ -20,6 +20,13 @@ async function render(i: number, editable = true, mutate?: (m: SlideModel) => vo
 }
 
 describe("renderSlide", () => {
+  it("tags slide shapes with their ids for animations, not inherited ones", async () => {
+    const { shapes } = await render(0, false);
+    const own = shapes.find((s) => !s.shape.inherited && s.shape.kind !== "cell")!;
+    expect(own.el.dataset.spids).toBe(own.shape.el.getElementsByTagNameNS("*", "cNvPr")[0].getAttribute("id"));
+    for (const s of shapes.filter((x) => x.shape.inherited)) expect(s.el.dataset.spids).toBeUndefined();
+  });
+
   it("sizes arrowheads like PowerPoint: thin lines count as about 2 pt wide, so heads stay readable", async () => {
     const marker = async (width: number) => {
       host.innerHTML = "";

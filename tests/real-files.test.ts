@@ -4,7 +4,7 @@
  * byte-identical when unchanged and keep its text through an edit + save.
  */
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync } from "fs";
+import { readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { parseSlide } from "../src/domain/pptx/slide-model";
@@ -49,7 +49,7 @@ describe.skipIf(!dir)("real decks", () => {
       }
       // SmartArt with a cached drawing must be drawn, not left as a placeholder frame.
       if (doc.rels(slide.path).some((r) => r.type === "diagramDrawing")) {
-        expect(model.shapes.filter((s) => s.kind === "frame" && s.el.getElementsByTagNameNS("*", "relIds").length), slide.path).toHaveLength(0);
+        expect(model.shapes.filter((s) => s.kind === "frame" && !s.diagram && s.el.getElementsByTagNameNS("*", "relIds").length), slide.path).toHaveLength(0);
       }
     }
 
@@ -81,5 +81,70 @@ describe.skipIf(!docsDir)("real docx files", () => {
     const back = await DocxDocument.load(await docx.save());
     const reread = readDocx(back.body, { imageSrc: () => null, hyperlinkHref: () => null }).doc;
     expect(reread.textContent).toBe(tr.doc.textContent);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workbooks: DOC_WORKS_BOOKS=<dir>
+// ---------------------------------------------------------------------------
+
+import JSZip from "jszip";
+import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
+import { Workbook } from "../src/domain/xlsx/workbook-model";
+import { Calc } from "../src/domain/xlsx/calculation";
+import { Edits } from "../src/domain/xlsx/commands";
+
+const bookDir = process.env.DOC_WORKS_BOOKS;
+const books = bookDir ? readdirSync(bookDir).filter((f) => f.endsWith(".xlsx")) : [];
+
+async function zipTexts(bytes: Uint8Array): Promise<Map<string, string>> {
+  const z = await JSZip.loadAsync(bytes);
+  const out = new Map<string, string>();
+  for (const f of Object.values(z.files)) if (!f.dir) out.set(f.name, await f.async("base64"));
+  return out;
+}
+
+describe.skipIf(!bookDir)("real workbooks", () => {
+  it.each(books)("%s keeps every part on a no-op save", async (name) => {
+    const bytes = new Uint8Array(readFileSync(join(bookDir!, name)));
+    const pkg = await XlsxWorkbook.load(bytes);
+    Workbook.open(pkg);
+    expect(await zipTexts(await pkg.save())).toEqual(await zipTexts(bytes));
+  });
+
+  it.each(books)("%s: supported formulas calculate to the cached results", async (name) => {
+    const wb = Workbook.open(await XlsxWorkbook.load(new Uint8Array(readFileSync(join(bookDir!, name)))));
+    const calc = new Calc(wb);
+    const wrong: string[] = [];
+    let checked = 0, unsupported = 0;
+    for (const sheet of wb.sheets) {
+      for (const cell of sheet.cells.values()) {
+        if (cell.formula === undefined || cell.noCache || cell.array) continue;
+        const v = calc.evaluate(sheet, cell.row, cell.col, cell.formula);
+        if (v === Calc.UNSUPPORTED) {
+          unsupported++;
+          continue;
+        }
+        checked++;
+        const same = typeof v === "number" && typeof cell.value === "number" ? Math.abs(v - cell.value) <= 1e-9 * Math.max(1, Math.abs(v)) : JSON.stringify(v) === JSON.stringify(cell.value);
+        if (!same) wrong.push(`${sheet.name}!${cell.el.getAttribute("r")} =${cell.formula} -> ${JSON.stringify(v)} (cached ${JSON.stringify(cell.value)})`);
+      }
+    }
+    console.log(`${name}: ${checked} formulas checked, ${unsupported} unsupported`);
+    expect(wrong.slice(0, 20)).toEqual([]);
+  });
+
+  it.each(books)("%s survives an edit and reload", async (name) => {
+    const e = new Edits(Workbook.open(await XlsxWorkbook.load(new Uint8Array(readFileSync(join(bookDir!, name))))));
+    const s = e.wb.sheets[0];
+    const used = s.used() ?? { r1: 0, c1: 0, r2: 0, c2: 0 };
+    e.input(s, used.r2 + 2, 0, "edited");
+    e.input(s, used.r2 + 2, 1, "=1+1");
+    e.format(s, { r1: used.r2 + 2, c1: 0, r2: used.r2 + 2, c2: 1 }, { bold: true, fill: "#FFFF00" });
+    const saved = await e.wb.pkg.save();
+    if (process.env.DOC_WORKS_EXPORT) writeFileSync(join(process.env.DOC_WORKS_EXPORT, `edited-${name}`), saved);
+    const back = Workbook.open(await XlsxWorkbook.load(saved));
+    expect(back.sheets[0].at(used.r2 + 2, 0)!.value).toBe("edited");
+    expect(back.sheets.map((x) => x.name)).toEqual(e.wb.sheets.map((x) => x.name));
   });
 });

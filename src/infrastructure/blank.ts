@@ -160,3 +160,33 @@ export function blankDocx(): Promise<Uint8Array> {
       `<w:style w:type="character" w:default="1" w:styleId="DefaultParagraphFont"><w:name w:val="Default Paragraph Font"/><w:uiPriority w:val="1"/><w:semiHidden/><w:unhideWhenUsed/></w:style></w:styles>`,
   });
 }
+
+// ---------------------------------------------------------------------------
+// xlsx
+// ---------------------------------------------------------------------------
+
+/** A workbook with one empty sheet, in Google Sheets' default font. */
+export function blankXlsx(): Promise<Uint8Array> {
+  const s = `xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${NS.r}"`;
+  return zip({
+    "[Content_Types].xml": types([
+      ["xl/workbook.xml", "spreadsheetml.sheet.main+xml"],
+      ["xl/worksheets/sheet1.xml", "spreadsheetml.worksheet+xml"],
+      ["xl/styles.xml", "spreadsheetml.styles+xml"],
+    ]),
+    "_rels/.rels": rels([["officeDocument", "xl/workbook.xml"]]),
+    "xl/_rels/workbook.xml.rels": rels([
+      ["worksheet", "worksheets/sheet1.xml"],
+      ["styles", "styles.xml"],
+    ]),
+    "xl/workbook.xml": `<workbook ${s}><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029"/></workbook>`,
+    "xl/worksheets/sheet1.xml": `<worksheet ${s}><sheetFormatPr defaultRowHeight="15"/><sheetData/></worksheet>`,
+    "xl/styles.xml":
+      `<styleSheet ${s}><fonts count="1"><font><sz val="10"/><name val="Arial"/></font></fonts>` +
+      `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>` +
+      `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
+      `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+      `<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>` +
+      `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+  });
+}

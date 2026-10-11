@@ -1,7 +1,7 @@
 import { Node as PMNode } from "prosemirror-model";
 import { EditorView, NodeView } from "prosemirror-view";
 import { attrsOf, ImageAttrs } from "../../domain/docx/schema";
-import { placementCss, Wrap } from "../../domain/docx/drawing";
+import { placementCss, PlacementGeometry, Wrap } from "../../domain/docx/drawing";
 
 /** Google Docs' image options, in its order. */
 const WRAPS: [Wrap, string][] = [
@@ -25,6 +25,9 @@ export class DocxImageView implements NodeView {
   dom: HTMLElement;
   private img: HTMLImageElement;
   private wrap: HTMLSelectElement;
+  private moveHandle: HTMLButtonElement;
+  private cancelGesture: (() => void) | null = null;
+  private mountTimer = 0;
 
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined, actions: ImageActions) {
     this.dom = createSpan({ cls: "docx-image" });
@@ -33,6 +36,12 @@ export class DocxImageView implements NodeView {
     handle.addEventListener("mousedown", (e) => this.startResize(e));
 
     const bar = this.dom.createSpan({ cls: "docx-image-bar" });
+    this.moveHandle = bar.createEl("button", { text: "Move", cls: "dw-btn", attr: { "aria-label": "Move image", title: "Drag to position the image" } });
+    this.moveHandle.addEventListener("mousedown", e => this.startMove(e));
+    this.img.draggable = false;
+    this.img.addEventListener("mousedown", e => {
+      if (this.dom.classList.contains("is-selected") && attrsOf<ImageAttrs>(this.node).wrap !== "inline") this.startMove(e);
+    });
     const button = (label: string, run: () => void) => {
       const b = bar.createEl("button", { text: label, cls: "dw-btn" });
       b.addEventListener("mousedown", (e) => e.preventDefault());
@@ -52,6 +61,13 @@ export class DocxImageView implements NodeView {
     });
     button("50%", () => this.scale(0.5));
     button("100%", () => this.scale(1));
+    const spacing = bar.createEl("input", { type: "number", attr: { "aria-label": "Image text spacing (px)", title: "Space between image and text (px)", min: "0", max: "96", step: "1" } });
+    spacing.addEventListener("change", () => {
+      const value = Number(spacing.value);
+      const pos = this.getPos();
+      if (pos === undefined || !Number.isFinite(value) || value < 0 || value > 96) return;
+      this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, distances: { top: value, right: value, bottom: value, left: value } }));
+    });
     button("Alt", () => actions.editAlt(this.getPos()!, attrsOf<ImageAttrs>(this.node).alt));
     button("Replace", () => actions.replace(this.getPos()!));
     button("Delete", () => {
@@ -59,6 +75,7 @@ export class DocxImageView implements NodeView {
       this.view.dispatch(this.view.state.tr.delete(pos, pos + 1));
     });
     this.render();
+    this.mountTimer = window.setTimeout(() => { this.mountTimer = 0; this.render(); }, 0);
   }
 
   private render(): void {
@@ -69,10 +86,69 @@ export class DocxImageView implements NodeView {
     this.img.style.height = height ? `${height}px` : "";
     // Floating pictures sit where the document puts them (see drawing.ts).
     const a = attrsOf<ImageAttrs>(this.node);
-    const { cls, style } = placementCss({ wrap: a.wrap, x: a.x, y: a.y, align: a.align }, a.width ?? 0);
+    const { cls, style } = placementCss(a, a.width ?? 0, this.geometry());
     this.dom.className = `docx-image ${cls}`.trim() + (this.dom.classList.contains("is-selected") ? " is-selected" : "");
     this.dom.setAttribute("style", style);
     if (this.wrap) this.wrap.value = a.wrap;
+    this.moveHandle.disabled = a.wrap === "inline";
+    const spacing = this.dom.querySelector<HTMLInputElement>('[aria-label="Image text spacing (px)"]');
+    if (spacing) { spacing.value = String(a.distances?.left ?? 12); spacing.disabled = a.wrap === "inline"; }
+  }
+
+  private geometry(): PlacementGeometry {
+    const paragraph = this.dom.closest<HTMLElement>("p, h1, h2, h3, h4, h5, h6");
+    const host = this.view.dom.closest<HTMLElement>(".docx-editor-host");
+    const p = paragraph?.getBoundingClientRect(), editor = this.view.dom.getBoundingClientRect();
+    const zoom = this.view.dom.offsetWidth && editor.width ? editor.width / this.view.dom.offsetWidth : 1;
+    const marginLeft = Number.parseFloat(host?.style.getPropertyValue("--docx-m-left") ?? "") || 0;
+    const marginTop = Number.parseFloat(host?.style.getPropertyValue("--docx-m-top") ?? "") || 0;
+    let pageTop = editor.top;
+    for (const gap of Array.from(this.view.dom.querySelectorAll(".docx-page-space"))) {
+      const rect = gap.getBoundingClientRect();
+      if (p && rect.bottom <= p.top) pageTop = Math.max(pageTop, rect.bottom);
+    }
+    return { columnWidth: paragraph?.clientWidth || this.view.dom.clientWidth || undefined,
+      pageLeft: p ? (p.left - editor.left) / zoom : marginLeft, marginLeft: p ? (p.left - editor.left) / zoom - marginLeft : 0,
+      pageTop: marginTop, paragraphTop: p ? (p.top - pageTop) / zoom : marginTop };
+  }
+
+  private startMove(e: MouseEvent): void {
+    const a = attrsOf<ImageAttrs>(this.node);
+    if (e.button !== 0 || a.wrap === "inline") return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.cancelGesture?.();
+    const startX = e.clientX, startY = e.clientY;
+    const geometry = this.geometry();
+    const column = geometry.columnWidth ?? 624;
+    const x0 = a.align === "right" ? column - (a.width ?? 0) : a.align === "center" ? (column - (a.width ?? 0)) / 2 : a.x;
+    const domRect = this.view.dom.getBoundingClientRect();
+    const zoom = this.view.dom.offsetWidth && domRect.width ? domRect.width / this.view.dom.offsetWidth : 1;
+    let x = x0, y = a.y;
+    const cleanup = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("keydown", key);
+      this.cancelGesture = null;
+      this.dom.removeClass("is-moving");
+    };
+    const move = (ev: MouseEvent) => {
+      x = Math.round(x0 + (ev.clientX - startX) / zoom);
+      y = Math.round(a.y + (ev.clientY - startY) / zoom);
+      this.dom.setAttribute("style", placementCss({ ...a, x, y, align: null }, a.width ?? 0, geometry).style);
+    };
+    const up = () => {
+      cleanup();
+      const pos = this.getPos();
+      if (pos !== undefined && (x !== x0 || y !== a.y)) this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, x, y, align: null }));
+      else this.render();
+    };
+    const key = (ev: KeyboardEvent) => { if (ev.key === "Escape") { ev.preventDefault(); cleanup(); this.render(); } };
+    this.cancelGesture = () => { cleanup(); this.render(); };
+    this.dom.addClass("is-moving");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("keydown", key);
   }
 
   private setSize(width: number, height: number): void {
@@ -97,9 +173,11 @@ export class DocxImageView implements NodeView {
     const startX = e.clientX;
     const w0 = this.img.offsetWidth;
     const ratio = this.img.offsetHeight / Math.max(1, w0);
+    const rect = this.view.dom.getBoundingClientRect();
+    const zoom = this.view.dom.offsetWidth && rect.width ? rect.width / this.view.dom.offsetWidth : 1;
     let width = w0;
     const move = (ev: MouseEvent) => {
-      width = Math.max(24, w0 + ev.clientX - startX);
+      width = Math.max(24, w0 + (ev.clientX - startX) / zoom);
       this.img.style.width = `${width}px`;
       this.img.style.height = `${width * ratio}px`;
     };
@@ -134,4 +212,6 @@ export class DocxImageView implements NodeView {
   ignoreMutation(): boolean {
     return true;
   }
+
+  destroy(): void { window.clearTimeout(this.mountTimer); this.cancelGesture?.(); }
 }

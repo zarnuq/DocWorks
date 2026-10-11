@@ -4,6 +4,7 @@
  * presentations.
  */
 import { NS, childNS } from "../../core/utils/xml";
+import type { ResourceBundle } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import type { Rect } from "./geometry";
 import { nextShapeId, setRect } from "./slide-edit";
@@ -176,6 +177,9 @@ interface ClipRel {
   external: boolean;
   /** Image bytes, for pasting into another presentation. */
   bytes?: Uint8Array;
+  uri?: string;
+  resources?: ResourceBundle;
+  drawingRel?: string;
 }
 
 export interface Clip {
@@ -185,19 +189,27 @@ export interface Clip {
 }
 
 /** Relationship types a pasted item may carry; anything else (charts, diagrams, media) is skipped. */
-const PASTABLE = new Set(["image", "hyperlink"]);
+const PASTABLE = new Set(["image", "hyperlink", "chart", "diagramData", "diagramLayout", "diagramQuickStyle", "diagramColors", "diagramDrawing", "audio", "video", "media"]);
 
 const relAttrs = (el: Element) =>
-  [el, ...Array.from(el.getElementsByTagName("*"))].flatMap((e) => Array.from(e.attributes).filter((a) => a.namespaceURI === NS.r).map((a) => ({ e, a })));
+  [el, ...Array.from(el.getElementsByTagName("*"))].flatMap((e) => Array.from(e.attributes).filter((a) => a.namespaceURI === NS.r && a.value !== "").map((a) => ({ e, a })));
 
 export async function copyItems(doc: PptxDocument, slidePath: string, items: Element[]): Promise<Clip> {
   const rels = new Map<string, ClipRel>();
   for (const item of items) {
+    const dataId = item.getElementsByTagNameNS(NS.dgm,"relIds")[0]?.getAttributeNS(NS.r,"dm");
+    const dataPath = dataId && doc.relTarget(slidePath,dataId);
+    const drawingRel = dataPath && doc.xml(dataPath)?.getElementsByTagNameNS(NS.dsp,"dataModelExt")[0]?.getAttribute("relId");
+    if (drawingRel && !rels.has(drawingRel)) {
+      const rel = doc.rels(slidePath).find(r=>r.id===drawingRel);
+      if(rel) rels.set(rel.id,{type:rel.type,uri:rel.uri,target:rel.target,external:rel.external,resources:await doc.captureResources([rel.target])});
+    }
     for (const { a } of relAttrs(item)) {
       const rel = doc.rels(slidePath).find((r) => r.id === a.value);
       if (!rel || rels.has(rel.id)) continue;
       const bytes = rel.type === "image" && !rel.external ? await doc.media(rel.target).catch(() => undefined) : undefined;
-      rels.set(rel.id, { type: rel.type, target: rel.target, external: rel.external, bytes });
+      const resources = PASTABLE.has(rel.type) && rel.type !== "image" && !rel.external ? await doc.captureResources([rel.target]).catch(() => undefined) : undefined;
+      rels.set(rel.id, { type: rel.type, uri: rel.uri, target: rel.target, external: rel.external, bytes, resources, drawingRel: rel.id === dataId ? drawingRel || undefined : undefined });
     }
   }
   return { doc, items: items.map((i) => new XMLSerializer().serializeToString(i)), rels };
@@ -217,7 +229,16 @@ export function pasteItems(doc: PptxDocument, slidePath: string, clip: Clip, off
     const rel = clip.rels.get(oldId);
     if (!rel || !PASTABLE.has(rel.type)) return null;
     let id: string;
-    if (rel.external || clip.doc === doc) id = doc.addSlideRel(slidePath, rel.type, rel.target, rel.external);
+    if (rel.resources) {
+      const paths = doc.importResources(rel.resources);
+      if(rel.drawingRel) {
+        const drawing = relFor(rel.drawingRel);
+        if (!drawing) return null;
+        const data = doc.xml(paths.get(rel.target)!);
+        data?.getElementsByTagNameNS(NS.dsp,"dataModelExt")[0]?.setAttribute("relId",drawing);
+      }
+      id = doc.addSlideRel(slidePath, rel.uri ?? rel.type, paths.get(rel.target)!);
+    } else if (rel.external || (clip.doc === doc && rel.type === "image")) id = doc.addSlideRel(slidePath, rel.uri ?? rel.type, rel.target, rel.external);
     else if (rel.bytes) id = doc.addImage(slidePath, rel.bytes, rel.target.slice(rel.target.lastIndexOf(".") + 1));
     else return null;
     relMap.set(oldId, id);
@@ -227,9 +248,10 @@ export function pasteItems(doc: PptxDocument, slidePath: string, clip: Clip, off
   for (const xml of clip.items) {
     const item = slide.importNode(new DOMParser().parseFromString(xml, "application/xml").documentElement, true);
     const frames = item.localName === "graphicFrame" ? [item] : Array.from(item.getElementsByTagNameNS(NS.p, "graphicFrame"));
-    const unsupported = frames.some((f) => !f.getElementsByTagNameNS(NS.a, "tbl").length);
+    const unsupported = frames.some((f) => !f.getElementsByTagNameNS(NS.a, "tbl").length && !relAttrs(f).length);
     const refs = relAttrs(item);
-    if (unsupported || refs.some(({ a }) => relFor(a.value) === null)) {
+    const missing=refs.some(({a})=>{const rel=clip.rels.get(a.value);return !rel||!PASTABLE.has(rel.type)||(!rel.external&&!rel.resources&&rel.type!=="image")||(!rel.external&&rel.type==="image"&&clip.doc!==doc&&!rel.bytes);});
+    if (unsupported || missing || refs.some(({ a }) => relFor(a.value) === null)) {
       skipped++;
       continue;
     }

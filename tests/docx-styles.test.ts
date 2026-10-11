@@ -156,7 +156,9 @@ describe("table borders from the table style", () => {
     new DOMParser().parseFromString(
       `<w:styles xmlns:w="${W}"><w:style w:type="table" w:styleId="TableGrid"><w:tblPr><w:tblBorders>` +
         ["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="single" w:sz="4"/>`).join("") +
-        `</w:tblBorders></w:tblPr></w:style><w:style w:type="table" w:styleId="Plain"><w:basedOn w:val="TableNormal"/></w:style></w:styles>`,
+        `</w:tblBorders></w:tblPr></w:style><w:style w:type="table" w:styleId="Plain"><w:basedOn w:val="TableNormal"/></w:style>` +
+        `<w:style w:type="table" w:styleId="Roomy"><w:tblPr><w:tblCellMar><w:top w:w="72" w:type="dxa"/><w:left w:w="144" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>` +
+        `<w:style w:type="table" w:styleId="RoomyGrid"><w:basedOn w:val="Roomy"/><w:tblPr><w:tblCellMar><w:left w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`,
       "application/xml"
     ),
     null
@@ -166,6 +168,22 @@ describe("table borders from the table style", () => {
     expect(styles.tableBorders(null)).toBe("none");
     expect(styles.tableBorders("Plain")).toBe("none");
     expect(styles.tableBorders("TableGrid")).toBe("all");
+  });
+
+  it("pads cells by the table style's cell margins, nearest style first", () => {
+    expect(styles.cellPaddingCss(null)).toBe("");
+    expect(styles.cellPaddingCss("TableGrid")).toBe("");
+    expect(styles.cellPaddingCss("Roomy")).toBe("--docx-cell-top: 3.6pt; --docx-cell-left: 7.2pt");
+    expect(styles.cellPaddingCss("RoomyGrid")).toBe("--docx-cell-top: 3.6pt; --docx-cell-left: 0pt");
+  });
+
+  it("gives rendered tables their style's cell padding", () => {
+    const xml = new DOMParser().parseFromString(`<w:body xmlns:w="${W}"><w:tbl><w:tblPr><w:tblStyle w:val="Roomy"/></w:tblPr><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl></w:body>`, "application/xml").documentElement;
+    const { doc } = readDocx(xml, { imageSrc: () => null, hyperlinkHref: () => null });
+    const div = document.createElement("div");
+    div.appendChild(DOMSerializer.fromSchema(schema).serializeFragment(doc.content, { document }));
+    styleRenderedParagraphs(div, doc, styles);
+    expect(div.querySelector("table")!.style.getPropertyValue("--docx-cell-left")).toBe("7.2pt");
   });
 
   it("draws a table without borders of its own with its style's (a header's empty layout table shows none)", () => {

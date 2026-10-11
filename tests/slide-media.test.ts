@@ -1,0 +1,21 @@
+import { it, expect } from "vitest";
+import { blankPptx } from "../src/infrastructure/blank";
+import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
+import { addMedia, readMedia, setMediaPlayback } from "../src/domain/pptx/media";
+import { parseSlide } from "../src/domain/pptx/slide-model";
+import { renderSlide } from "../src/presentation/pptx/slide-renderer";
+it.each(["audio", "video"] as const)("embeds %s, edits playback settings and round trips", async (kind) => {
+  const doc = await PptxDocument.load(await blankPptx());
+  const path = doc.slides()[0].path;
+  const frame = addMedia(doc, path, new Uint8Array([1, 2, 3]), kind, kind === "audio" ? "mp3" : "mp4", "Demo");
+  expect(readMedia(doc, path, frame)).toMatchObject({ kind, autoPlay: false, loop: false });
+  setMediaPlayback(doc.xml(path)!, frame, { autoPlay: true, loop: true });
+  const model = parseSlide(doc, path);
+  expect(model.shapes.find(s => s.el === frame)?.media).toMatchObject({ autoPlay: true, loop: true });
+  const host = document.createElement("div");
+  renderSlide(host, model, doc.slideSize, { width: 800, editable: false, playMedia: true, imageUrl: () => "blob:demo" });
+  expect(host.querySelector(kind)?.getAttribute("src")).toBe("blob:demo");
+  expect(host.querySelector(kind)?.hasAttribute("controls")).toBe(true);
+  const back = await PptxDocument.load(await doc.save());
+  expect(parseSlide(back, path).shapes.find(s => s.media)?.media).toMatchObject({ kind, autoPlay: true, loop: true });
+});

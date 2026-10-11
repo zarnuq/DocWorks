@@ -1,11 +1,13 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFolder, WorkspaceLeaf } from "obsidian";
-import { blankDocx, blankPptx } from "./infrastructure/blank";
+import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
 import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
 import { PptxView, VIEW_TYPE_PPTX } from "./presentation/pptx/pptx-view";
+import { XlsxView, VIEW_TYPE_XLSX } from "./presentation/xlsx/xlsx-view";
 
 const NEW_FILES = [
   ["new-presentation", "New presentation", "presentation", "pptx", blankPptx],
   ["new-document", "New document", "file-text", "docx", blankDocx],
+  ["new-spreadsheet", "New spreadsheet", "table", "xlsx", blankXlsx],
 ] as const;
 
 export default class DocWorksPlugin extends Plugin {
@@ -16,13 +18,11 @@ export default class DocWorksPlugin extends Plugin {
    * it was off (the view type, a ghost); name them after their file until they're opened.
    */
   private nameBackgroundTabs(): void {
-    const icons: Record<string, string> = { [VIEW_TYPE_DOCX]: "file-text", [VIEW_TYPE_PPTX]: "presentation" };
+    const icons: Record<string, string> = { [VIEW_TYPE_DOCX]: "file-text", [VIEW_TYPE_PPTX]: "presentation", [VIEW_TYPE_XLSX]: "table" };
     this.app.workspace.iterateAllLeaves((leaf) => {
       const { type, state } = leaf.getViewState();
       const file = state?.file;
-      // Deferred tabs exist from Obsidian 1.7.2; older versions load every tab, so there's nothing to name.
-      const deferred = (leaf as unknown as { isDeferred?: boolean }).isDeferred;
-      if (!icons[type] || !deferred || typeof file !== "string") return;
+      if (!icons[type] || !leaf.isDeferred || typeof file !== "string") return;
       // ponytail: a deferred view's title / icon and updateHeader() are private API; if they change this does nothing.
       const view = leaf.view as unknown as { title?: string; icon?: string };
       view.title = file.split("/").pop()!.replace(/\.[^.]+$/, "");
@@ -37,7 +37,9 @@ export default class DocWorksPlugin extends Plugin {
     this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf, this.settings, () => this.saveSettings()));
     this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf));
     this.claimExtension("docx", VIEW_TYPE_DOCX);
+    this.registerView(VIEW_TYPE_XLSX, (leaf: WorkspaceLeaf) => new XlsxView(leaf));
     this.claimExtension("pptx", VIEW_TYPE_PPTX);
+    this.claimExtension("xlsx", VIEW_TYPE_XLSX);
     this.app.workspace.onLayoutReady(() => this.nameBackgroundTabs());
 
     for (const [id, name, fromStart] of [
@@ -54,6 +56,16 @@ export default class DocWorksPlugin extends Plugin {
         },
       });
     }
+
+    this.addCommand({
+      id: "export-pdf",
+      name: "Export to PDF",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(DocxView) ?? this.app.workspace.getActiveViewOfType(PptxView) ?? this.app.workspace.getActiveViewOfType(XlsxView);
+        if (view && !checking) void view.exportPdf();
+        return !!view;
+      },
+    });
 
     for (const [id, name, , ext, make] of NEW_FILES) {
       this.addCommand({
@@ -76,9 +88,9 @@ export default class DocWorksPlugin extends Plugin {
       (this.app.workspace as { on(name: string, cb: () => Promise<void>): import("obsidian").EventRef }).on(
         "quit",
         async () => {
-          for (const type of [VIEW_TYPE_DOCX, VIEW_TYPE_PPTX]) {
+          for (const type of [VIEW_TYPE_DOCX, VIEW_TYPE_PPTX, VIEW_TYPE_XLSX]) {
             for (const leaf of this.app.workspace.getLeavesOfType(type)) {
-              await (leaf.view as DocxView | PptxView).requestSave?.();
+              await (leaf.view as DocxView | PptxView | XlsxView).requestSave?.();
             }
           }
         }

@@ -22,6 +22,7 @@ export const HEADING_LEVEL: Record<string, number> = {
 };
 
 export type Align = "left" | "center" | "right" | "justify";
+export interface TabStop { pt: number; align: string; leader: string | null; }
 
 // Typed views of node/mark attrs (ProseMirror types them as `any`).
 export interface ParagraphAttrs {
@@ -32,6 +33,8 @@ export interface ParagraphAttrs {
   ilvl: number;
   lineSpacing: string | null;
   indent: number;
+  rightIndent: number | null;
+  tabs: TabStop[] | null;
   /** Points; null = from the style. */
   spaceBefore: number | null;
   spaceAfter: number | null;
@@ -69,7 +72,7 @@ export interface TableAttrs {
   /** Table style id (w:tblStyle), for display only: its paragraph settings apply to the text in the table. */
   style: string | null;
 }
-export interface ImageAttrs {
+export interface ImageAttrs extends Placement {
   xml: string;
   rId: string | null;
   src: string;
@@ -112,7 +115,11 @@ export const docxSchema = new Schema({
       attrs: { count: { default: 2 }, space: { default: 720 }, sep: { default: false } },
       toDOM(node): DOMOutputSpec {
         const { count, space, sep } = node.attrs as { count: number; space: number; sep: boolean };
-        return ["div", { class: sep ? "docx-columns docx-columns-sep" : "docx-columns", style: `--docx-cols: ${count}; --docx-col-gap: ${space / 1440}in` }, 0];
+        // Multi-column properties go inline: the plugin directory's CSS lint flags them in styles.css.
+        // The page view measures with --docx-col-count: 1.
+        const gap = `${space / 1440}in`;
+        const style = `--docx-cols: ${count}; --docx-col-gap: ${gap}; column-count: var(--docx-col-count, ${count}); column-gap: ${gap};${sep ? " column-rule: 1px solid currentColor;" : ""}`;
+        return ["div", { class: sep ? "docx-columns docx-columns-sep" : "docx-columns", style }, 0];
       },
     },
 
@@ -128,6 +135,8 @@ export const docxSchema = new Schema({
         lineSpacing: { default: null },
         /** Left indent in 0.5" steps. */
         indent: { default: 0 },
+        rightIndent: { default: null },
+        tabs: { default: null },
         spaceBefore: { default: null },
         spaceAfter: { default: null },
         firstLine: { default: null },
@@ -151,6 +160,7 @@ export const docxSchema = new Schema({
         if (a.align) style.push(`text-align: ${a.align}`);
         if (a.lineSpacing) style.push(`line-height: ${a.lineSpacing}`);
         if (a.indent) style.push(`margin-left: ${a.indent * 36}pt`);
+        if (a.rightIndent !== null) style.push(`margin-right: ${a.rightIndent}pt`);
         const attrs: Record<string, string> = {};
         if (style.length) attrs.style = style.join("; ");
         if (a.style) attrs["data-style"] = a.style;
@@ -179,7 +189,7 @@ export const docxSchema = new Schema({
       /** header: repeats at the top of each page (w:tblHeader); cantSplit: moves to the next page whole. */
       attrs: { key: { default: null }, header: { default: false }, cantSplit: { default: false } },
       parseDOM: [{ tag: "tr" }],
-      toDOM: () => ["tr", 0],
+      toDOM: node => ["tr", node.attrs.cantSplit ? { style: "break-inside: avoid" } : {}, 0],
     },
     table_cell: {
       content: "block+",
@@ -250,13 +260,16 @@ export const docxSchema = new Schema({
         height: { default: null },
         alt: { default: "" },
         wrap: { default: "inline" },
+        hRelative: { default: null },
+        vRelative: { default: null },
+        distances: { default: null },
         x: { default: 0 },
         y: { default: 0 },
         align: { default: null },
       },
       toDOM: (node) => {
         const { src, alt, width, height, wrap, x, y, align } = attrsOf<ImageAttrs>(node);
-        const { cls, style } = placementCss({ wrap, x, y, align }, width ?? 0);
+        const { cls, style } = placementCss({ ...attrsOf<ImageAttrs>(node), wrap, x, y, align }, width ?? 0);
         const size = `${width ? `width: ${width}px; ` : ""}${height ? `height: ${height}px; ` : ""}`;
         return ["img", { src, alt, class: `docx-image-node ${cls}`.trim(), style: size + style }];
       },
@@ -276,7 +289,10 @@ export const docxSchema = new Schema({
         // Page number fields are filled in by the page view.
         const field = /w:instr="\s*(PAGE|NUMPAGES)\b/.exec(node.attrs.xml as string)?.[1];
         if (field) attrs["data-field"] = field;
-        if (/<w:br\b[^>]*w:type="column"/.test(xml)) attrs.class += " docx-column-break";
+        if (/<w:br\b[^>]*w:type="column"/.test(xml)) {
+          attrs.class += " docx-column-break";
+          attrs.style = "break-after: column";
+        }
         if (/^<m:oMath/.test(xml)) return ["span", attrs, mathSpec(xml)];
         const box = textBoxOf(xml);
         if (box) return textBoxSpec(box, attrs);

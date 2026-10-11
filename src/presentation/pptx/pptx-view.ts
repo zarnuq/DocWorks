@@ -1,4 +1,6 @@
-import { FileView, Menu, Modifier, Notice, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { addMedia, MEDIA_MIME, setMediaPlayback } from "../../domain/pptx/media";
+import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
+import { Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel } from "../../domain/pptx/slide-model";
 import {
@@ -34,6 +36,10 @@ import { FONTS, PaperTheme, showValue, Toolbar } from "../common/toolbar";
 import { loadEmbeddedFonts } from "./embedded-fonts";
 import { eotToTtf } from "../../infrastructure/fonts/eot";
 import { nextVisible, Slideshow } from "./slideshow";
+import { readAnimations, readTransition, writeTransition } from "../../domain/pptx/animation";
+import { updateAnimationPart, addAnimation, animationEntries, moveAnimation, removeAnimation, updateAnimation } from "../../domain/pptx/animation-edit";
+import { buildMotionPanel } from "./motion-panel";
+import { exportPdf } from "../common/pdf";
 import { RenderedShape, renderSlide } from "./slide-renderer";
 import { rangeInParagraph } from "./text-html";
 import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
@@ -53,7 +59,7 @@ const highlights = () => CSS.highlights as unknown as Map<string, Highlight>;
 /** Zoom steps; 1 = fit the slide to the stage. */
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
-type Snapshot = { snap: PptxSnapshot; index: number };
+type Snapshot = { snap: PptxSnapshot; index: number; editPart?: string | null };
 
 const isMod = (e: KeyboardEvent | MouseEvent) => e.ctrlKey || e.metaKey;
 const P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main";
@@ -138,7 +144,10 @@ export class PptxView extends FileView {
   private notesEl!: HTMLTextAreaElement;
   private notesTimer: number | null = null;
   private propsEl!: HTMLElement;
-  private showProps = window.localStorage.getItem(PROPS_KEY) !== "hidden";
+  private showProps = this.app.loadLocalStorage(PROPS_KEY) !== "hidden";
+  private showMotion = false;
+  private showTheme = false;
+  private editPart: string | null = null;
   private galleryEl: HTMLElement | null = null;
   private fontSelect: HTMLSelectElement | null = null;
   private sizeSelect: HTMLSelectElement | null = null;
@@ -179,6 +188,11 @@ export class PptxView extends FileView {
         return false;
       });
     }
+  }
+
+  onPaneMenu(menu: Menu, source: string): void {
+    super.onPaneMenu(menu, source);
+    menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
   }
 
   getViewType(): string {
@@ -301,6 +315,8 @@ export class PptxView extends FileView {
     for (const url of this.imageUrls.values()) URL.revokeObjectURL(url);
     this.imageUrls.clear();
     this.doc = null;
+    this.showMotion = false;
+    this.showTheme = false; this.editPart = null;
     this.rendered = [];
     this.history = new History<Snapshot>();
   }
@@ -319,7 +335,7 @@ export class PptxView extends FileView {
 
   private async loadMedia(): Promise<void> {
     for (const path of this.doc!.mediaPaths()) {
-      const mime = IMAGE_MIME[extOf(path)];
+      const mime = IMAGE_MIME[extOf(path)] ?? MEDIA_MIME[extOf(path)];
       if (!mime || this.imageUrls.has(path)) continue;
       const bytes = await this.doc!.media(path);
       this.imageUrls.set(path, URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime })));
@@ -465,6 +481,41 @@ export class PptxView extends FileView {
     };
   }
 
+  /** Open the motion editor while keeping the object selection for animation targets. */
+  private openMotion(): void {
+    this.flushCommit();
+    this.showMotion = true;
+    this.showProps = true;
+    this.setSelection(this.items, this.selected?.shape.el ?? null);
+  }
+
+  private renderMotionPanel(): void {
+    const xml = this.currentSlideXml();
+    if (!xml) return;
+    const selected = this.items.length === 1 ? this.items[0] : null;
+    const selectedId = selected ? shapeId(selected) : null;
+    const selectedName = selected?.getElementsByTagNameNS(P_NS, "cNvPr")[0]?.getAttribute("name") ?? "Object";
+    buildMotionPanel(this.propsEl, {
+      transition: readTransition(xml), entries: animationEntries(xml), selectedId, selectedName,
+      setTransition: (patch) => this.mutate(() => writeTransition(xml, patch), "slide"),
+      applyTransitionToAll: () => {
+        const t = readTransition(xml);
+        const patch = t && t.type !== "cut" ? { type: t.type, dir: t.dir, dur: t.dur } : { type: "cut" };
+        this.mutate((d) => d.slides().forEach((s) => writeTransition(d.xml(s.path)!, patch)));
+      },
+      addAnimation: (settings) => { if (selectedId) this.mutate(() => addAnimation(xml, selectedId, settings), "slide"); },
+      updateAnimation: (entry, patch) => this.mutate(() => updateAnimation(xml, entry, patch), "slide"),
+      updatePart: (part, patch) => this.mutate(() => updateAnimationPart(xml, part, patch), "slide"),
+      removeAnimation: (entry) => this.mutate(() => removeAnimation(xml, entry), "slide"),
+      moveAnimation: (entry, direction) => this.mutate(() => moveAnimation(xml, entry, direction), "slide"),
+      preview: () => this.startPresentation(false, true),
+      back: () => {
+        this.showMotion = false;
+        this.setSelection(this.items, this.selected?.shape.el ?? null);
+      },
+    });
+  }
+
   private refreshThumb(i: number): void {
     const host = this.thumbsEl.children[i]?.querySelector<HTMLElement>(".pptx-thumb-slide");
     const slide = this.doc?.slides()[i];
@@ -481,7 +532,8 @@ export class PptxView extends FileView {
     if (!this.doc) return;
     const slides = this.doc.slides();
     this.index = Math.max(0, Math.min(this.index, slides.length - 1));
-    this.model = parseSlide(this.doc, slides[this.index].path);
+    if (this.editPart && !this.doc.xml(this.editPart)) this.editPart = null;
+    this.model = parseSlide(this.doc, this.editPart ?? slides[this.index].path);
 
     this.lastStageWidth = this.stageEl.clientWidth;
     const width = Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400)) * this.zoom;
@@ -703,6 +755,15 @@ export class PptxView extends FileView {
     this.selected = this.rendered.find((r) => r.shape.el === (primaryEl ?? single)) ?? null;
     for (const r of this.rendered) if (items.includes(topLevel(r.shape.el))) r.el.addClass("is-in-selection");
 
+    if (this.showMotion) {
+      if (this.selected && !this.selected.shape.inherited) this.selected.el.addClass("is-selected");
+      if (items.length && !single) this.drawSelectionBox();
+      this.renderMotionPanel();
+      this.propsEl.toggle(this.showProps);
+      return;
+    }
+
+    if (!items.length && this.showTheme) { this.renderThemePanel(); return; }
     if (!items.length) {
       if (this.doc && this.model) buildSlidePanel(this.propsEl, this.slideControl());
       this.propsEl.toggle(this.showProps && !!this.model);
@@ -727,6 +788,17 @@ export class PptxView extends FileView {
       };
       Object.defineProperty(ctl, "lockAspect", { get: () => this.lockAspect, set: (v: boolean) => (this.lockAspect = v) });
       buildShapePanel(this.propsEl, rs.shape, ctl);
+      if (rs.shape.media) {
+        for (const [text,key] of [["Play automatically","autoPlay"],["Loop","loop"]] as const) {
+          const label=this.propsEl.createEl("label",{cls:"pptx-props-row"});label.createSpan({text});
+          const field=label.createEl("input",{type:"checkbox"});field.checked=rs.shape.media[key];
+          field.addEventListener("change",()=>this.mutate(()=>setMediaPlayback(this.currentSlideXml()!,rs.shape.el,{[key]:field.checked})));
+        }
+      }
+      if (rs.shape.chart) {
+        const button = this.propsEl.createEl("button", { text: "Edit chart data" });
+        button.addEventListener("click", () => this.editChart(rs.shape.chart!.path));
+      }
     } else {
       this.drawSelectionBox();
       buildArrangePanel(this.propsEl, this.arrangeControl());
@@ -835,22 +907,24 @@ export class PptxView extends FileView {
 
   private async copySelection(): Promise<boolean> {
     if (!this.doc || !this.items.length) return false;
-    const slidePath = this.doc.slides()[this.index].path;
+    const slidePath = this.editPart ?? this.doc.slides()[this.index].path;
     clipboard = { clip: await copyItems(this.doc, slidePath, this.items), slidePath, pastes: 0 };
     return true;
   }
 
   private paste(): void {
     if (!this.doc || !clipboard) return;
-    const slidePath = this.doc.slides()[this.index].path;
+    const slidePath = this.editPart ?? this.doc.slides()[this.index].path;
     // Pasting where the items came from offsets each copy so it doesn't hide the original.
     const same = clipboard.clip.doc === this.doc && clipboard.slidePath === slidePath;
     const step = same ? ++clipboard.pastes * (EMU_PER_INCH / 10) : 0;
     const clip = clipboard.clip;
     let result: { pasted: Element[]; skipped: number } = { pasted: [], skipped: 0 };
     this.mutate((doc) => (result = pasteItems(doc, slidePath, clip, { dx: step, dy: step })), "slide");
-    if (result.skipped) new Notice(`${result.skipped} item(s) (charts or diagrams) can't be pasted.`);
+    if (result.skipped) new Notice(`${result.skipped} item(s) have missing or unsupported linked resources.`);
     this.setSelection(result.pasted);
+    const doc = this.doc;
+    void this.loadMedia().then(() => { if (this.doc === doc) this.renderCurrent(); });
   }
 
   private async cutSelection(): Promise<void> {
@@ -1574,12 +1648,29 @@ export class PptxView extends FileView {
     if (!this.doc || i < 0 || i >= this.doc.slides().length) return;
     this.flushCommit();
     this.index = i;
+    this.editPart = null; this.showTheme = false;
     this.renderCurrent();
     this.stageEl.focus({ preventScroll: true });
   }
 
+  /** Save the slides (not hidden ones) as a PDF, one slide per page. */
+  async exportPdf(): Promise<void> {
+    const doc = this.doc;
+    if (!doc || !this.file) return;
+    this.flushCommit();
+    const width = doc.slideSize.cx / 9525;
+    const height = doc.slideSize.cy / 9525;
+    const pages = doc.slides().flatMap((s, i) => {
+      if (doc.isHidden(i)) return [];
+      const page = createDiv({ cls: "dw-print-page" });
+      renderSlide(page, parseSlide(doc, s.path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 });
+      return [page];
+    });
+    await exportPdf(this.app, this.file, pages, { width, height });
+  }
+
   /** Run the slideshow from the first visible slide, or from the current one. */
-  startPresentation(fromStart: boolean): void {
+  startPresentation(fromStart: boolean, previewTransition = false): void {
     const doc = this.doc;
     if (!doc) return;
     this.flushCommit();
@@ -1592,13 +1683,17 @@ export class PptxView extends FileView {
       isHidden: (i: number) => hidden[i],
       notes: (i: number) => doc.notesText(i),
       render: (host: HTMLElement, i: number, width: number) =>
-        renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 }),
+        renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1, playMedia: true }),
+      effects: (i: number) => {
+        const xml = doc.xml(doc.slides()[i].path);
+        return { transition: xml && readTransition(xml), steps: xml ? readAnimations(xml) : [] };
+      },
     };
-    new Slideshow(deck, start, (i) => this.goTo(i)).open();
+    new Slideshow(deck, start, (i) => this.goTo(i)).open(previewTransition);
   }
 
   private pushHistory(): void {
-    if (this.doc) this.history.push({ snap: this.doc.snapshot(), index: this.index });
+    if (this.doc) this.history.push({ snap: this.doc.snapshot(), index: this.index, editPart: this.editPart });
   }
 
   /** Snapshot, apply a change, then redraw everything (or only the current slide and its thumbnail). */
@@ -1607,6 +1702,7 @@ export class PptxView extends FileView {
     this.flushCommit();
     const before = this.doc.snapshot();
     const index = this.index;
+    const editPart = this.editPart;
     try {
       fn(this.doc);
     } catch (err) {
@@ -1615,7 +1711,7 @@ export class PptxView extends FileView {
       new Notice((err as Error).message);
       return;
     }
-    this.history.push({ snap: before, index });
+    this.history.push({ snap: before, index, editPart });
     this.markDirty();
     if (scope === "all") this.renderAll();
     else {
@@ -1635,17 +1731,169 @@ export class PptxView extends FileView {
   private travel(step: (current: Snapshot) => Snapshot | null): void {
     if (!this.doc) return;
     this.flushCommit();
-    const target = step({ snap: this.doc.snapshot(), index: this.index });
+    const target = step({ snap: this.doc.snapshot(), index: this.index, editPart: this.editPart });
     if (!target) return;
     this.doc.restore(target.snap);
     this.index = target.index;
+    this.editPart = target.editPart ?? null;
     this.markDirty();
     this.renderAll();
   }
 
+  private pickMedia(): void {
+    const input = createEl("input", { type: "file", attr: { accept: Object.keys(MEDIA_MIME).map(ext => "." + ext).join(",") } });
+    input.addEventListener("change", () => { const file = input.files?.[0]; if (file)
+      void this.insertMediaFile(file); });
+    input.click();
+  }
+  private async insertMediaFile(file: File): Promise<void> {
+    if (!this.doc)
+      return;
+    const doc = this.doc;
+    const part = this.editPart ?? doc.slides()[this.index].path;
+    const ext = extOf(file.name);
+    const mime = MEDIA_MIME[ext];
+    if (!mime) {
+      new Notice("Choose an audio or video file in a supported format.");
+      return;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const canvas=createEl("canvas");canvas.width=320;canvas.height=180;
+    const ctx=canvas.getContext("2d");
+    if(ctx){ctx.fillStyle="#202c40";ctx.fillRect(0,0,320,180);ctx.fillStyle="white";ctx.font="64px sans-serif";ctx.textAlign="center";ctx.fillText(mime.startsWith("video/")?"▶":"♫",160,112);}
+    const poster=await new Promise<Uint8Array|undefined>(resolve=>canvas.toBlob(blob=>{if(blob)void blob.arrayBuffer().then(b=>resolve(new Uint8Array(b)));else resolve(undefined);},"image/png"));
+
+    if (this.doc !== doc || (this.editPart ?? doc.slides()[this.index].path) !== part)
+      return;
+    this.mutate(d => { const shape = addMedia(d, part, bytes, mime.startsWith("video/") ? "video" : "audio", ext, file.name, poster); const media = parseSlide(d, part).shapes.find(s => s.el === shape)!.media!; this.imageUrls.set(media.path, URL.createObjectURL(new Blob([bytes], { type: mime }))); });
+    await this.loadMedia();
+    this.renderCurrent();
+  }
+  private editChart(path?: string): void {
+    if (!this.doc)
+      return;
+    const doc = this.doc;
+    const slide = this.editPart ?? doc.slides()[this.index].path;
+    const imported = path ? parseSlide(doc, slide).shapes.find(s => s.chart?.path === path)?.chart?.data : undefined;
+    const data: ChartData = imported ? structuredClone(imported) : { categories: ["Category 1", "Category 2", "Category 3"], series: [{ name: "Series 1", values: [10, 20, 15] }] };
+    if (path && !imported)
+      return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText(path ? "Edit chart data" : "Insert chart");
+    const host = modal.contentEl;
+    let type = "barChart";
+    if (!path) {
+      const picker = host.createEl("select", { cls: "dropdown", attr: { "aria-label": "Chart type" } });
+      for (const [text, value] of [["Column", "barChart"], ["Line", "lineChart"], ["Pie", "pieChart"], ["Doughnut", "doughnutChart"], ["Area", "areaChart"]])
+        picker.createEl("option", { text, value });
+      picker.addEventListener("change", () => { type = picker.value; });
+    }
+    const grid = host.createDiv({ cls: "dw-chart-grid" });
+    const render = () => {
+      grid.replaceChildren();
+      const table = grid.createEl("table");
+      const heading = table.createEl("tr");
+      heading.createEl("th", { text: "Category" });
+      data.series.forEach(s => { const field = heading.createEl("th").createEl("input", { type: "text", value: s.name, attr: { "aria-label": "Series name" } }); field.addEventListener("input", () => { s.name = field.value; }); });
+      data.categories.forEach((name, i) => {
+        const row = table.createEl("tr");
+        const category = row.createEl("td").createEl("input", { type: "text", value: name, attr: { "aria-label": `Category ${i + 1}` } });
+        category.addEventListener("input", () => { data.categories[i] = category.value; });
+        data.series.forEach(s => { const field = row.createEl("td").createEl("input", { type: "number", value: String(s.values[i]), attr: { "aria-label": `${s.name}, row ${i + 1}`, step: "any" } }); field.addEventListener("input", () => { s.values[i] = field.value === "" ? NaN : Number(field.value); }); });
+        const remove = row.createEl("td").createEl("button", { text: "Remove row" });
+        remove.disabled = data.categories.length === 1;
+        remove.addEventListener("click", () => { data.categories.splice(i, 1); data.series.forEach(s => s.values.splice(i, 1)); render(); });
+      });
+    };
+    render();
+    host.createEl("button", { text: "Add row" }).addEventListener("click", () => { data.categories.push(`Category ${data.categories.length + 1}`); data.series.forEach(s => s.values.push(0)); render(); });
+    if (!path)
+      host.createEl("button", { text: "Add series" }).addEventListener("click", () => { data.series.push({ name: `Series ${data.series.length + 1}`, values: data.categories.map(() => 0) }); render(); });
+    const error = host.createDiv({ cls: "pptx-props-hint" });
+    const apply = host.createEl("button", { text: path ? "Apply chart data" : "Insert chart", cls: "mod-cta" });
+    apply.addEventListener("click", () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          const update = path ? await prepareChartEdit(doc, path, data) : null;
+          const workbook = path ? null : await chartWorkbook(data);
+          if (this.doc !== doc || (this.editPart ?? doc.slides()[this.index].path) !== slide) {
+            error.setText("Return to the slide where this editor was opened.");
+            return;
+          }
+          this.mutate(d => { if (path && update) {
+            d.putXml(path, update.xml);
+            if (update.workbookPath && update.workbook)
+              d.putBinary(update.workbookPath, update.workbook);
+          }
+          else
+            addChart(d, slide, data, type, workbook!); });
+          modal.close();
+        }
+        catch (err) {
+          error.setText((err as Error).message);
+        }
+        finally {
+          apply.disabled = false;
+        }
+      })();
+    });
+    host.createEl("button", { text: "Cancel" }).addEventListener("click", () => modal.close());
+    modal.open();
+  }
+  private renderThemePanel(): void {
+    if (!this.doc)
+      return;
+    const doc = this.doc;
+    const layout = doc.layoutOf(doc.slides()[this.index].path)!;
+    const master = doc.masterOf(layout)!;
+    const theme = doc.themeOf(master)!;
+    const host = this.propsEl;
+    host.replaceChildren();
+    host.createEl("h3", { text: "Theme and layouts" });
+    const select = host.createEl("select", { cls: "dropdown", attr: { "aria-label": "Edit master or layout" } });
+    select.createEl("option", { text: "Slides", value: "" });
+    select.createEl("option", { text: "Master", value: master });
+    for (const item of doc.layouts(master))
+      select.createEl("option", { text: item.name || item.type, value: item.path });
+    select.value = this.editPart ?? "";
+    select.addEventListener("change", () => { this.flushCommit(); this.editPart = select.value || null; this.setSelection([]); this.renderCurrent(); });
+    host.createDiv({ cls: "pptx-props-hint", text: this.editPart ? "Edit objects on the canvas. Changes apply to slides using this master or layout." : "Choose a master or layout to edit its objects." });
+    const create = host.createEl("button", { text: "Create custom layout" });
+    create.addEventListener("click", () => {
+      void (async () => {
+        const name = await promptText(this.app, "Layout name", "Custom layout");
+        if (name && this.doc === doc)
+          this.mutate(d => { this.editPart = d.createLayout(this.editPart && d.masterOf(this.editPart) ? this.editPart : layout, name); });
+      })();
+    });
+    if (this.editPart)
+      for (const type of ["title", "body"] as const) {
+        const button = host.createEl("button", { text: `Add ${type} placeholder` });
+        button.addEventListener("click", () => this.mutate(d => d.addLayoutPlaceholder(this.editPart!, type)));
+      }
+    const colors = doc.xml(theme)?.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "clrScheme")[0];
+    for (const slot of Array.from(colors?.children ?? [])) {
+      const label = host.createEl("label", { cls: "pptx-props-row" });
+      label.createSpan({ text: slot.localName });
+      const field = label.createEl("input", { type: "color", attr: { "aria-label": "Theme " + slot.localName } });
+      field.value = "#" + (slot.firstElementChild?.getAttribute("lastClr") ?? slot.firstElementChild?.getAttribute("val") ?? "000000");
+      field.addEventListener("change", () => this.mutate(d => d.setTheme(theme, { [slot.localName]: field.value.slice(1) })));
+    }
+    for (const [label, tag] of [["Heading font", "majorFont"], ["Body font", "minorFont"]]) {
+      const row = host.createEl("label", { cls: "pptx-props-row" });
+      row.createSpan({ text: label });
+      const field = row.createEl("input", { type: "text", attr: { "aria-label": label } });
+      field.value = doc.xml(theme)?.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", tag)[0]?.firstElementChild?.getAttribute("typeface") ?? "";
+      field.addEventListener("change", () => this.mutate(d => d.setTheme(theme, {}, tag === "majorFont" ? field.value : undefined, tag === "minorFont" ? field.value : undefined)));
+    }
+    const back = host.createEl("button", { text: "Done editing theme" });
+    back.addEventListener("click", () => { this.flushCommit(); this.editPart = null; this.showTheme = false; this.renderCurrent(); });
+    host.show();
+  }
   private currentSlideXml(): Document | null {
     const slide = this.doc?.slides()[this.index];
-    return slide ? this.doc!.xml(slide.path) : null;
+    return this.editPart ? this.doc!.xml(this.editPart) : slide ? this.doc!.xml(slide.path) : null;
   }
 
   private addTextBox(): void {
@@ -1685,7 +1933,7 @@ export class PptxView extends FileView {
     const w = natural.w * fit;
     const h = natural.h * fit;
     this.mutate((doc) => {
-      const path = doc.slides()[this.index].path;
+      const path = this.editPart ?? doc.slides()[this.index].path;
       const rId = doc.addImage(path, bytes, ext);
       this.imageUrls.set(doc.relTarget(path, rId)!, url);
       addPicture(doc.xml(path)!, { x: (cx - w) / 2, y: (cy - h) / 2, w, h }, rId, file.name);
@@ -1846,21 +2094,24 @@ export class PptxView extends FileView {
     sep();
 
     btn("Text box", "Insert text box", () => this.addTextBox());
+    btn("Chart", "Insert an editable chart", () => this.editChart());
     btn("Table", "Insert table", () => void this.insertTable());
     const shapesBtn = btn("Shapes ▾", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
+    btn("Audio/video", "Insert audio or video from file", () => this.pickMedia());
     btn("Image", "Insert image from file", () => pickImage((file) => void this.insertImageFile(file)));
     btn("Delete shape", "Delete selected shape (Del)", () => this.deleteSelected());
     sep();
 
-    btn("New slide", "Insert slide after this one", () => this.mutate((d) => (this.index = d.addSlide(this.index))));
-    const slideBtn = btn("Slide ▾", "Duplicate, delete, hide, move or add a section", () => {
+    const slideBtn = btn("Slide ▾", "Add, duplicate, delete, hide, move or group slides into sections", () => {
       const r = slideBtn.getBoundingClientRect();
       this.slideMenu(this.index).showAtPosition({ x: r.left, y: r.bottom });
     });
+    btn("Theme", "Edit theme colors, fonts, master and custom layouts", () => { this.showMotion = false; this.showTheme = true; this.showProps = true; this.setSelection([]); });
+    btn("Motion", "Add slide transitions and object animations", () => this.openMotion());
     sep();
     const panelBtn = tb.icon("panel-right", "Show or hide the format panel", () => {
       this.showProps = !this.showProps;
-      window.localStorage.setItem(PROPS_KEY, this.showProps ? "shown" : "hidden");
+      this.app.saveLocalStorage(PROPS_KEY, this.showProps ? "shown" : "hidden");
       panelBtn.toggleClass("is-active", this.showProps);
       this.propsEl.toggle(this.showProps);
     });

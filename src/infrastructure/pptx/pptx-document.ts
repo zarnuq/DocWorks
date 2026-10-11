@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { NS, escapeXml } from "../../core/utils/xml";
-import { nextShapeId, setRect, writePlainParagraphs } from "../../domain/pptx/slide-edit";
+import { addTextBox, nextShapeId, setRect, writePlainParagraphs } from "../../domain/pptx/slide-edit";
 import { itemRect, setItemRect, xfrmOf } from "../../domain/pptx/arrange";
 import { parseSlide, plainText } from "../../domain/pptx/slide-model";
 import { Fill, writeFill } from "../../domain/pptx/shape-style";
@@ -340,6 +340,50 @@ export class PptxDocument extends OoxmlPackage {
       const name = root.getElementsByTagNameNS(NS.p, "cSld")[0]?.getAttribute("name") ?? "";
       return [{ path, name, type: root.getAttribute("type") ?? "cust" }];
     });
+  }
+
+  createLayout(base: string, name: string): string {
+    const master = this.masterOf(base);
+    if (!master || !name.trim()) throw new Error("A layout needs a master and a name");
+    const path = this.nextPartPath("ppt/slideLayouts/slideLayout", ".xml");
+    const xml = this.xml(base)!.cloneNode(true) as Document;
+    xml.documentElement.setAttribute("type", "cust");
+    xml.documentElement.setAttribute("preserve", "1");
+    xml.getElementsByTagNameNS(NS.p, "cSld")[0].setAttribute("name", name.trim());
+    this.putXml(path, xml, "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml");
+    const rels = this.xml(relsPathOf(base));
+    if (rels) this.putXml(relsPathOf(path), rels.cloneNode(true) as Document);
+    const rId = this.addRel(master, "slideLayout", path);
+    const mx = this.xml(master)!;
+    let list = mx.getElementsByTagNameNS(NS.p, "sldLayoutIdLst")[0];
+    if (!list) { list = mx.createElementNS(NS.p, "p:sldLayoutIdLst"); mx.documentElement.insertBefore(list, mx.getElementsByTagNameNS(NS.p, "txStyles")[0] ?? null); }
+    const id = mx.createElementNS(NS.p, "p:sldLayoutId");
+    id.setAttribute("id", String(Math.max(2147483648, ...Array.from(list.children).map(e => Number(e.getAttribute("id")))) + 1));
+    id.setAttributeNS(NS.r, "r:id", rId); list.append(id);
+    return path;
+  }
+  addLayoutPlaceholder(path: string, type: "title" | "body"): Element {
+    const xml=this.xml(path);
+    if(!xml || !["sldLayout","sldMaster"].includes(xml.documentElement.localName))throw new Error("Choose a layout or master first");
+    const {cx,cy}=this.slideSize;
+    const shape=addTextBox(xml,{x:cx*.1,y:cy*(type==="title"?.08:.25),w:cx*.8,h:cy*(type==="title"?.15:.6)},type==="title"?"Title":"Body text");
+    const ph=xml.createElementNS(NS.p,"p:ph");ph.setAttribute("type",type);
+    ph.setAttribute("idx",String(Math.max(0,...Array.from(xml.getElementsByTagNameNS(NS.p,"ph")).map(e=>Number(e.getAttribute("idx"))||0))+1));
+    shape.getElementsByTagNameNS(NS.p,"nvPr")[0].append(ph);return shape;
+  }
+
+  setTheme(path: string, colors: Record<string, string>, heading?: string, body?: string): void {
+    const xml = this.xml(path);
+    if (!xml) throw new Error("Theme is missing");
+    for (const [key, color] of Object.entries(colors)) {
+      if (!/^[0-9a-f]{6}$/i.test(color)) throw new Error("Invalid theme color");
+      const slot = xml.getElementsByTagNameNS(NS.a, "clrScheme")[0]?.getElementsByTagNameNS(NS.a, key)[0];
+      if (!slot) continue;
+      const value = xml.createElementNS(NS.a, "a:srgbClr"); value.setAttribute("val", color); slot.replaceChildren(value);
+    }
+    for (const [tag, font] of [["majorFont", heading], ["minorFont", body]] as const) {
+      if (font?.trim()) xml.getElementsByTagNameNS(NS.a, tag)[0]?.getElementsByTagNameNS(NS.a, "latin")[0]?.setAttribute("typeface", font.trim());
+    }
   }
 
   /**

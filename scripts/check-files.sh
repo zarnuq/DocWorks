@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check Doc Works against a folder of real .docx / .pptx files (searched recursively):
+# Check Doc Works against a folder of real .docx / .pptx / .xlsx files (searched recursively):
 #   1. unchanged files write back byte-identical, and edited ones reload (tests/real-files.test.ts)
 #   2. heavily edited copies are written (tests/export-samples.test.ts)
 #   3. if LibreOffice is available (soffice on PATH, or SOFFICE=<path>), originals and edited copies are
@@ -11,7 +11,7 @@ src=$(realpath "${1:?usage: check-files.sh <folder>}")
 out=$(mktemp -d)
 mkdir -p "$out/files" "$out/edited"
 
-find "$src" -name '.*' -prune -o \( -name '*.docx' -o -name '*.pptx' \) -print0 |
+find "$src" -name '.*' -prune -o \( -name '*.docx' -o -name '*.pptx' -o -name '*.xlsx' \) -print0 |
   while IFS= read -r -d '' f; do
     rel=${f#"$src"/}
     cp "$f" "$out/files/${rel//\//_}"
@@ -20,7 +20,7 @@ find "$src" -name '.*' -prune -o \( -name '*.docx' -o -name '*.pptx' \) -print0 
 cp tests/fixtures/sample.docx tests/fixtures/sample.pptx "$out/files/"
 echo "$(ls "$out/files" | wc -l) files copied to $out/files"
 
-DOC_WORKS_DOCS="$out/files" DOC_WORKS_DECKS="$out/files" DOC_WORKS_EXPORT="$out/edited" \
+DOC_WORKS_DOCS="$out/files" DOC_WORKS_DECKS="$out/files" DOC_WORKS_BOOKS="$out/files" DOC_WORKS_EXPORT="$out/edited" \
   npx vitest run tests/real-files.test.ts tests/export-samples.test.ts
 
 soffice=${SOFFICE:-$(command -v soffice || command -v libreoffice || true)}
@@ -28,8 +28,21 @@ if [ -z "$soffice" ]; then
   echo "LibreOffice not found (set SOFFICE=<path>): skipped the conversion check"
   exit 0
 fi
-"$soffice" --headless --convert-to pdf --outdir "$out/pdf-orig" "$out"/files/* >"$out/orig.log" 2>&1 || true
-"$soffice" --headless --convert-to pdf --outdir "$out/pdf-edited" "$out"/edited/* >"$out/edited.log" 2>&1 || true
+"$soffice" -env:UserInstallation="file://$out/lo-profile" --headless --convert-to pdf --outdir "$out/pdf-orig" "$out"/files/* >"$out/orig.log" 2>&1 || { cat "$out/orig.log"; exit 1; }
+"$soffice" -env:UserInstallation="file://$out/lo-profile" --headless --convert-to pdf --outdir "$out/pdf-edited" "$out"/edited/* >"$out/edited.log" 2>&1 || { cat "$out/edited.log"; exit 1; }
+# Some failed launches exit successfully without converting anything. Check every expected PDF.
+for kind in orig edited; do
+  folder=files
+  if [ "$kind" = edited ]; then folder=edited; fi
+  for file in "$out/$folder"/*; do
+    name=${file##*/}
+    if [ ! -s "$out/pdf-$kind/${name%.*}.pdf" ]; then
+      cat "$out/$kind.log"
+      echo "Missing PDF for $file" >&2
+      exit 1
+    fi
+  done
+done
 
 python3 - "$out/edited.log" "$out/orig.log" <<'EOF'
 import collections, re, sys

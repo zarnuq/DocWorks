@@ -11,6 +11,13 @@ const DEFAULT_MAIN = "word/document.xml";
 const NUMBERING_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
 const BULLETS = ["•", "◦", "▪"];
 const ORDERED_FORMATS = ["decimal", "lowerLetter", "lowerRoman"];
+const W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
+const W15 = "http://schemas.microsoft.com/office/word/2012/wordml";
+export interface DocxComment {
+  id: string; author: string; initials: string; date: string; text: string;
+  parentId?: string;
+  resolved?: boolean;
+}
 
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -265,14 +272,72 @@ export class DocxDocument extends OoxmlPackage {
     return Array.from(part?.getElementsByTagNameNS(NS.w, tag) ?? []).filter((n) => !["separator", "continuationSeparator", "continuationNotice"].includes(wVal(n, "type") ?? ""));
   }
 
-  comments(): { id: string; author: string; initials: string; date: string; text: string }[] {
-    return this.notes(this.partOf("comments"), "comment").map((c) => ({
+  comments(): DocxComment[] {
+    const comments = this.notes(this.partOf("comments"), "comment");
+    const ids = new Map(comments.map(c => [this.commentParaId(c), wVal(c, "id")!]));
+    const extensions = new Map(Array.from(this.partOf("commentsExtended")?.getElementsByTagNameNS(W15, "commentEx") ?? []).map(e => [e.getAttributeNS(W15, "paraId"), e]));
+    return comments.map((c) => {
+      const ex = extensions.get(this.commentParaId(c));
+      const parentId = ids.get(ex?.getAttributeNS(W15, "paraIdParent") ?? null);
+      return ({
       id: wVal(c, "id") ?? "",
       author: wVal(c, "author") ?? "",
       initials: wVal(c, "initials") ?? "",
       date: wVal(c, "date") ?? "",
       text: noteText(c),
-    }));
+      ...(parentId ? { parentId } : {}),
+      ...(ex ? { resolved: ["1", "true", "on"].includes(ex.getAttributeNS(W15, "done") ?? "") } : {}),
+    }); });
+  }
+
+  private commentParaId(comment: Element): string | null {
+    const paragraphs = comment.getElementsByTagNameNS(NS.w, "p");
+    return paragraphs[paragraphs.length - 1]?.getAttributeNS(W14, "paraId") ?? null;
+  }
+
+  private commentExtension(id: string): Element {
+    const comment = this.notes(this.partOf("comments"), "comment").find(c => wVal(c, "id") === id);
+    if (!comment) throw new Error("Comment no longer exists");
+    let paraId = this.commentParaId(comment);
+    if (!paraId) {
+      const used = new Set(this.notes(this.partOf("comments"), "comment").map(c => this.commentParaId(c)));
+      let n = 1;
+      while (used.has(n.toString(16).toUpperCase().padStart(8, "0"))) n++;
+      paraId = n.toString(16).toUpperCase().padStart(8, "0");
+      const paragraphs = comment.getElementsByTagNameNS(NS.w, "p");
+      paragraphs[paragraphs.length - 1].setAttributeNS(W14, "w14:paraId", paraId);
+    }
+    let part = this.partOf("commentsExtended");
+    if (!part) {
+      const path = "word/commentsExtended.xml";
+      this.putXml(path, parseXml(`<w15:commentsEx xmlns:w15="${W15}"/>`)!, "application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml");
+      this.addRel(this.mainPath, "http://schemas.microsoft.com/office/2011/relationships/commentsExtended", path);
+      part = this.xml(path)!;
+    }
+    const existing = Array.from(part.documentElement.children).find(e => e.getAttributeNS(W15, "paraId") === paraId);
+    if (existing) return existing;
+    const ex = part.documentElement.appendChild(part.createElementNS(W15, "w15:commentEx"));
+    ex.setAttributeNS(W15, "w15:paraId", paraId);
+    return ex;
+  }
+
+  replyToComment(parentId: string, text: string, author: string): string {
+    // Replies to replies belong to the same top-level thread.
+    const seen = new Set<string>();
+    let parent = this.comments().find(c => c.id === parentId);
+    if (!parent) throw new Error("Comment no longer exists");
+    while (parent.parentId && !seen.has(parent.id)) {
+      seen.add(parent.id);
+      parent = this.comments().find(c => c.id === parent!.parentId) ?? parent;
+    }
+    const parentEx = this.commentExtension(parent.id);
+    const id = this.addComment(text, author);
+    this.commentExtension(id).setAttributeNS(W15, "w15:paraIdParent", parentEx.getAttributeNS(W15, "paraId")!);
+    return id;
+  }
+
+  setCommentResolved(id: string, resolved: boolean): void {
+    this.commentExtension(id).setAttributeNS(W15, "w15:done", resolved ? "1" : "0");
   }
 
   /** New comment; returns its id (anchor it in the text with the editor's addCommentAnchors). */
@@ -290,11 +355,25 @@ export class DocxDocument extends OoxmlPackage {
 
   setCommentText(id: string, text: string): void {
     const el = this.notes(this.partOf("comments"), "comment").find((c) => wVal(c, "id") === id);
-    if (el) setNoteText(el, text);
+    if (el) {
+      const paraId = this.commentParaId(el);
+      setNoteText(el, text);
+      if (paraId) {
+        const paragraphs = el.getElementsByTagNameNS(NS.w, "p");
+        paragraphs[paragraphs.length - 1].setAttributeNS(W14, "w14:paraId", paraId);
+      }
+    }
   }
 
   deleteComment(id: string): void {
-    this.notes(this.partOf("comments"), "comment").find((c) => wVal(c, "id") === id)?.remove();
+    for (const reply of this.comments().filter(c => c.parentId === id)) this.deleteComment(reply.id);
+    const comment = this.notes(this.partOf("comments"), "comment").find((c) => wVal(c, "id") === id);
+    if (!comment) return;
+    const paraId = this.commentParaId(comment);
+    for (const ex of Array.from(this.partOf("commentsExtended")?.documentElement.children ?? [])) {
+      if (ex.getAttributeNS(W15, "paraId") === paraId) ex.remove();
+    }
+    comment.remove();
   }
 
   // --- Footnotes -------------------------------------------------------------------

@@ -135,12 +135,14 @@ describe("copy and paste", () => {
     expect(back.mediaPaths()).toContain(media);
   });
 
-  it("skips charts and diagrams it cannot copy", async () => {
+  it("copies chart resources independently", async () => {
     const doc = await loadSample();
     const from = doc.slides()[2].path;
     const frame = Array.from(doc.xml(from)!.getElementsByTagNameNS(P, "graphicFrame")).find((f) => !f.getElementsByTagNameNS(A, "tbl").length)!;
     const clip = await copyItems(doc, from, [frame]);
-    expect(pasteItems(doc, doc.slides()[1].path, clip, { dx: 0, dy: 0 })).toMatchObject({ pasted: [], skipped: 1 });
+    const result = pasteItems(doc, doc.slides()[1].path, clip, { dx: 0, dy: 0 });
+    expect(result.pasted).toHaveLength(1);
+    expect(result.skipped).toBe(0);
   });
 
   it("moves pasted rects with setRect after the fact", async () => {
@@ -149,4 +151,13 @@ describe("copy and paste", () => {
     setRect(a, { x: 20, y: 20, w: 100, h: 100 });
     expect(rectOf(a).x).toBe(20);
   });
+});
+
+it("copies SmartArt with its cached drawing between presentations", async () => {
+ const doc=await loadSample();const from=doc.slides()[2].path;
+ const frame=Array.from(doc.xml(from)!.getElementsByTagNameNS(P,"graphicFrame")).find(f=>f.getElementsByTagNameNS("*","relIds").length)!;
+ const other=await loadSample();const target=other.slides()[0].path;
+ const clip=await copyItems(doc,from,[frame]);const result=pasteItems(other,target,clip,{dx:0,dy:0});
+ expect(result.skipped).toBe(0);expect(result.pasted).toHaveLength(1);
+ const model=parseSlide(other,target);expect(model.shapes.filter(s=>s.el.namespaceURI!==P&&s.inherited)).toHaveLength(2);
 });

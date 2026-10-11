@@ -1,3 +1,5 @@
+import { addChart, chartWorkbook, prepareChartEdit } from "../src/domain/pptx/chart";
+import { addMedia, setMediaPlayback } from "../src/domain/pptx/media";
 /*
  * Writes heavily edited copies of the fixtures (and of real files, when
  * DOC_WORKS_DECKS / DOC_WORKS_DOCS are set) into DOC_WORKS_EXPORT, so another
@@ -26,6 +28,8 @@ import { docxSchema as schema } from "../src/domain/docx/schema";
 import { DocxStyles } from "../src/domain/docx/docx-styles";
 import { cmd, EditorContext, pageNumberNode } from "../src/presentation/docx/docx-editor";
 import { acceptRevisions } from "../src/domain/docx/revisions";
+import { writeTransition } from "../src/domain/pptx/animation";
+import { addAnimation } from "../src/domain/pptx/animation-edit";
 const fixture = (file: string) => join(__dirname, "fixtures", file);
 
 const out = process.env.DOC_WORKS_EXPORT;
@@ -39,6 +43,17 @@ const PNG = Uint8Array.from(
 /** Every pptx edit the editor can make, applied to one deck. */
 async function editDeck(doc: PptxDocument): Promise<void> {
   const slides = doc.slides();
+  const authoringIndex=doc.addSlide(slides.length-1);
+  const authoring=doc.slides()[authoringIndex].path;
+  const data={categories:["North","South"],series:[{name:"Sales",values:[10,20]}]};
+  const chart=addChart(doc,authoring,data,"barChart",await chartWorkbook(data));
+  const chartPath=parseSlide(doc,authoring).shapes.find(s=>s.el===chart)!.chart!.path;
+  const update=await prepareChartEdit(doc,chartPath,{...data,series:[{name:"Income",values:[15,25]}]});
+  doc.putXml(chartPath,update.xml);doc.putBinary(update.workbookPath!,update.workbook!);
+  for(const [kind,ext] of [["audio","wav"],["video","mp4"]] as const){const media=addMedia(doc,authoring,new Uint8Array(readFileSync(fixture(`sample-${kind}.${ext}`))),kind,ext,kind);setMediaPlayback(doc.xml(authoring)!,media,{autoPlay:false,loop:true});}
+  const sourceLayout=doc.layoutOf(authoring)!;const custom=doc.createLayout(sourceLayout,"Custom test layout");
+  doc.addLayoutPlaceholder(custom,"body"); doc.setLayout(authoringIndex,custom);
+  const theme=doc.themeOf(doc.masterOf(custom)!);if(theme)doc.setTheme(theme,{accent1:"4285f4"});
   // A slide with every preset shape, each styled differently.
   const index = doc.addSlide(slides.length - 1);
   const path = doc.slides()[index].path;
@@ -77,6 +92,9 @@ async function editDeck(doc: PptxDocument): Promise<void> {
 
   // Text, notes, hiding, images, slide operations.
   const tb = addTextBox(xml, { x: cx * 0.6, y: cy * 0.85, w: cx * 0.35, h: cy * 0.1 }, "Edited by Doc Works");
+  writeTransition(xml, { type: "push", dir: "l", dur: 850 });
+  addAnimation(xml, shapeId(tb), { type: "fade-in", dur: 700 });
+  addAnimation(xml, shapeId(a), { type: "fly-left", trigger: "after", dur: 900 });
   const model = parseSlide(doc, path).shapes.find((s) => s.el === tb)!;
   writeParagraphs(model.text!, [{ align: "ctr", lvl: 0, bullet: null, runs: [{ ...model.text!.paras[0].runs[0], text: "Edited ", b: true }, { ...model.text!.paras[0].runs[0], text: "by Doc Works", i: true, color: "#C0504D" }] }]);
   // Text: numbering, spacing, character spacing, a link, a field, text box settings.
@@ -164,6 +182,7 @@ function editDocx(docx: DocxDocument): void {
   run(cmd.shiftLevel(1));
   run(cmd.toggleList(ctx, "ordered"));
   run(cmd.insertPageBreak);
+  run(cmd.setEquation(null, "\\frac{-b\\pm \\sqrt{b^2-4ac}}{2a}+\\sum_{i=1}^{n}{x_i}"));
   run(cmd.insertTable(3, 3));
   run(cmd.addRow(true));
   run(cmd.addColumn(true));

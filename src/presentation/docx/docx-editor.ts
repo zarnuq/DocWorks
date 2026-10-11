@@ -3,18 +3,19 @@
  * editor. No Obsidian imports, so everything here runs under jsdom tests.
  */
 import { Attrs, MarkType, Node as PMNode, ResolvedPos } from "prosemirror-model";
-import { Command, EditorState, Plugin, TextSelection, Transaction } from "prosemirror-state";
-import { Decoration, DecorationSet } from "prosemirror-view";
+import { Command, EditorState, Plugin, PluginKey, TextSelection, Transaction } from "prosemirror-state";
+import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
 import { baseKeymap, chainCommands, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { InputRule, inputRules } from "prosemirror-inputrules";
-import { attrsOf, docxSchema as schema, HEADING_LEVEL, Align, CellAttrs, ParagraphAttrs, TableAttrs, TableBorders } from "../../domain/docx/schema";
+import { attrsOf, docxSchema as schema, HEADING_LEVEL, Align, CellAttrs, ParagraphAttrs, TableAttrs, TableBorders, TabStop } from "../../domain/docx/schema";
 import { DocxStyles, lineHeight } from "../../domain/docx/docx-styles";
 import { fontStack } from "../../core/utils/fonts";
-import { letterSpacing } from "../pptx/text-fit";
+import { letterSpacing, textWidthEm } from "../pptx/text-fit";
 import { pageAt } from "./docx-pages";
 import { Columns, DEFAULT_SECTPR, ONE_COLUMN, regroup, sections, sectionType, withColumns, withType } from "../../domain/docx/sections";
+import { latexToOmml, ommlToLatex } from "../../domain/docx/math";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
 
@@ -404,7 +405,32 @@ export function linkHref(state: EditorState): string | null {
   return (link?.attrs.href as string | null | undefined) ?? null;
 }
 
+const isEquation = (node: PMNode | null | undefined): node is PMNode => node?.type === schema.nodes.opaque && /^<m:oMath/.test(node.attrs.xml as string);
+
 export const cmd = {
+  /** LaTeX of the equation at `pos`, or null when there is none. */
+  equationAt(state: EditorState, pos: number): string | null {
+    const node = state.doc.nodeAt(pos);
+    return isEquation(node) ? ommlToLatex(node.attrs.xml as string) : null;
+  },
+
+  /** Insert an equation at the cursor (`pos` null) or rewrite the one at `pos`; empty LaTeX removes it. */
+  setEquation:
+    (pos: number | null, latex: string): Command =>
+    (state, dispatch) => {
+      const old = pos === null ? null : state.doc.nodeAt(pos);
+      if (pos !== null && !isEquation(old)) return false;
+      if (!latex.trim()) {
+        if (old && pos !== null && dispatch) dispatch(state.tr.delete(pos, pos + old.nodeSize));
+        return !!old;
+      }
+      const xml = latexToOmml(latex, /^<m:oMathPara/.test((old?.attrs.xml as string | undefined) ?? ""));
+      const text = new DOMParser().parseFromString(xml, "application/xml").documentElement.textContent ?? "";
+      const node = schema.nodes.opaque.create({ xml, text }, null, old?.marks);
+      if (dispatch) dispatch((old && pos !== null ? state.tr.replaceWith(pos, pos + old.nodeSize, node) : state.tr.replaceSelectionWith(node)).scrollIntoView());
+      return true;
+    },
+
   setColumns,
   columnsAt,
   insertSectionBreak,
@@ -742,6 +768,7 @@ function paragraphCss(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number
   if (a.spaceBefore !== null) css.push(`margin-top: ${a.spaceBefore}pt`);
   if (a.spaceAfter !== null) css.push(`margin-bottom: ${a.spaceAfter}pt`);
   if (a.firstLine) css.push(`text-indent: ${a.firstLine}pt`);
+  if (a.rightIndent !== null) css.push(`margin-right: ${a.rightIndent}pt`);
   return css.filter(Boolean).join("; ");
 }
 
@@ -814,6 +841,8 @@ export function styleRenderedParagraphs(root: HTMLElement, doc: PMNode, styles: 
     const a = attrsOf<TableAttrs>(node);
     const borders = a.borders ? null : styles.tableBorders(a.style);
     if (el && borders) el.classList.add(`docx-borders-${borders}`);
+    const pad = styles.cellPaddingCss(a.style);
+    if (el && pad) el.style.cssText += `; ${pad}`;
     return true;
   });
   const els = Array.from(root.querySelectorAll<HTMLElement>("p, h1, h2, h3, h4, h5, h6"));
@@ -823,6 +852,49 @@ export function styleRenderedParagraphs(root: HTMLElement, doc: PMNode, styles: 
     els[i++]?.setAttribute("style", paragraphCss(styles, doc, node, pos));
     return false;
   });
+}
+
+export function tabAdvance(tabs: TabStop[], current: number, followingWidth: number, decimalWidth: number): number {
+  const stop = [...tabs].sort((a, b) => a.pt - b.pt).find(t => t.align !== "clear" && t.pt * 4 / 3 > current + 0.5);
+  if (!stop) return Math.ceil((current + 1) / 48) * 48 - current;
+  const offset = stop.align === "center" ? followingWidth / 2 : ["right", "end"].includes(stop.align) ? followingWidth : stop.align === "decimal" ? decimalWidth : 0;
+  return Math.max(0, stop.pt * 4 / 3 - current - offset);
+}
+
+const tabsKey = new PluginKey("docx-tab-stops");
+const tabStyle = (width: number) => `display: inline-block; white-space: pre; font-size: 0; width: ${width}px`;
+function renderTabStops(view: EditorView, styles: DocxStyles): void {
+  const widths: { pos: number; width: number }[] = [];
+  let changed = false;
+  view.state.doc.descendants((node, pos) => {
+    if (node.type !== schema.nodes.paragraph) return true;
+    const a = attrsOf<ParagraphAttrs>(node);
+    if (!a.tabs?.length || a.tabLeader) return false;
+    const paragraph = view.nodeDOM(pos);
+    if (!(paragraph instanceof HTMLElement)) return false;
+    const elements = Array.from(paragraph.querySelectorAll<HTMLElement>(".docx-explicit-tab"));
+    const stops = a.tabs;
+    let i = 0;
+    node.forEach((child, offset) => {
+      if (!child.isText) return;
+      for (let at = child.text!.indexOf("\t"); at >= 0; at = child.text!.indexOf("\t", at + 1)) {
+        const span = elements[i++];
+        if (!span) continue;
+        const zoom = Number.parseFloat(view.dom.style.zoom) || 1;
+        const current = (span.getBoundingClientRect().left - paragraph.getBoundingClientRect().left) / zoom + a.indent * 48;
+        const text = node.textBetween(offset + at + 1, node.content.size, "", "").split(/[\t\n]/)[0];
+        const cs = getComputedStyle(paragraph);
+        const size = Number.parseFloat(cs.fontSize) || 16;
+        const font = styles.fontFor(a.style, null) ?? "Calibri";
+        const width = (text: string) => (textWidthEm(text, font, cs.fontWeight === "bold" || Number(cs.fontWeight) >= 600, cs.fontStyle === "italic") ?? text.length * 0.5) * size;
+        const advance = tabAdvance(stops, current, width(text), width(text.split(/[.,]/)[0]));
+        widths.push({ pos: pos + 1 + offset + at, width: advance });
+        if (Math.abs((Number.parseFloat(span.style.width) || 0) - advance) > 0.5) changed = true;
+      }
+    });
+    return false;
+  });
+  if (changed) view.dispatch(view.state.tr.setMeta(tabsKey, widths).setMeta("addToHistory", false));
 }
 
 function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
@@ -839,8 +911,10 @@ function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
   doc.descendants((node, pos) => {
     if (node.type === schema.nodes.table) {
       tableDecorations(node, pos, decos);
-      const borders = attrsOf<TableAttrs>(node).borders ? null : styles.tableBorders(attrsOf<TableAttrs>(node).style);
-      if (borders) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `docx-borders-${borders}` }));
+      const { borders: own, style } = attrsOf<TableAttrs>(node);
+      const borders = own ? null : styles.tableBorders(style);
+      const pad = styles.cellPaddingCss(style);
+      if (borders || pad) decos.push(Decoration.node(pos, pos + node.nodeSize, { ...(borders ? { class: `docx-borders-${borders}` } : {}), ...(pad ? { style: pad } : {}) }));
       return true;
     }
     if (node.type !== schema.nodes.paragraph) return true;
@@ -860,13 +934,15 @@ function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
     // ponytail: in that row a text node of only spaces between two styled spans collapses; real TOC lines don't have one.
     const leader = attrsOf<ParagraphAttrs>(node).tabLeader;
     const tabs: number[] = [];
-    if (leader)
+    if (leader || attrsOf<ParagraphAttrs>(node).tabs?.length)
       node.forEach((child, offset) => {
         for (let i = child.isText ? child.text!.indexOf("\t") : -1; i >= 0; i = child.text!.indexOf("\t", i + 1)) tabs.push(pos + 1 + offset + i);
       });
-    if (tabs.length) {
+    if (tabs.length && leader) {
       attrs.class = [attrs.class, "docx-tab-right"].filter(Boolean).join(" ");
       tabs.forEach((at, i) => decos.push(Decoration.inline(at, at + 1, { class: i === tabs.length - 1 ? `docx-tab-fill docx-leader-${leader}` : "docx-tab" })));
+    } else if (tabs.length) {
+      tabs.forEach(at => decos.push(Decoration.inline(at, at + 1, { class: "docx-explicit-tab", style: tabStyle(0) }, { tabStop: true })));
     }
     attrs.style = css.filter(Boolean).join("; ");
     decos.push(Decoration.node(pos, pos + node.nodeSize, attrs));
@@ -935,12 +1011,27 @@ export function docxPlugins(ctx: EditorContext, extraKeys: Record<string, Comman
     new Plugin({
       state: {
         init: (_, state) => decorations(ctx.styles, state.doc),
-        apply: (tr: Transaction, old: DecorationSet) => (tr.docChanged ? decorations(ctx.styles, tr.doc) : old),
+        apply: (tr: Transaction, old: DecorationSet) => {
+          if (tr.docChanged) return decorations(ctx.styles, tr.doc);
+          const widths = tr.getMeta(tabsKey) as { pos: number; width: number }[] | undefined;
+          if (!widths) return old;
+          return old.remove(old.find().filter(d => (d.spec as { tabStop?: boolean }).tabStop)).add(tr.doc,
+            widths.map(t => Decoration.inline(t.pos, t.pos + 1, { class: "docx-explicit-tab", style: tabStyle(t.width) }, { tabStop: true })));
+        },
       },
       props: {
         decorations(state) {
           return this.getState(state);
         },
+      },
+      view(view) {
+        let timer = 0;
+        const schedule = () => {
+          if (timer) return;
+          timer = window.setTimeout(() => { timer = 0; renderTabStops(view, ctx.styles); }, 0);
+        };
+        schedule();
+        return { update: schedule, destroy: () => window.clearTimeout(timer) };
       },
     }),
     findPlugin(),

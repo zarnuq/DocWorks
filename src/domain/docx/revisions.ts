@@ -54,7 +54,11 @@ function unwrap(el: Element): void {
 /** Join paragraph `p` with the next one (its mark was deleted). */
 function joinNext(p: Element): void {
   const next = p.nextElementSibling;
-  if (!next || next.localName !== "p") return;
+  if (!next || next.localName !== "p") {
+    // Removing a proposed trailing paragraph must not leave its empty shell behind.
+    if (p.previousElementSibling && !Array.from(p.children).some(c => c.localName !== "pPr")) p.remove();
+    return;
+  }
   for (const child of Array.from(next.childNodes)) if ((child as Element).localName !== "pPr") p.appendChild(child);
   next.remove();
 }
@@ -110,7 +114,11 @@ function apply(root: Element, ids: Set<string> | undefined, accept: boolean): nu
       const removeOwner = accept ? isDel : isIns;
       if (removeOwner) {
         if (owner.localName === "p") joinNext(owner);
-        else owner.remove();
+        else {
+          const table = owner.parentElement;
+          owner.remove();
+          if (table?.localName === "tbl" && !Array.from(table.children).some(c => c.localName === "tr")) table.remove();
+        }
       }
     } else if (isProp) {
       if (accept) el.remove();

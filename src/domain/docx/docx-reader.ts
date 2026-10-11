@@ -2,7 +2,7 @@ import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, childNS } from "../../core/utils/xml";
 import { regroup } from "./sections";
 import { placementOf } from "./drawing";
-import { docxSchema as schema, Align } from "./schema";
+import { docxSchema as schema, Align, TabStop } from "./schema";
 
 export interface ReadContext {
   /** Preview URL for an image relationship. */
@@ -62,6 +62,8 @@ export interface ParagraphProps {
   ilvl: number;
   lineSpacing: string | null;
   indent: number;
+  rightIndent: number | null;
+  tabs: TabStop[] | null;
   spaceBefore: number | null;
   spaceAfter: number | null;
   firstLine: number | null;
@@ -78,7 +80,7 @@ const pt = (twips: string | null) => (twips === null ? null : Math.round((Number
 function rightTabLeader(tabs: Element | null): string | null {
   const stops = tabs ? Array.from(tabs.children).filter((t) => t.localName === "tab" && wVal(t) !== "clear") : [];
   const last = stops.sort((a, b) => Number(wVal(a, "pos")) - Number(wVal(b, "pos"))).pop();
-  return last && ["right", "end"].includes(wVal(last) ?? "") ? wVal(last, "leader") ?? "none" : null;
+  return last && ["right", "end"].includes(wVal(last) ?? "") && wVal(last, "leader") ? wVal(last, "leader") : null;
 }
 
 export function paragraphProps(pPr: Element | null): ParagraphProps {
@@ -95,7 +97,9 @@ export function paragraphProps(pPr: Element | null): ParagraphProps {
     numId: numId && numId !== "0" ? numId : null,
     ilvl: Number(wVal(w(numPr, "ilvl")) ?? 0),
     lineSpacing: line && (!rule || rule === "auto") ? String(Math.round((Number(line) / 240) * 100) / 100) : null,
-    indent: left > 0 ? Math.round(left / 720) : 0,
+    indent: left / 720,
+    rightIndent: pt(wVal(ind, "right") ?? wVal(ind, "end")),
+    tabs: w(pPr, "tabs") ? Array.from(w(pPr, "tabs")!.children).filter(t => t.localName === "tab").map(t => ({ pt: pt(wVal(t, "pos")) ?? 0, align: wVal(t) ?? "left", leader: wVal(t, "leader") })) : null,
     spaceBefore: pt(wVal(spacing, "before")),
     spaceAfter: pt(wVal(spacing, "after")),
     firstLine: wVal(ind, "hanging") !== null ? -pt(wVal(ind, "hanging"))! : pt(wVal(ind, "firstLine")),
@@ -139,10 +143,8 @@ export function vMergeOf(tcPr: Element | null): "restart" | "continue" | null {
 
 const NO_LINE = new Set(["nil", "none"]);
 
-/** A cell's own border overrides (w:tcBorders), as "t:none b:line"; null when it has none. Display only. */
-/** Cell padding as "top right bottom left" in pt ("-" = default), from the cell's w:tcMar, else the table's w:tblCellMar. */
+/** Cell padding as "top right bottom left" in pt ("-" = default), from the cell's w:tcMar, else the table's w:tblCellMar (a table style's comes from DocxStyles.cellPaddingCss). */
 function marginsOf(tcPr: Element | null, tblPr: Element | null): string | null {
-  // ponytail: a table style's tblCellMar isn't read; such tables keep the default padding.
   const sides = [["top"], ["right", "end"], ["bottom"], ["left", "start"]].map((names) => {
     for (const mar of [w(tcPr, "tcMar"), w(tblPr, "tblCellMar")]) {
       const side = names.map((n) => w(mar, n)).find(Boolean);
@@ -153,6 +155,7 @@ function marginsOf(tcPr: Element | null, tblPr: Element | null): string | null {
   return sides.every((x) => x === "-") ? null : sides.join(" ");
 }
 
+/** A cell's own border overrides (w:tcBorders), as "t:none b:line"; null when it has none. Display only. */
 export function edgesOf(tcPr: Element | null): string | null {
   const b = w(tcPr, "tcBorders");
   if (!b) return null;

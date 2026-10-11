@@ -19,10 +19,10 @@ const PRESET: Record<string, string> = {
 
 const COLOR_TAGS = new Set(["srgbClr", "schemeClr", "sysClr", "prstClr", "scrgbClr", "hslClr"]);
 
-const hex = (rgb: number[]) =>
+export const hex = (rgb: number[]) =>
   "#" + rgb.map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, "0")).join("").toUpperCase();
 
-function rgbToHsl([r, g, b]: number[]): [number, number, number] {
+export function rgbToHsl([r, g, b]: number[]): [number, number, number] {
   r /= 255;
   g /= 255;
   b /= 255;
@@ -36,7 +36,7 @@ function rgbToHsl([r, g, b]: number[]): [number, number, number] {
   return [h / 6, s, l];
 }
 
-function hslToRgb([h, s, l]: number[]): number[] {
+export function hslToRgb([h, s, l]: number[]): number[] {
   if (s === 0) return [l * 255, l * 255, l * 255];
   const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
   const p = 2 * l - q;
