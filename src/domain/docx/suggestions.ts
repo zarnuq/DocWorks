@@ -81,7 +81,8 @@ class Recorder {
   }
   private properties(old: Element | null, next: Element, name: string): void {
     const now = w(next, name);
-    if ((!old && !now) || (old && now && old.isEqualNode(now))) return;
+    // Compare the written XML: rebuilt properties can differ from parsed ones only in how attributes were created.
+    if ((!old && !now) || (old && now && xml(old) === xml(now))) return;
     const props = now ?? next.insertBefore(element(next.ownerDocument, name), next.firstChild);
     if (w(props, `${name}Change`)) return; // retain the original baseline of an existing suggestion
     const signature = `${name}:${old ? xml(old) : ""}:${xml(props)}`;

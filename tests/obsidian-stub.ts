@@ -93,7 +93,7 @@ export class Setting {
   setDesc() { return this; }
   setHeading() { return this; }
   private control(cb: Fn) {
-    const c: any = { setValue: () => c, onChange: () => c, addOptions: () => c, setPlaceholder: () => c, setLimits: () => c };
+    const c: any = { setValue: () => c, onChange: () => c, addOptions: () => c, setPlaceholder: () => c, setLimits: () => c, inputEl: this.settingEl.createEl("input") };
     cb(c);
     return this;
   }

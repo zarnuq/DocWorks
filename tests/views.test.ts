@@ -575,6 +575,24 @@ describe("slide authoring additions",()=>{
   await vi.waitFor(()=>expect(v.model.shapes.find((s:any)=>s.chart).chart.format.kind).toBe("pie"));
   await view.onUnloadFile(file);
  });
+ it("keeps the caret in the text box after Ctrl+Z / Ctrl+Y there, so typing carries on",async()=>{
+  const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
+  const shape=v.rendered.find((r:any)=>r.textEl&&!r.shape.inherited);
+  const ids=shape.el.dataset.spids;
+  v.mutate((d:any)=>d.addSlide(v.index));v.index=0;v.renderAll();
+  const textEl=v.rendered.find((r:any)=>r.el.dataset.spids===ids).textEl as HTMLElement;
+  // jsdom can't focus contenteditable elements: record what gets focused instead.
+  const focused:HTMLElement[]=[];
+  const spy=vi.spyOn(HTMLElement.prototype,"focus").mockImplementation(function(this:HTMLElement){focused.push(this);});
+  textEl.dispatchEvent(new KeyboardEvent("keydown",{key:"z",ctrlKey:true,bubbles:true}));
+  const again=v.rendered.find((r:any)=>r.el.dataset.spids===ids).textEl as HTMLElement;
+  expect(again).not.toBe(textEl);
+  expect(focused.at(-1)).toBe(again);
+  again.dispatchEvent(new KeyboardEvent("keydown",{key:"y",ctrlKey:true,bubbles:true}));
+  expect(focused.at(-1)).toBe(v.rendered.find((r:any)=>r.el.dataset.spids===ids).textEl);
+  spy.mockRestore();
+  await view.onUnloadFile(file);
+ });
  it("undoes with Ctrl+Z after a dialog closes, when focus is on the page rather than the slide",async()=>{
   const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
   Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Chart")!.click();

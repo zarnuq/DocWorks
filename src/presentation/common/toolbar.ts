@@ -102,7 +102,12 @@ export function promptText(app: App, title: string, value: string): Promise<stri
     };
     new Setting(modal.contentEl).addText((text) => {
       text.setValue(value).onChange((v) => (value = v));
-      text.inputEl.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+      // Cancel the key too: focus returns to the editor before the key's input, which would add a line break there.
+      text.inputEl.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" || e.isComposing) return;
+        e.preventDefault();
+        submit();
+      });
       window.setTimeout(() => text.inputEl.select());
     });
     new Setting(modal.contentEl)

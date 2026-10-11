@@ -28,6 +28,18 @@ async function setup(text = "Original text") {
 const plain = (body: Element) => readDocx(body, context).doc.textContent;
 
 describe("suggestion recording", () => {
+  it("doesn't record a format change on an untouched link when typing elsewhere in its paragraph", async () => {
+    const pkg = await DocxDocument.load(await blankDocx());
+    const p = new DOMParser().parseFromString(`<w:p xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:r><w:t xml:space="preserve">This report covers the </w:t></w:r><w:hyperlink r:id="rId9"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr><w:t>study website</w:t></w:r></w:hyperlink><w:r><w:t>.</w:t></w:r></w:p>`, "application/xml").documentElement;
+    pkg.body.insertBefore(pkg.body.ownerDocument.importNode(p, true), pkg.body.firstChild);
+    const ctx = { imageSrc: () => null, hyperlinkHref: () => "https://example.org" };
+    const { doc, origins } = readDocx(pkg.body, ctx);
+    const state = EditorState.create({ doc });
+    const next = state.apply(suggestTransaction(state.tr.insertText("big ", 6), origins, pkg, ctx, "Ada"));
+    writeBody(pkg.body, next.doc, origins, pkg);
+    expect(revisions(pkg.body).map(r => [r.kind, r.text])).toEqual([["insert", "big "]]);
+  });
+
   it("records a replacement with author, deletion and insertion and restores either version", async () => {
     const t = await setup();
     t.edit(t.state.tr.insertText("suggested", 10, 14));

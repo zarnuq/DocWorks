@@ -1665,8 +1665,16 @@ export class PptxView extends FileView {
     const key = e.key.toLowerCase();
     if (isMod(e) && (key === "z" || key === "y")) {
       e.preventDefault();
+      // The slide is redrawn: put the caret back in the same box, at the same place in its text.
+      const ids = rs.el.dataset.spids;
+      const at = rs.textEl ? caretOffset(rs.textEl) : 0;
       if (key === "y" || e.shiftKey) this.redo();
       else this.undo();
+      const again = ids ? this.rendered.find((r) => r.el.dataset.spids === ids)?.textEl : null;
+      if (again) {
+        again.focus();
+        placeCaret(again, at);
+      }
     } else if (isMod(e) && (key === "b" || key === "i" || key === "u")) {
       e.preventDefault();
       this.toggle(key);
@@ -2268,4 +2276,34 @@ export class PptxView extends FileView {
   private updateSaveStatus(dirty: boolean): void {
     this.saveIndicatorEl?.setText(dirty ? "Saving…" : "Saved");
   }
+}
+
+/** Characters of `el`'s text before the caret (0 when the caret is elsewhere). */
+function caretOffset(el: HTMLElement): number {
+  const sel = el.ownerDocument.getSelection();
+  if (!sel?.rangeCount || !el.contains(sel.anchorNode)) return 0;
+  const range = el.ownerDocument.createRange();
+  range.selectNodeContents(el);
+  range.setEnd(sel.anchorNode!, sel.anchorOffset);
+  return range.toString().length;
+}
+
+/** Put the caret `offset` characters into `el`'s text (at the end when it's shorter). */
+function placeCaret(el: HTMLElement, offset: number): void {
+  const sel = el.ownerDocument.getSelection();
+  if (!sel) return;
+  const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let left = offset;
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    if (left <= node.length) {
+      sel.collapse(node, left);
+      return;
+    }
+    left -= node.length;
+  }
+  const range = el.ownerDocument.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
 }
