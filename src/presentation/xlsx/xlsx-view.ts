@@ -1,4 +1,4 @@
-import { FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { Edits } from "../../domain/xlsx/commands";
@@ -11,13 +11,16 @@ import { CellMatch, findCells, replaceCells } from "../../domain/xlsx/find";
 import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
 import { FONTS, PaperTheme, Toolbar, promptText, showValue } from "../common/toolbar";
+import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
+import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
+import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
 import { exportPdf } from "../common/pdf";
 import { Grid, Hit } from "./grid";
 import { Picture, sheetPictures } from "../../domain/xlsx/drawing";
 import { addRule, CfStyle, ConditionalFormats, deleteRule, readRules } from "../../domain/xlsx/conditional";
 import { checkValue, invalidateValidations, listItems, removeValidation, setValidation, Validation, validationAt } from "../../domain/xlsx/validation";
 import { conditionalForm, validationForm } from "./rule-forms";
-import { chartModel, chartSource, deleteChart, formatChart, insertChart, setChartSource, SheetChart, sheetCharts } from "../../domain/xlsx/charts";
+import { chartModel, chartSource, deleteChart, formatChart, insertChart, moveChart, setChartSource, SheetChart, sheetCharts } from "../../domain/xlsx/charts";
 import type { ChartModel } from "../../domain/pptx/chart";
 import { renderChart } from "../pptx/chart-renderer";
 import { chartFormatForm, defaultChartFormat } from "../common/chart-form";
@@ -25,6 +28,9 @@ import { IMAGE_MIME } from "../../core/utils/images";
 
 export const VIEW_TYPE_XLSX = "doc-works-xlsx-view";
 const THEME_KEY = "doc-works-xlsx-theme";
+const ZOOM_KEY = "doc-works-xlsx-zoom";
+/** Google Sheets' zoom levels. */
+const ZOOMS = ["0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
 const FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 18, 24, 36];
 const WHOLE_COL = (c1: number, c2: number): Rect => ({ r1: 0, c1, r2: 1048575, c2 });
 
@@ -49,7 +55,7 @@ export class XlsxView extends FileView {
   private edits: Edits | null = null;
   private sheetIndex = 0;
   private grid: Grid | null = null;
-  private theme: PaperTheme = this.app.loadLocalStorage(THEME_KEY) === "light" ? "light" : "dark";
+  private theme: PaperTheme;
   private nameBox!: HTMLInputElement;
   private formulaInput!: HTMLTextAreaElement;
   private tabsEl!: HTMLElement;
@@ -77,8 +83,10 @@ export class XlsxView extends FileView {
   private chartSvgs = new Map<string, { sig: string; el: HTMLElement }>();
   private pictureCache = new Map<string, Picture[]>();
 
-  constructor(leaf: WorkspaceLeaf) {
+  constructor(leaf: WorkspaceLeaf, private settings: DocWorksSettings = { ...DEFAULT_SETTINGS }) {
     super(leaf);
+    // The setting, or (by default) the theme last picked here.
+    this.theme = paperFor(settings, this.app.loadLocalStorage(THEME_KEY) === "light" ? "light" : "dark");
     // Spreadsheet shortcuts win over app hotkeys while the grid has focus; in the editor they're normal text keys.
     this.scope = new Scope(this.app.scope);
     const keys: [("Mod" | "Shift" | "Alt")[], string, () => void][] = [
@@ -94,6 +102,7 @@ export class XlsxView extends FileView {
       [["Mod"], "r", () => this.fillFrom("right")],
       [["Mod"], ";", () => this.insertNow("date")],
       [["Mod", "Shift"], ";", () => this.insertNow("time")],
+      [["Shift"], "F2", () => void this.editNote(this.sel.r1, this.sel.c1)],
     ];
     for (const [mods, key, run] of keys) {
       this.scope.register(mods, key, () => {
@@ -185,11 +194,14 @@ export class XlsxView extends FileView {
       imageUrl: (path) => this.imageUrl(path),
       conditional: (row, col) => this.conditional(this.sheet, row, col),
       dropdown: (row, col) => validationAt(this.sheet, row, col)?.type === "list",
+      moveChart: (key, box) => this.change(() => moveChart(this.edits!, key, box)),
+      note: (row, col) => this.notes().get(cellName(row, col))?.text ?? null,
       invalid: (row, col) => this.invalid(row, col),
       openDropdown: (row, col, at) => this.openDropdown(row, col, at),
       charts: () => this.charts(),
       chartMenu: (key, e) => this.chartMenu(key, e),
     });
+    if (this.savedZoom() !== "1") this.grid.setZoom(Number(this.savedZoom()));
     const bottom = this.contentEl.createDiv({ cls: "xlsx-bottom" });
     this.tabsEl = bottom.createDiv({ cls: "xlsx-tabs" });
     this.statusEl = bottom.createDiv({ cls: "xlsx-status" });
@@ -259,6 +271,7 @@ export class XlsxView extends FileView {
       return false;
     }
     this.cfCache.clear();
+    this.notesCache = null;
     this.invalidCache.clear();
     this.chartCache.clear();
     for (const sheet of this.wb.sheets) invalidateValidations(sheet);
@@ -494,6 +507,7 @@ export class XlsxView extends FileView {
   private afterReload(): void {
     this.pictureCache.clear();
     this.cfCache.clear();
+    this.notesCache = null;
     this.invalidCache.clear();
     this.chartCache.clear();
     this.sheetIndex = Math.min(this.sheetIndex, this.wb.sheets.length - 1);
@@ -612,6 +626,44 @@ export class XlsxView extends FileView {
     if (area) this.grid!.selectRect(area);
   }
 
+  /** The zoom picked last (100% by default). */
+  private savedZoom(): string {
+    const z = this.app.loadLocalStorage(ZOOM_KEY) as string | null;
+    return z && ZOOMS.includes(z) ? z : "1";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notes
+  // ---------------------------------------------------------------------------
+
+  private notesCache: { sheet: string; notes: Map<string, Note> } | null = null;
+  /** The current sheet's notes (read again after every change). */
+  private notes(): Map<string, Note> {
+    const path = this.sheet.ref.path;
+    if (!this.notesCache || this.notesCache.sheet !== path) this.notesCache = { sheet: path, notes: notesOf(this.edits!.wb.pkg, path) };
+    return this.notesCache.notes;
+  }
+
+  private setNoteText(row: number, col: number, text: string | null): void {
+    const path = this.sheet.ref.path;
+    this.change(() => this.edits!.structural(() => setNote(this.edits!.wb.pkg, path, cellName(row, col), text, this.author())));
+    this.notesCache = null;
+    this.grid?.invalidate();
+  }
+
+  /** Google Sheets' Insert › Note (Shift+F2): the cell's note in a box to edit. */
+  private async editNote(row: number, col: number): Promise<void> {
+    const current = this.notes().get(cellName(row, col))?.text ?? "";
+    const text = await promptNote(this.app, `Note on ${cellName(row, col)}`, current);
+    if (text === null || text === current) return;
+    this.setNoteText(row, col, text.trim() ? text : null);
+  }
+
+  /** The name notes are written with: the comment author setting, else "Doc Works". */
+  private author(): string {
+    return this.settings.author.trim() || "Doc Works";
+  }
+
   /**
    * Cut / copy / paste from a menu: the app runs the edit command on the grid's input, which raises the same
    * clipboard events as the keyboard shortcuts (no direct clipboard reads or writes).
@@ -676,6 +728,11 @@ export class XlsxView extends FileView {
     tb.icon("palette", "Conditional formatting", () => this.conditionalDialog());
     tb.icon("list-checks", "Data validation (dropdowns and rules)", () => this.validationDialog());
     tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
+    const zoom = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [`${Math.round(Number(z) * 100)}%`, z]), (z) => {
+      this.grid?.setZoom(Number(z));
+      this.app.saveLocalStorage(ZOOM_KEY, z);
+    });
+    zoom.value = this.savedZoom();
     const { syncTheme, status } = tb.end(this.theme, (t) => this.setTheme(t), "grid");
     this.syncTheme = syncTheme;
     this.saveIndicatorEl = status;
@@ -894,6 +951,11 @@ export class XlsxView extends FileView {
     if (hit.area !== "colHeader") item(`Delete ${rows}`, "trash", () => this.change(() => ops.deleteRows(ed, this.sheet, r.r1, r.r2 - r.r1 + 1)));
     if (hit.area !== "rowHeader") item(`Delete ${cols}`, "trash", () => this.change(() => ops.deleteCols(ed, this.sheet, r.c1, r.c2 - r.c1 + 1)));
     item("Clear contents", "eraser", () => this.change(() => ed.clear(this.sheet, r)));
+    if (hit.area === "cell") {
+      const note = this.notes().get(cellName(r.r1, r.c1));
+      item(note ? "Edit note" : "Insert note", "sticky-note", () => void this.editNote(r.r1, r.c1));
+      if (note) item("Delete note", "trash", () => this.setNoteText(r.r1, r.c1, null));
+    }
     menu.addSeparator();
     if (hit.area === "rowHeader") {
       item(`Hide ${rows}`, "eye-off", () => this.change(() => ops.setHidden(ed, this.sheet, "row", r.r1, r.r2, true)));
@@ -1105,43 +1167,62 @@ export class XlsxView extends FileView {
   // ---------------------------------------------------------------------------
 
   /** Export the current sheet's used range: fit to page width (landscape Letter), rows split across pages. */
+  /** Google Sheets' print screen: what to print, paper, orientation, scale, margins and gridlines; then the PDF. */
   async exportPdf(): Promise<void> {
     if (!this.edits || !this.file) return;
     if (this.grid?.edit) this.grid.commitEdit();
-    const s = this.sheet;
-    const used = s.used();
-    if (!used) return void new Notice("This sheet is empty.");
-    const size = { width: 1056, height: 816 };
-    const margin = 48;
-    const totalW = s.colX(used.c2 + 1) - s.colX(used.c1);
-    const scale = Math.min(1, (size.width - 2 * margin) / totalW);
+    const choice = await printDialog(this.app, printSettings(this.sheet), this.sel.r1 !== this.sel.r2 || this.sel.c1 !== this.sel.c2);
+    if (!choice) return;
+    const { settings, what } = choice;
+    // The settings belong to the sheet (as in Excel): keep them when changed.
+    if (JSON.stringify(settings) !== JSON.stringify(printSettings(this.sheet))) this.change(() => setPrintSettings(this.edits!, this.sheet, settings));
+    const jobs: { sheet: Sheet; range: Rect }[] = [];
+    if (what === "selection") jobs.push({ sheet: this.sheet, range: this.sel });
+    else for (const sheet of what === "workbook" ? this.edits.wb.sheets.filter((s) => s.ref.state === "visible") : [this.sheet]) {
+      const used = sheet.used();
+      if (used) jobs.push({ sheet, range: used });
+    }
+    if (!jobs.length) return void new Notice("There's nothing to print.");
     const pages: HTMLElement[] = [];
-    const painter = new Grid(createDiv(), {
-      sheet: () => s,
-      conditional: (row, col) => this.conditional(s, row, col),
-      isStale: () => false,
-      isCircular: () => false,
-      commit: () => false,
-      selectionChanged: () => undefined,
-      editing: () => undefined,
-      clear: () => undefined,
-      fill: () => undefined,
-      resize: () => undefined,
-      autofit: () => undefined,
-      contextMenu: () => undefined,
-      filterMenu: () => undefined,
-    });
-    let start = used.r1;
-    while (start <= used.r2) {
-      let end = start, h = 0;
-      while (end <= used.r2 && (h + s.rowHeight(end)) * scale <= size.height - 2 * margin) h += s.rowHeight(end++);
-      if (end === start) end++;
-      const page = createDiv({ cls: "dw-print-page xlsx-print-page" });
-      const sheetEl = page.createDiv({ cls: "xlsx-print-sheet" });
-      sheetEl.setCssProps({ "--xlsx-scale": String(scale), "--xlsx-margin": `${margin}px`, "--xlsx-print-w": `${totalW}px`, "--xlsx-print-h": `${h}px` });
-      painter.drawRange(sheetEl, { r1: start, c1: used.c1, r2: end - 1, c2: used.c2 });
-      pages.push(page);
-      start = end;
+    let size = { width: 816, height: 1056 };
+    for (const { sheet, range } of jobs) {
+      const ps = what === "workbook" && sheet !== this.sheet ? printSettings(sheet) : settings;
+      const cols: number[] = [], rows: number[] = [];
+      for (let c = range.c1; c <= range.c2; c++) cols.push(sheet.colWidth(c));
+      for (let r = range.r1; r <= range.r2; r++) rows.push(sheet.rowHeight(r));
+      const plan = pagePlan(cols, rows, ps);
+      // ponytail: one paper size per PDF (the first sheet's); sheets on other paper are scaled onto it.
+      if (!pages.length) size = { width: plan.width, height: plan.height };
+      const painter = new Grid(createDiv(), {
+        sheet: () => sheet,
+        conditional: (row, col) => this.conditional(sheet, row, col),
+        isStale: () => false,
+        isCircular: () => false,
+        commit: () => false,
+        selectionChanged: () => undefined,
+        editing: () => undefined,
+        clear: () => undefined,
+        fill: () => undefined,
+        resize: () => undefined,
+        autofit: () => undefined,
+        contextMenu: () => undefined,
+        filterMenu: () => undefined,
+      });
+      painter.printGridlines = ps.gridlines;
+      for (const p of plan.pages) {
+        const r: Rect = { r1: range.r1 + p.r1, c1: range.c1 + p.c1, r2: range.r1 + p.r2, c2: range.c1 + p.c2 };
+        const page = createDiv({ cls: "dw-print-page xlsx-print-page" });
+        const sheetEl = page.createDiv({ cls: "xlsx-print-sheet" });
+        sheetEl.setCssProps({
+          "--xlsx-scale": String(plan.scale),
+          "--xlsx-margin-top": `${ps.margins.top * 96}px`,
+          "--xlsx-margin-left": `${ps.margins.left * 96}px`,
+          "--xlsx-print-w": `${sheet.colX(r.c2 + 1) - sheet.colX(r.c1)}px`,
+          "--xlsx-print-h": `${sheet.rowY(r.r2 + 1) - sheet.rowY(r.r1)}px`,
+        });
+        painter.drawRange(sheetEl, r);
+        pages.push(page);
+      }
     }
     await exportPdf(this.app, this.file, pages, size);
   }
@@ -1178,4 +1259,71 @@ export class XlsxView extends FileView {
     });
     return this.saving;
   }
+}
+
+/** A box for a note's text (several lines); resolves null when cancelled. */
+function promptNote(app: App, title: string, value: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let result: string | null = null;
+    const modal = new Modal(app);
+    modal.titleEl.setText(title);
+    const area = modal.contentEl.createEl("textarea", { cls: "xlsx-note-input", attr: { rows: "5", "aria-label": "Note" } });
+    area.value = value;
+    // Ctrl+Enter saves, as in Sheets; Enter is a new line.
+    area.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      result = area.value;
+      modal.close();
+    });
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
+        result = area.value;
+        modal.close();
+      }))
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.onClose = () => resolve(result);
+    modal.open();
+    window.setTimeout(() => area.focus());
+  });
+}
+
+const MARGINS: Record<string, PrintSettings["margins"]> = {
+  normal: { top: 0.75, bottom: 0.75, left: 0.7, right: 0.7 },
+  narrow: { top: 0.75, bottom: 0.75, left: 0.25, right: 0.25 },
+  wide: { top: 1, bottom: 1, left: 1, right: 1 },
+};
+
+/** The print settings screen; resolves null when cancelled. */
+function printDialog(app: App, current: PrintSettings, hasSelection: boolean): Promise<{ settings: PrintSettings; what: "sheet" | "selection" | "workbook" } | null> {
+  return new Promise((resolve) => {
+    let result: { settings: PrintSettings; what: "sheet" | "selection" | "workbook" } | null = null;
+    const ps: PrintSettings = { ...current, margins: { ...current.margins } };
+    let what: "sheet" | "selection" | "workbook" = "sheet";
+    const modal = new Modal(app);
+    modal.titleEl.setText("Print settings");
+    const dropdown = (name: string, options: Record<string, string>, value: string, set: (v: string) => void) =>
+      new Setting(modal.contentEl).setName(name).addDropdown((d) => d.addOptions(options).setValue(value).onChange(set));
+    dropdown("Print", { sheet: "Current sheet", ...(hasSelection ? { selection: "Selected cells" } : {}), workbook: "Workbook" }, what, (v) => (what = v as typeof what));
+    dropdown("Paper size", { letter: "Letter (8.5\" × 11\")", a4: "A4 (8.27\" × 11.69\")", legal: "Legal (8.5\" × 14\")" }, ps.paper, (v) => (ps.paper = v as PrintSettings["paper"]));
+    dropdown("Page orientation", { portrait: "Portrait", landscape: "Landscape" }, ps.landscape ? "landscape" : "portrait", (v) => (ps.landscape = v === "landscape"));
+    dropdown("Scale", { normal: "Normal", width: "Fit to width", page: "Fit to page" }, ps.fit, (v) => (ps.fit = v as PrintSettings["fit"]));
+    new Setting(modal.contentEl).setName("Scale (%)").setDesc("Used when the scale is normal.").addText((t) => {
+      t.inputEl.type = "number";
+      t.setValue(String(ps.scale)).onChange((v) => (ps.scale = Math.min(400, Math.max(10, Math.round(Number(v) || 100)))));
+    });
+    const preset = Object.keys(MARGINS).find((k) => JSON.stringify(MARGINS[k]) === JSON.stringify(ps.margins)) ?? "custom";
+    dropdown("Margins", { normal: "Normal", narrow: "Narrow", wide: "Wide", ...(preset === "custom" ? { custom: "As saved" } : {}) }, preset, (v) => {
+      if (MARGINS[v]) ps.margins = { ...MARGINS[v] };
+    });
+    new Setting(modal.contentEl).setName("Show gridlines").addToggle((t) => t.setValue(ps.gridlines).onChange((v) => (ps.gridlines = v)));
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Export to PDF").setCta().onClick(() => {
+        result = { settings: ps, what };
+        modal.close();
+      }))
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.onClose = () => resolve(result);
+    modal.open();
+  });
 }

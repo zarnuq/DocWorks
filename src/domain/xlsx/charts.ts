@@ -248,6 +248,40 @@ export function setChartSource(e: Edits, path: string, source: string): void {
   });
 }
 
+/** Move / resize a chart to `box` (sheet pixels): its anchor's cells and offsets follow, as when dragged in Sheets. */
+export function moveChart(e: Edits, path: string, box: { x: number; y: number; w: number; h: number }): void {
+  const sheet = e.wb.sheets.find((s) => sheetCharts(e.wb, s).some((c) => c.path === path));
+  const chart = sheet && sheetCharts(e.wb, sheet).find((c) => c.path === path);
+  if (!sheet || !chart) return;
+  const x = Math.max(0, box.x), y = Math.max(0, box.y), w = Math.max(20, box.w), h = Math.max(20, box.h);
+  e.structural(() => {
+    const live = e.wb.pkg.xml(chart.drawing);
+    const s = e.wb.sheets.find((x) => x.ref.path === sheet.ref.path)!;
+    const anchor = Array.from(live?.documentElement.children ?? []).find((a) => Array.from(a.getElementsByTagNameNS(C, "chart")).some((c) => c.getAttributeNS(R, "id") === chart.rId));
+    if (!anchor) return;
+    const swap = (tag: string, px: number, py: number) => {
+      const old = Array.from(anchor.children).find((c) => c.namespaceURI === XDR && c.localName === tag);
+      const next = live!.importNode(parseXml(marker(s, tag, px, py).replace(`<xdr:${tag}>`, `<xdr:${tag} xmlns:xdr="${XDR}">`))!.documentElement, true);
+      if (old) old.replaceWith(next);
+      return !!old;
+    };
+    const ext = (el: Element | undefined) => {
+      el?.setAttribute("cx", String(Math.round(w * EMU_PER_PX)));
+      el?.setAttribute("cy", String(Math.round(h * EMU_PER_PX)));
+    };
+    const kid = (name: string) => Array.from(anchor.children).find((c) => c.namespaceURI === XDR && c.localName === name);
+    if (anchor.localName === "absoluteAnchor") {
+      kid("pos")?.setAttribute("x", String(Math.round(x * EMU_PER_PX)));
+      kid("pos")?.setAttribute("y", String(Math.round(y * EMU_PER_PX)));
+      ext(kid("ext"));
+    } else {
+      swap("from", x, y);
+      if (!swap("to", x + w, y + h)) ext(kid("ext"));
+    }
+    e.wb.pkg.touch(chart.drawing);
+  });
+}
+
 export function deleteChart(e: Edits, _sheet: Sheet, chart: SheetChart): void {
   e.structural(() => {
     const live = e.wb.pkg.xml(chart.drawing);

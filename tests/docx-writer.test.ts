@@ -160,6 +160,30 @@ describe("writeBody", () => {
     expect(p.getElementsByTagNameNS("*", "docPr")[0].getAttribute("descr")).toBe("Blue box");
   });
 
+  it("crops a picture: writes the crop rectangle, reads it back and draws only that part", async () => {
+    const { doc, write, docx } = await setup();
+    const pos = blockPos(doc, 7) + 1;
+    const img = doc.child(7).firstChild!;
+    const p = write(new Transform(doc).setNodeMarkup(pos, undefined, { ...img.attrs, crop: { l: 0.1, t: 0, r: 0.25, b: 0.5 } }).doc)[7];
+    const rect = p.getElementsByTagNameNS("*", "srcRect")[0];
+    expect([rect.getAttribute("l"), rect.getAttribute("t"), rect.getAttribute("r"), rect.getAttribute("b")]).toEqual(["10000", null, "25000", "50000"]);
+    // In schema order: after the blip, before the stretch.
+    expect(rect.previousElementSibling?.localName).toBe("blip");
+    const { readDocx } = await import("../src/domain/docx/docx-reader");
+    docx.body.replaceChild(docx.body.ownerDocument.importNode(p, true), bodyBlocks(docx.body)[7]);
+    const back = readDocx(docx.body, { imageSrc: () => null, hyperlinkHref: () => null }).doc.child(7).firstChild!;
+    expect(back.attrs.crop).toEqual({ l: 0.1, t: 0, r: 0.25, b: 0.5 });
+    const { DOMSerializer } = await import("prosemirror-model");
+    const el = DOMSerializer.fromSchema(schema).serializeNode(back) as HTMLElement;
+    // A clipped box the picture's size, with the whole image scaled and shifted inside.
+    expect(el.classList.contains("docx-cropped")).toBe(true);
+    const w = back.attrs.width / (1 - 0.1 - 0.25), h = back.attrs.height / 0.5;
+    expect(el.querySelector("img")!.getAttribute("style")).toContain(`width: ${Math.round(w * 100) / 100}px; height: ${Math.round(h * 100) / 100}px; margin-left: ${Math.round(-0.1 * w * 100) / 100}px; margin-top: 0px`);
+    // Uncropping removes it again.
+    const plain = write(new Transform(doc).setNodeMarkup(pos, undefined, { ...img.attrs, crop: null }).doc)[7];
+    expect(plain.getElementsByTagNameNS("*", "srcRect")).toHaveLength(0);
+  });
+
   it("writes new images with a unique docPr id", async () => {
     const { doc, write, docx } = await setup();
     const rId = docx.addImage(new Uint8Array([1]), "png");
@@ -263,5 +287,14 @@ describe("writeBody", () => {
     write(new Transform(doc).insert(blockPos(doc, 0) + 1, schema.text("Saved ")).doc);
     const back = await DocxDocument.load(await docx.save());
     expect(back.body.textContent).toContain("Saved Doc Heading");
+  });
+});
+
+describe("cropping keeps the picture's scale", () => {
+  it("shrinks the drawn size by what's cut off, and grows it back when uncropped", async () => {
+    const { recrop } = await import("../src/domain/docx/drawing");
+    // 400 x 300 uncropped; cut 25% off the left and half off the bottom: 300 x 150.
+    expect(recrop({ width: 400, height: 300, crop: null }, { l: 0.25, t: 0, r: 0, b: 0.5 })).toEqual({ width: 300, height: 150, crop: { l: 0.25, t: 0, r: 0, b: 0.5 } });
+    expect(recrop({ width: 300, height: 150, crop: { l: 0.25, t: 0, r: 0, b: 0.5 } }, null)).toEqual({ width: 400, height: 300, crop: null });
   });
 });

@@ -2,7 +2,7 @@ import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from ".
 import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
 import { chartPalette, ChartFormat, setChartFormat } from "../../domain/pptx/chart-format";
 import { chartFormatForm, defaultChartFormat } from "../common/chart-form";
-import { Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
 import {
@@ -35,6 +35,8 @@ import { pickImage } from "../common/images";
 import { findAll, Match, replaceAll, replaceMatch } from "../../domain/pptx/find";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
 import { FONTS, PaperTheme, showValue, Toolbar } from "../common/toolbar";
+import { setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
+import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
 import { loadEmbeddedFonts } from "./embedded-fonts";
 import { eotToTtf } from "../../infrastructure/fonts/eot";
 import { nextVisible, Slideshow } from "./slideshow";
@@ -170,7 +172,7 @@ export class PptxView extends FileView {
   private saveIndicatorEl: HTMLElement | null = null;
   private syncTheme: ((t: PaperTheme) => void) | null = null;
 
-  constructor(leaf: WorkspaceLeaf) {
+  constructor(leaf: WorkspaceLeaf, private settings: DocWorksSettings = { ...DEFAULT_SETTINGS }) {
     super(leaf);
     // Shape shortcuts go through a view scope so they win over app hotkeys (Ctrl+G opens the graph otherwise).
     // They only act while the slide stage has focus; in text they fall through to normal editing.
@@ -334,7 +336,7 @@ export class PptxView extends FileView {
     this.resizeObserver.observe(this.stageEl);
 
     this.index = 0;
-    this.setPaperTheme(this.paperTheme);
+    this.setPaperTheme(paperFor(this.settings, "dark"));
     this.renderAll();
     void this.loadFonts();
   }
@@ -895,6 +897,10 @@ export class PptxView extends FileView {
       if (rs.shape.chart) {
         const button = this.propsEl.createEl("button", { text: "Edit chart" });
         button.addEventListener("click", () => this.editChart(rs.shape.chart!.path));
+      }
+      if (rs.shape.diagram) {
+        const button = this.propsEl.createEl("button", { text: "Edit diagram text" });
+        button.addEventListener("click", () => this.editSmartArt(rs.shape.el));
       }
     } else {
       this.drawSelectionBox();
@@ -1874,6 +1880,38 @@ export class PptxView extends FileView {
     await this.loadMedia();
     this.renderCurrent();
   }
+  /** Edit the text of a SmartArt's items (in its data and the drawing shown). */
+  private editSmartArt(frame: Element): void {
+    const doc = this.doc;
+    if (!doc) return;
+    const part = this.editPart ?? doc.slides()[this.index].path;
+    const parts = smartArtParts(doc, frame, part);
+    const data = parts && doc.xml(parts.data);
+    if (!parts || !data) return void new Notice("This diagram's data couldn't be found.");
+    const items = smartArtItems(data);
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Diagram text");
+    modal.contentEl.createDiv({ cls: "pptx-props-hint", text: "Edit each item's text. Adding or removing items needs PowerPoint, which lays the diagram out again." });
+    const fields = items.map((item) => {
+      const field = modal.contentEl.createEl("textarea", { cls: "pptx-smartart-item", attr: { rows: "1", "aria-label": `Item ${item.text}` } });
+      field.value = item.text;
+      field.setCssProps({ "--pptx-depth": String(item.depth) });
+      return field;
+    });
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Apply").setCta().onClick(() => {
+        const changed = items.filter((item, i) => fields[i].value !== item.text);
+        if (changed.length)
+          this.mutate((d) => {
+            const drawing = parts.drawing ? d.xml(parts.drawing) : null;
+            for (const item of changed) setSmartArtText(d.xml(parts.data)!, drawing, item.id, fields[items.indexOf(item)].value);
+          });
+        modal.close();
+      }))
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.open();
+  }
+
   private editChart(path?: string): void {
     if (!this.doc)
       return;

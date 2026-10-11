@@ -2161,7 +2161,7 @@ textarea.pptx-notes {
   position: relative;
   width: var(--xlsx-print-w);
   height: var(--xlsx-print-h);
-  margin: var(--xlsx-margin);
+  margin: var(--xlsx-margin-top) 0 0 var(--xlsx-margin-left);
   overflow: hidden;
   transform: scale(var(--xlsx-scale));
   transform-origin: top left;
@@ -2191,7 +2191,19 @@ textarea.pptx-notes {
   pointer-events: none;
 }
 
+/* Drag a chart's bottom right corner to resize it. */
+.xlsx-chart-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #9aa0a6 50%);
+}
+
 .xlsx-chart {
+  cursor: move;
   position: absolute;
   left: var(--x);
   top: var(--y);
@@ -2273,4 +2285,43 @@ textarea.pptx-notes {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* A cropped picture: a clipped box its size, the whole image scaled and shifted inside (set from its crop). */
+.docx-image.docx-cropped {
+  display: inline-block;
+  overflow: hidden;
+  width: var(--docx-crop-w);
+  height: var(--docx-crop-h);
+}
+
+.docx-image.docx-cropped > img {
+  max-width: none;
+}
+
+/* SmartArt text dialog: one box per item, indented by its level. */
+.pptx-smartart-item {
+  display: block;
+  width: calc(100% - var(--pptx-depth, 0) * 24px);
+  margin: 0 0 var(--size-2-2) calc(var(--pptx-depth, 0) * 24px);
+  resize: vertical;
+  field-sizing: content;
+}
+
+/* A cell's note, beside the cell while the pointer is over it (as in Google Sheets). */
+.xlsx-note-popup {
+  position: absolute;
+  z-index: 20;
+  left: var(--xlsx-note-x);
+  top: var(--xlsx-note-y);
+  max-width: 220px;
+  padding: var(--size-2-3) var(--size-4-2);
+  background: #ffffff;
+  color: #202124;
+  border: 1px solid #dadce0;
+  border-radius: var(--radius-s);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+  pointer-events: none;
 }

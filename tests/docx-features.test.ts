@@ -424,6 +424,59 @@ describe("section breaks", () => {
   });
 });
 
+describe("headers and footers per section", () => {
+  /** A blank document with a section break after its first paragraph (two sections). */
+  async function twoSections() {
+    const docx = await DocxDocument.load(await blankDocx());
+    const p = docx.document.createElementNS(W, "w:p");
+    const pPr = p.appendChild(docx.document.createElementNS(W, "w:pPr"));
+    pPr.appendChild(docx.document.createElementNS(W, "w:sectPr")).appendChild(docx.document.createElementNS(W, "w:pgSz")).setAttributeNS(W, "w:w", "12240");
+    docx.body.insertBefore(p, docx.body.firstChild);
+    return docx;
+  }
+  const text = (root: Element | null) => root?.textContent ?? null;
+
+  it("lists sections in order and lets a section without its own header use the previous one's (Word's rule)", async () => {
+    const docx = await twoSections();
+    expect(docx.sections()).toHaveLength(2);
+    docx.ensureHeaderFooter("header", "default", 0).textContent = "";
+    docx.ensureHeaderFooter("header", "default", 0).appendChild(docx.document.createTextNode("first section"));
+    expect(text(docx.headerFooter("header", "default", 0))).toBe("first section");
+    // The last section has no header of its own: it follows the first.
+    expect(docx.linkedToPrevious("header", 1)).toBe(true);
+    expect(text(docx.headerFooter("header", "default", 1))).toBe("first section");
+  });
+
+  it("unlinks a section from the previous one with a copy of its header, and links it back", async () => {
+    const docx = await twoSections();
+    docx.ensureHeaderFooter("header", "default", 0).appendChild(docx.document.createTextNode("shared"));
+    // A picture in the shared header: the copy keeps its relationship id.
+    const shared = docx.headerFooterPath("header", "default", 0)!;
+    const relsPath = shared.replace(/([^/]+)$/, "_rels/$1.rels");
+    docx.putXml(relsPath, new DOMParser().parseFromString(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.png"/></Relationships>`, "application/xml"));
+    docx.setLinkedToPrevious("header", 1, false);
+    expect(docx.rels(docx.headerFooterPath("header", "default", 1)!).map((r) => r.id)).toEqual(["rId5"]);
+    expect(docx.linkedToPrevious("header", 1)).toBe(false);
+    const own = docx.headerFooter("header", "default", 1)!;
+    expect(own).not.toBe(docx.headerFooter("header", "default", 0));
+    expect(text(own)).toBe("shared");
+    own.appendChild(docx.document.createTextNode(" changed"));
+    expect(text(docx.headerFooter("header", "default", 0))).toBe("shared");
+    const back = await DocxDocument.load(await docx.save());
+    expect(text(back.headerFooter("header", "default", 1))).toBe("shared changed");
+    expect(text(back.headerFooter("header", "default", 0))).toBe("shared");
+    back.setLinkedToPrevious("header", 1, true);
+    expect(text(back.headerFooter("header", "default", 1))).toBe("shared");
+  });
+
+  it("keeps 'different first page' per section", async () => {
+    const docx = await twoSections();
+    docx.setDifferentFirstPage(true, 0);
+    expect([docx.differentFirstPage(0), docx.differentFirstPage(1)]).toEqual([true, false]);
+    expect(docx.differentFirstPage()).toBe(false);
+  });
+});
+
 describe("headers and footers", () => {
   it("creates a default header and footer referenced from the final section", async () => {
     const docx = await DocxDocument.load(await blankDocx());
@@ -1012,5 +1065,56 @@ describe("superscript size", () => {
     const sup = dom.querySelector("sup")!;
     expect(sup.querySelector("[style*='font-size']")).toBeNull();
     expect(sup.closest("[style*='font-size']")).not.toBeNull();
+  });
+});
+
+describe("code", () => {
+  const two = () => s.doc.create(null, [s.paragraph.create(null, schema.text("let a = 1;")), s.paragraph.create(null, schema.text("let b = 2;")), s.paragraph.create(null, schema.text("after"))]);
+  it("sets a monospace font on part of a line", () => {
+    const st = run(EditorState.create({ doc: two(), selection: TextSelection.create(two(), 5, 6) }), cmd.toggleCode);
+    expect(st.doc.child(0).type).toBe(s.paragraph);
+    expect(st.doc.rangeHasMark(5, 6, m.font.create({ font: "Courier New" }))).toBe(true);
+  });
+
+  it("boxes whole paragraphs as a code block (Google Docs' code block: a shaded one-cell table) and unboxes them", () => {
+    const doc = two();
+    const end = doc.child(0).nodeSize + doc.child(1).nodeSize - 1;
+    let st = run(EditorState.create({ doc, selection: TextSelection.create(doc, 1, end) }), cmd.toggleCode);
+    const table = st.doc.child(0);
+    expect(table.type).toBe(s.table);
+    expect(table.childCount).toBe(1);
+    const cell = table.child(0).child(0);
+    expect(table.child(0).childCount).toBe(1);
+    expect(cell.attrs.background).toBe("#F1F3F4");
+    expect(cell.childCount).toBe(2);
+    expect(cell.textContent).toBe("let a = 1;let b = 2;");
+    cell.forEach((p) => {
+      expect(p.attrs.spaceAfter).toBe(0);
+      p.forEach((t) => expect(t.marks.some((mk) => mk.type === m.font && mk.attrs.font === "Courier New")).toBe(true));
+    });
+    expect(st.doc.child(1).textContent).toBe("after");
+    const shown = EditorState.create({ doc: st.doc, plugins: docxPlugins(ctx) });
+    const decos = shown.plugins.flatMap((pl) => (pl.props.decorations?.call(pl, shown) as DecorationSet | undefined)?.find(0, 0) ?? []);
+    expect(decos.some((d) => (d as unknown as { type: { attrs?: { spellcheck?: string } } }).type.attrs?.spellcheck === "false")).toBe(true);
+    // Again inside the box: back to plain paragraphs.
+    st = run(EditorState.create({ doc: st.doc, selection: TextSelection.create(st.doc, 5) }), cmd.toggleCode);
+    expect(st.doc.childCount).toBe(3);
+    expect(st.doc.child(0).type).toBe(s.paragraph);
+    expect(st.doc.child(0).firstChild!.marks.some((mk) => mk.type === m.font)).toBe(false);
+  });
+
+  it("saves a code block as a shaded table of Courier New text that reads back as one", async () => {
+    const { DocxDocument } = await import("../src/infrastructure/docx/docx-document");
+    const doc = two();
+    const end = doc.child(0).nodeSize + doc.child(1).nodeSize - 1;
+    const st = run(EditorState.create({ doc, selection: TextSelection.create(doc, 1, end) }), cmd.toggleCode);
+    const pkg = await DocxDocument.load(await blankDocx());
+    writeBody(pkg.body, st.doc, new Map(), pkg);
+    const xml = new XMLSerializer().serializeToString(pkg.body);
+    expect(xml).toContain('w:fill="F1F3F4"');
+    expect(xml).toContain('w:ascii="Courier New"');
+    const back = readDocx(pkg.body, { imageSrc: () => null, hyperlinkHref: () => null }).doc;
+    expect(back.child(0).type).toBe(s.table);
+    expect(back.child(0).child(0).child(0).attrs.background?.toUpperCase()).toBe("#F1F3F4");
   });
 });

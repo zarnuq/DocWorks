@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
 import { Edits } from "../src/domain/xlsx/commands";
-import { chartModel, chartSource, deleteChart, formatChart, insertChart, setChartSource, sheetCharts } from "../src/domain/xlsx/charts";
+import { chartModel, chartSource, deleteChart, formatChart, insertChart, moveChart, setChartSource, sheetCharts } from "../src/domain/xlsx/charts";
 import { readChartFormat } from "../src/domain/pptx/chart-format";
 import { sheetXml, S, xlsx } from "./xlsx-fixtures";
 
@@ -99,5 +99,21 @@ describe("charts on sheets", () => {
     e.undo();
     expect(sheetCharts(e.wb, e.wb.sheets[0])).toHaveLength(1);
     expect(e.wb.pkg.xml(chart.path)?.getElementsByTagNameNS(C, "pieChart")).toHaveLength(1);
+  });
+});
+
+describe("moving and resizing charts", () => {
+  it("moves and resizes a chart to a new box (its cell anchors follow), with undo", async () => {
+    const e = await setup();
+    const before = sheetCharts(e.wb, e.wb.sheets[0])[0];
+    const box = { x: 40, y: 300, w: 400, h: 250 };
+    moveChart(e, before.path, box);
+    const after = sheetCharts(e.wb, e.wb.sheets[0])[0];
+    expect(after.box.x).toBeCloseTo(box.x, 0);
+    expect(after.box.y).toBeCloseTo(box.y, 0);
+    expect(after.box.w).toBeCloseTo(box.w, 0);
+    expect(after.box.h).toBeCloseTo(box.h, 0);
+    e.undo();
+    expect(sheetCharts(e.wb, e.wb.sheets[0])[0].box).toEqual(before.box);
   });
 });

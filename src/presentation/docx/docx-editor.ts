@@ -2,7 +2,7 @@
  * ProseMirror commands, keymap, input rules and decorations for the docx
  * editor. No Obsidian imports, so everything here runs under jsdom tests.
  */
-import { Attrs, MarkType, Node as PMNode, ResolvedPos } from "prosemirror-model";
+import { Attrs, Mark, MarkType, Node as PMNode, ResolvedPos } from "prosemirror-model";
 import { Command, EditorState, Plugin, PluginKey, TextSelection, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
 import { baseKeymap, chainCommands, toggleMark } from "prosemirror-commands";
@@ -29,6 +29,30 @@ export interface EditorContext {
 const MAX_LEVEL = 8;
 const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const CODE_FONT = "Courier New";
+const CODE_PT = 10;
+/** Google Docs' code block shading. */
+const CODE_FILL = "#F1F3F4";
+
+/** A code block: a one-cell table shaded like Google's, all in the code font. */
+function isCodeBlock(table: PMNode): boolean {
+  const cell = table.childCount === 1 && table.firstChild!.childCount === 1 ? table.firstChild!.firstChild! : null;
+  if (!cell || attrsOf<CellAttrs>(cell).background !== CODE_FILL) return false;
+  let code = true;
+  cell.descendants((n) => {
+    if (n.isText && !n.marks.some((mk) => mk.type === schema.marks.font && mk.attrs.font === CODE_FONT)) code = false;
+    return code;
+  });
+  return code;
+}
+
+/** The code block around `$pos` (its innermost table), if that's one. */
+function codeBlockAt($pos: ResolvedPos): { node: PMNode; pos: number } | null {
+  for (let d = $pos.depth; d > 0; d--) {
+    const node = $pos.node(d);
+    if (node.type === schema.nodes.table) return isCodeBlock(node) ? { node, pos: $pos.before(d) } : null;
+  }
+  return null;
+}
 
 /** Positions and nodes of the paragraphs touched by the selection. */
 function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[] {
@@ -727,8 +751,43 @@ export const cmd = {
   },
 
   toggleCode: ((state, dispatch) => {
-    const { from, to, empty, $from } = state.selection;
+    const { from, to, empty, $from, $to } = state.selection;
     const font = schema.marks.font;
+    // Inside a code block: back to plain paragraphs.
+    const box = codeBlockAt($from);
+    if (box) {
+      if (dispatch) {
+        const paras: PMNode[] = [];
+        const code = (mk: Mark) => (mk.type === font && mk.attrs.font === CODE_FONT) || (mk.type === schema.marks.size && mk.attrs.pt === CODE_PT);
+        box.node.firstChild!.firstChild!.forEach((p) => {
+          const content: PMNode[] = [];
+          p.forEach((t) => content.push(t.isText ? t.mark(t.marks.filter((mk) => !code(mk))) : t));
+          paras.push(p.type.create({ ...p.attrs, spaceBefore: null, spaceAfter: null }, content));
+        });
+        dispatch(state.tr.replaceWith(box.pos, box.pos + box.node.nodeSize, paras).scrollIntoView());
+      }
+      return true;
+    }
+    // Whole paragraphs: a code block, as Google Docs makes one (and exports to Word): a shaded one-cell table.
+    if (!empty && $from.depth === 1 && $to.depth === 1 && $from.parentOffset === 0 && $to.parentOffset === $to.parent.content.size
+      && $from.parent.type === schema.nodes.paragraph && $to.parent.type === schema.nodes.paragraph) {
+      if (dispatch) {
+        const start = $from.before(1), end = $to.after(1);
+        const paras: PMNode[] = [];
+        state.doc.nodesBetween(start, end, (node) => {
+          if (node.type !== schema.nodes.paragraph) return node.type === schema.nodes.doc;
+          const marks = [font.create({ font: CODE_FONT }), schema.marks.size.create({ pt: CODE_PT })];
+          const content: PMNode[] = [];
+          node.forEach((child) => content.push(child.isText ? child.mark(marks.reduce((set, mk) => mk.addToSet(set), child.marks)) : child));
+          paras.push(node.type.create({ ...node.attrs, key: null, spaceBefore: 0, spaceAfter: 0 }, content));
+          return false;
+        });
+        const cell = schema.nodes.table_cell.create({ background: CODE_FILL }, paras);
+        const table = schema.nodes.table.create({ borders: "outer" }, schema.nodes.table_row.create(null, cell));
+        dispatch(state.tr.replaceWith(start, end, table).scrollIntoView());
+      }
+      return true;
+    }
     const active = empty
       ? (state.storedMarks ?? $from.marks()).some((m) => m.type === font && m.attrs.font === CODE_FONT)
       : state.doc.rangeHasMark(from, to, font.create({ font: CODE_FONT }));
@@ -942,6 +1001,7 @@ function decorations(styles: DocxStyles, doc: PMNode): DecorationSet {
     if (r.to > r.from) decos.push(Decoration.inline(r.from, r.to, { class: "docx-comment-range", "data-comment": id }));
   }
   doc.descendants((node, pos) => {
+    if (node.type === schema.nodes.table && isCodeBlock(node)) decos.push(Decoration.node(pos, pos + node.nodeSize, { spellcheck: "false" }));
     if (node.type === schema.nodes.table) {
       tableDecorations(node, pos, decos);
       const { borders: own, style } = attrsOf<TableAttrs>(node);

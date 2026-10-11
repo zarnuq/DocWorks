@@ -19,20 +19,16 @@ import { latexToOmml, mathSpec } from "../../domain/docx/math";
 import { exportPdf } from "../common/pdf";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
-import { headerFooterType, pageSetup, PageSetup, PageSize, sectionSetups } from "../../domain/docx/pages";
-import { attrsOf, ParagraphAttrs } from "../../domain/docx/schema";
+import { pageSetup, PageSetup, sectionSetups } from "../../domain/docx/pages";
+import { attrsOf, ImageAttrs, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView } from "./docx-image-view";
 import { TextBoxView } from "./docx-textbox-view";
 import { suggestTransaction } from "../../domain/docx/suggestions";
 import { DocxRuler, outlineEntries } from "./docx-ruler";
 
-export interface DocWorksSettings {
-  /** "document": pages use the document's own size; "letter": always 8.5 x 11 in. */
-  pageSize: PageSize;
-  /** Name shown on new comments; asked for on the first comment when empty. */
-  author: string;
-}
-export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document", author: "" };
+import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+export { DEFAULT_SETTINGS };
+export type { DocWorksSettings };
 
 export const VIEW_TYPE_DOCX = "doc-works-docx-view";
 
@@ -114,7 +110,10 @@ export class DocxView extends FileView {
   private fontSelect: HTMLSelectElement | null = null;
   private sizeSelect: HTMLSelectElement | null = null;
   /** rId -> data URL for pictures in the header and footer parts. */
-  private hfUrls = new Map<HFPart, Map<string, string>>();
+  /** Pictures of each header / footer part, by part path. */
+  private hfUrls = new Map<string, Map<string, string>>();
+  /** Every header / footer part any section shows, read for drawing on the pages, by part path. */
+  private hfByPath = new Map<string, PMNode>();
   private reviewEl: HTMLElement | null = null;
   private reviewOpen = this.app.loadLocalStorage(REVIEW_KEY) === "on";
   private reviewTimer: number | null = null;
@@ -170,10 +169,7 @@ export class DocxView extends FileView {
     try {
       docx = await DocxDocument.load(await this.app.vault.readBinary(file));
       urls = await docx.imageUrls();
-      for (const part of HF_PARTS) {
-        const path = docx.headerFooterPath(...splitPart(part));
-        if (path) this.hfUrls.set(part, await docx.imageUrls(path));
-      }
+      for (const path of hfPaths(docx)) this.hfUrls.set(path, await docx.imageUrls(path));
     } catch (err) {
       status.setText(`Could not open this .docx file: ${(err as Error).message}`);
       console.error(err);
@@ -237,6 +233,7 @@ export class DocxView extends FileView {
         image: (node, view, getPos) =>
           new DocxImageView(node, view, getPos, {
             replace: (pos) => pickImage((f) => void this.replaceImage(pos, f)),
+            crop: (current) => cropDialog(this.app, current),
             editAlt: (pos, current) =>
               void promptText(this.app, "Image description (alt text)", current).then((alt) => {
                 const node = alt === null ? null : view.state.doc.nodeAt(pos);
@@ -291,7 +288,7 @@ export class DocxView extends FileView {
     });
 
     this.buildToolbar(toolbar, ctx);
-    this.setPaperTheme(this.paperTheme);
+    this.setPaperTheme(paperFor(this.settings, "light"));
     window.addEventListener("blur", this.onWindowBlur);
     this.resizeObserver = new ResizeObserver(() => {
       this.fitDocument();
@@ -973,24 +970,41 @@ export class DocxView extends FileView {
 
   private readAllHF(): void {
     this.hf.clear();
+    this.hfByPath.clear();
+    const docx = this.docx;
+    if (!docx) return;
     for (const part of HF_PARTS) {
-      const root = this.docx?.headerFooter(...splitPart(part));
+      const root = docx.headerFooter(...splitPart(part));
       if (root) this.hf.set(part, readDocx(root, this.hfReadContext(part)).doc);
+    }
+    for (const path of hfPaths(docx)) {
+      const root = docx.xml(path)?.documentElement;
+      if (root) this.hfByPath.set(path, readDocx(root, this.hfReadContextFor(path)).doc);
     }
   }
 
   /** Images and links in a header / footer resolve through that part's own relationships. */
-  private hfReadContext(part: HFPart) {
-    const docx = this.docx;
-    const path = docx?.headerFooterPath(...splitPart(part)) ?? undefined;
-    return { imageSrc: (id: string) => this.hfUrls.get(part)?.get(id) ?? null, hyperlinkHref: (id: string) => docx?.hyperlinkHref(id, path) ?? null };
+  private hfReadContext(part: HFPart, section?: number) {
+    return this.hfReadContextFor(this.docx?.headerFooterPath(...splitPart(part), section) ?? null);
   }
 
-  /** The header / footer a page shows (first page, even pages or the default), with page number fields filled in. */
-  private renderHF(kind: HF, page: number, total: number): Node | null {
+  private hfReadContextFor(path: string | null) {
     const docx = this.docx;
-    if (!docx) return null;
-    const doc = this.hf.get(`${kind}:${headerFooterType(page, docx.differentFirstPage(), docx.differentOddEven())}`);
+    return { imageSrc: (id: string) => (path && this.hfUrls.get(path)?.get(id)) ?? null, hyperlinkHref: (id: string) => docx?.hyperlinkHref(id, path ?? undefined) ?? null };
+  }
+
+  /**
+   * The header / footer a page shows: its section's (first page of the section, even pages or the default), with
+   * page number fields filled in. `pos` is where the page starts.
+   */
+  private renderHF(kind: HF, page: number, total: number, pos = 0): Node | null {
+    const docx = this.docx;
+    if (!docx || !this.editor) return null;
+    const { index, start } = sectionOfPos(this.editor.state.doc, pos);
+    const first = pos <= start && docx.differentFirstPage(index);
+    const type: HFType = first ? "first" : docx.differentOddEven() && page % 2 === 0 ? "even" : "default";
+    const path = docx.headerFooterPath(kind, type, index);
+    const doc = path ? this.hfByPath.get(path) : undefined;
     if (!doc || !doc.textContent.trim() && !doc.content.size) return null;
     const frag = DOMSerializer.fromSchema(schema).serializeFragment(doc.content);
     const wrap = createDiv({ cls: `docx-hf docx-hf-${kind}` });
@@ -1004,8 +1018,8 @@ export class DocxView extends FileView {
     return pagesPlugin({
       setup: () => (this.pageView ? this.setup : null),
       pageSize: () => this.settings.pageSize,
-      header: (page, total) => this.renderHF("header", page, total),
-      footer: (page, total) => this.renderHF("footer", page, total),
+      header: (page, total, pos) => this.renderHF("header", page, total, pos),
+      footer: (page, total, pos) => this.renderHF("footer", page, total, pos),
       keep: (node) => this.ctx?.styles.keep(attrsOf<ParagraphAttrs>(node).style) ?? { next: false, lines: false },
       // Word's own layout only describes the document at its own page size.
       wordPages: () => (this.settings.pageSize === "document" ? this.docx?.wordPages() ?? null : null),
@@ -1024,12 +1038,29 @@ export class DocxView extends FileView {
     // as its doc attribute: bring the body up to date first, and the attribute after.
     const editor = this.editor;
     if (editor) writeBody(docx.body, editor.state.doc, this.origins, docx);
-    const modal = new HeaderFooterModal(this.app, this.ctx, docx, (part) => this.hfReadContext(part), () => (this.suggesting ? this.settings.author : null), () => {
+    // The section the cursor is in (headers and footers belong to sections).
+    const section = editor ? sectionOfPos(editor.state.doc, editor.state.selection.from).index : 0;
+    const modal = new HeaderFooterModal(this.app, this.ctx, docx, section, (part) => this.hfReadContext(part, section), () => (this.suggesting ? this.settings.author : null), () => {
       this.readAllHF();
       const last = docx.body.lastElementChild;
       if (this.editor && last?.localName === "sectPr") {
         const sectPr = new XMLSerializer().serializeToString(last);
         if (sectPr !== this.editor.state.doc.attrs.sectPr) this.editor.dispatch(this.editor.state.tr.setDocAttribute("sectPr", sectPr).setMeta("addToHistory", false));
+      }
+      // Sections ended by a paragraph keep their w:sectPr on it: bring those up to date too.
+      if (this.editor) {
+        const sections = docx.sections().slice(0, -1).map((e) => new XMLSerializer().serializeToString(e));
+        const tr = this.editor.state.tr;
+        let k = 0;
+        this.editor.state.doc.descendants((node, pos) => {
+          if (node.type !== schema.nodes.paragraph) return true;
+          if (node.attrs.sectPr) {
+            const now = sections[k++];
+            if (now && now !== node.attrs.sectPr) tr.setNodeMarkup(pos, undefined, { ...node.attrs, sectPr: now });
+          }
+          return false;
+        });
+        if (tr.docChanged) this.editor.dispatch(tr.setMeta("addToHistory", false));
       }
       this.dirty = true;
       void this.saveNow();
@@ -1258,6 +1289,8 @@ class HeaderFooterModal extends Modal {
     app: App,
     private ctx: EditorContext,
     private docx: DocxDocument,
+    /** The section whose headers and footers this edits. */
+    private sectionIndex: number,
     private readContext: (part: HFPart) => { imageSrc: (id: string) => string | null; hyperlinkHref: (id: string) => string | null },
     /** The suggestion author while the document is in suggesting mode, else null. */
     private suggestAuthor: () => string | null,
@@ -1267,7 +1300,8 @@ class HeaderFooterModal extends Modal {
   }
 
   onOpen(): void {
-    this.titleEl.setText("Header and footer");
+    const count = this.docx.sections().length;
+    this.titleEl.setText(count > 1 ? `Header and footer: section ${this.sectionIndex + 1} of ${count}` : "Header and footer");
     this.modalEl.addClass("docx-hf-modal");
     this.render();
   }
@@ -1283,9 +1317,20 @@ class HeaderFooterModal extends Modal {
           this.render();
         })
       );
-    option("Different first page", this.docx.differentFirstPage(), (on) => this.docx.setDifferentFirstPage(on));
+    const at = this.sectionIndex;
+    // Google Docs' / Word's "Link to previous", for sections after the first.
+    if (at > 0) {
+      for (const kind of ["header", "footer"] as const) {
+        option(`${kind === "header" ? "Header" : "Footer"} same as previous section`, this.docx.linkedToPrevious(kind, at), (on) => {
+          this.docx.setLinkedToPrevious(kind, at, on);
+          // Editors open on the old parts: start them again from the section's current ones.
+          for (const [part, e] of this.editors) if (part.startsWith(kind)) { e.view.destroy(); this.editors.delete(part); }
+        });
+      }
+    }
+    option("Different first page", this.docx.differentFirstPage(at), (on) => this.docx.setDifferentFirstPage(on, at));
     option("Different odd & even", this.docx.differentOddEven(), (on) => this.docx.setDifferentOddEven(on));
-    const types: HFType[] = ["default", ...(this.docx.differentFirstPage() ? ["first" as const] : []), ...(this.docx.differentOddEven() ? ["even" as const] : [])];
+    const types: HFType[] = ["default", ...(this.docx.differentFirstPage(at) ? ["first" as const] : []), ...(this.docx.differentOddEven() ? ["even" as const] : [])];
     const label: Record<HFType, string> = { default: this.docx.differentOddEven() ? " (odd pages)" : "", first: " (first page)", even: " (even pages)" };
     for (const kind of ["header", "footer"] as const) {
       for (const type of types) this.section(`${kind}:${type}`, `${kind === "header" ? "Header" : "Footer"}${label[type]}`);
@@ -1300,7 +1345,7 @@ class HeaderFooterModal extends Modal {
     let entry = kept;
     if (kept) host.appendChild(kept.view.dom);
     else {
-      const root = this.docx.headerFooter(...splitPart(part));
+      const root = this.docx.headerFooter(...splitPart(part), this.sectionIndex);
       const { doc, origins } = root ? readDocx(root, this.readContext(part)) : { doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create()), origins: new Map() as Origins };
       let lastKey: string | null = null;
       const view: EditorView = new EditorView(host, {
@@ -1338,12 +1383,75 @@ class HeaderFooterModal extends Modal {
       for (const [part, { view, origins, changed }] of this.editors) {
         if (!changed) continue;
         const [kind, type] = splitPart(part);
-        if (!view.state.doc.textContent.trim() && !this.docx.headerFooter(kind, type)) continue;
-        writeBody(this.docx.ensureHeaderFooter(kind, type), view.state.doc, origins, this.docx);
+        if (!view.state.doc.textContent.trim() && !this.docx.headerFooter(kind, type, this.sectionIndex)) continue;
+        // A section linked to the previous one edits the shared header, as in Word.
+        const target = this.docx.headerFooter(kind, type, this.sectionIndex) ?? this.docx.ensureHeaderFooter(kind, type, this.sectionIndex);
+        writeBody(target, view.state.doc, origins, this.docx);
       }
       this.onDone();
     }
     this.editors.forEach((e) => e.view.destroy());
     this.contentEl.empty();
   }
+}
+
+/** Ask for a picture's crop, in percent of each side; resolves undefined when cancelled, null for no crop. */
+function cropDialog(app: App, current: ImageAttrs["crop"]): Promise<ImageAttrs["crop"] | undefined> {
+  return new Promise((resolve) => {
+    let result: ImageAttrs["crop"] | undefined;
+    const crop = { l: 0, t: 0, r: 0, b: 0, ...(current ?? {}) };
+    const modal = new Modal(app);
+    modal.titleEl.setText("Crop picture");
+    for (const [key, name] of [["l", "Left"], ["t", "Top"], ["r", "Right"], ["b", "Bottom"]] as const) {
+      new Setting(modal.contentEl).setName(`${name} (%)`).addText((t) => {
+        t.inputEl.type = "number";
+        t.inputEl.min = "0";
+        t.inputEl.max = "95";
+        t.setValue(String(Math.round(crop[key] * 1000) / 10)).onChange((v) => (crop[key] = Math.min(95, Math.max(0, Number(v) || 0)) / 100));
+      });
+    }
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Apply").setCta().onClick(() => {
+        if (crop.l + crop.r >= 0.95 || crop.t + crop.b >= 0.95) return new Notice("Leave some of the picture showing.");
+        result = crop.l || crop.t || crop.r || crop.b ? crop : null;
+        modal.close();
+      }))
+      .addButton((b) => b.setButtonText("Reset").onClick(() => {
+        result = null;
+        modal.close();
+      }))
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.onClose = () => resolve(result);
+    modal.open();
+  });
+}
+
+/** Every header / footer part some section of the document shows. */
+function hfPaths(docx: DocxDocument): string[] {
+  const out = new Set<string>();
+  docx.sections().forEach((_, i) => {
+    for (const part of HF_PARTS) {
+      const path = docx.headerFooterPath(...splitPart(part), i);
+      if (path) out.add(path);
+    }
+  });
+  return [...out];
+}
+
+/** Which section (0-based) the block at `pos` belongs to, and where that section starts: a paragraph carrying a w:sectPr ends its section. */
+function sectionOfPos(doc: PMNode, pos: number): { index: number; start: number } {
+  let index = 0;
+  let start = 0;
+  doc.descendants((node, at) => {
+    if (at >= pos) return false;
+    if (node.type === schema.nodes.paragraph) {
+      if (node.attrs.sectPr && at + node.nodeSize <= pos) {
+        index++;
+        start = at + node.nodeSize;
+      }
+      return false;
+    }
+    return true;
+  });
+  return { index, start };
 }

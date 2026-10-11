@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import { NS, childNS } from "../../core/utils/xml";
 import { IMAGE_MIME } from "../../core/utils/images";
-import { OoxmlPackage, parseXml } from "../ooxml/ooxml-package";
+import { OoxmlPackage, parseXml, relsPathOf } from "../ooxml/ooxml-package";
 import { wVal } from "../../domain/docx/docx-reader";
 import { numberingLevel } from "../../domain/docx/docx-styles";
 import { deobfuscateFont } from "../fonts/odttf";
@@ -222,47 +222,94 @@ export class DocxDocument extends OoxmlPackage {
     return this.body.appendChild(this.document.createElementNS(NS.w, "w:sectPr"));
   }
 
-  /** Part path of a header or footer, if the section has one of that type. */
-  headerFooterPath(kind: "header" | "footer", type: HFType = "default"): string | null {
-    const ref = Array.from(this.finalSectPr(false)?.children ?? []).find(
-      (c) => c.localName === `${kind}Reference` && (wVal(c, "type") ?? "default") === type
-    );
-    return (ref && this.relTarget(this.mainPath, ref.getAttributeNS(NS.r, "id") ?? "")) || null;
+  /**
+   * The document's sections, as their w:sectPr in order: one in each paragraph that ends a section, then the
+   * body's final one (created if asked).
+   */
+  sections(create = false): Element[] {
+    const inParagraphs = Array.from(this.body.getElementsByTagNameNS(NS.w, "sectPr")).filter((e) => e.parentElement?.localName === "pPr" && e.parentElement.parentElement?.parentElement === this.body);
+    const last = this.finalSectPr(create);
+    return last ? [...inParagraphs, last] : inParagraphs;
+  }
+
+  /** Section `section` (default: the last). */
+  private sectionAt(section: number | undefined, create = false): Element | null {
+    const all = this.sections(create);
+    return all[section ?? all.length - 1] ?? null;
+  }
+
+  private ownReference(sectPr: Element | null, kind: "header" | "footer", type: HFType): Element | null {
+    return Array.from(sectPr?.children ?? []).find((c) => c.localName === `${kind}Reference` && (wVal(c, "type") ?? "default") === type) ?? null;
+  }
+
+  /** Part path of a header or footer of a section (default: the last); one without its own uses the previous section's, as in Word. */
+  headerFooterPath(kind: "header" | "footer", type: HFType = "default", section?: number): string | null {
+    const all = this.sections();
+    for (let i = section ?? all.length - 1; i >= 0; i--) {
+      const ref = this.ownReference(all[i], kind, type);
+      if (ref) return this.relTarget(this.mainPath, ref.getAttributeNS(NS.r, "id") ?? "") || null;
+    }
+    return null;
   }
 
   /** Root (w:hdr / w:ftr) of a header or footer, if the document has one. */
-  headerFooter(kind: "header" | "footer", type: HFType = "default"): Element | null {
-    const path = this.headerFooterPath(kind, type);
+  headerFooter(kind: "header" | "footer", type: HFType = "default", section?: number): Element | null {
+    const path = this.headerFooterPath(kind, type, section);
     return (path && this.xml(path)?.documentElement) || null;
   }
 
-  /** The header or footer of `type`, created (empty) and referenced from the final section if missing. */
-  ensureHeaderFooter(kind: "header" | "footer", type: HFType = "default"): Element {
-    const existing = this.headerFooter(kind, type);
-    if (existing) return existing;
+  /**
+   * The section's own header or footer of `type`, created and referenced if missing: a copy of the one it used
+   * from a previous section, or empty.
+   */
+  ensureHeaderFooter(kind: "header" | "footer", type: HFType = "default", section?: number): Element {
+    const sectPr = this.sectionAt(section, true)!;
+    const own = this.ownReference(sectPr, kind, type);
+    if (own) return this.headerFooter(kind, type, section)!;
+    const inherited = this.headerFooter(kind, type, section);
     const path = this.nextPartPath(`word/${kind}`, ".xml");
     const tag = kind === "header" ? "hdr" : "ftr";
-    this.parts.set(path, parseXml(`<w:${tag} xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:p/></w:${tag}>`)!);
+    this.parts.set(path, parseXml(inherited ? new XMLSerializer().serializeToString(inherited) : `<w:${tag} xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:p/></w:${tag}>`)!);
     this.addOverride(path, `application/vnd.openxmlformats-officedocument.wordprocessingml.${kind}+xml`);
+    // A copy keeps the pictures and links of the part it came from.
+    const from = inherited && this.headerFooterPath(kind, type, section);
+    const rels = from && this.xml(relsPathOf(from));
+    if (rels) this.putXml(relsPathOf(path), parseXml(new XMLSerializer().serializeToString(rels))!);
     const rId = this.addRel(this.mainPath, kind, path);
-    const sectPr = this.finalSectPr(true)!;
     const ref = this.document.createElementNS(NS.w, `w:${kind}Reference`);
     ref.setAttributeNS(NS.w, "w:type", type);
     ref.setAttributeNS(NS.r, "r:id", rId);
     // Header / footer references come first in w:sectPr.
     const before = Array.from(sectPr.children).find((c) => !c.localName.endsWith("Reference")) ?? null;
     sectPr.insertBefore(ref, before);
-    return this.headerFooter(kind, type)!;
+    return this.headerFooter(kind, type, section)!;
   }
 
-  /** "Different first page" (w:titlePg on the final section). */
-  differentFirstPage(): boolean {
-    const el = Array.from(this.finalSectPr(false)?.children ?? []).find((c) => c.localName === "titlePg");
+  /** Whether a section (not the first) shows the previous section's headers (or footers): it has none of its own. */
+  linkedToPrevious(kind: "header" | "footer", section: number): boolean {
+    return section > 0 && !Array.from(this.sectionAt(section)?.children ?? []).some((c) => c.localName === `${kind}Reference`);
+  }
+
+  /** Google Docs' / Word's "Link to previous": drop the section's own headers, or give it copies of the ones it showed. */
+  setLinkedToPrevious(kind: "header" | "footer", section: number, linked: boolean): void {
+    const sectPr = this.sectionAt(section);
+    if (!sectPr || section === 0 || linked === this.linkedToPrevious(kind, section)) return;
+    if (linked) {
+      Array.from(sectPr.children).filter((c) => c.localName === `${kind}Reference`).forEach((c) => c.remove());
+      return;
+    }
+    for (const type of ["default", "first", "even"] as const) if (this.headerFooter(kind, type, section)) this.ensureHeaderFooter(kind, type, section);
+    if (!Array.from(sectPr.children).some((c) => c.localName === `${kind}Reference`)) this.ensureHeaderFooter(kind, "default", section);
+  }
+
+  /** "Different first page" (w:titlePg) of a section (default: the last). */
+  differentFirstPage(section?: number): boolean {
+    const el = Array.from(this.sectionAt(section)?.children ?? []).find((c) => c.localName === "titlePg");
     return !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
   }
 
-  setDifferentFirstPage(on: boolean): void {
-    const sectPr = this.finalSectPr(true)!;
+  setDifferentFirstPage(on: boolean, section?: number): void {
+    const sectPr = this.sectionAt(section, true)!;
     Array.from(sectPr.children).filter((c) => c.localName === "titlePg").forEach((c) => c.remove());
     if (!on) return;
     const at = SECT_ORDER.indexOf("titlePg");

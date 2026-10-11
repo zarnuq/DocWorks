@@ -88,6 +88,8 @@ export interface ImageAttrs extends Placement {
   x: number;
   y: number;
   align: Placement["align"];
+  /** Share of the picture cut off each side (a:srcRect), or null. */
+  crop: { l: number; t: number; r: number; b: number } | null;
 }
 export interface XmlAttrs {
   xml: string;
@@ -273,12 +275,17 @@ export const docxSchema = new Schema({
         x: { default: 0 },
         y: { default: 0 },
         align: { default: null },
+        crop: { default: null },
       },
       toDOM: (node) => {
-        const { src, alt, width, height, wrap, x, y, align } = attrsOf<ImageAttrs>(node);
+        const { src, alt, width, height, wrap, x, y, align, crop } = attrsOf<ImageAttrs>(node);
         const { cls, style } = placementCss({ ...attrsOf<ImageAttrs>(node), wrap, x, y, align }, width ?? 0);
         const size = `${width ? `width: ${width}px; ` : ""}${height ? `height: ${height}px; ` : ""}`;
-        return ["img", { src, alt, class: `docx-image-node ${cls}`.trim(), style: size + style }];
+        if (!crop || !width || !height) return ["img", { src, alt, class: `docx-image-node ${cls}`.trim(), style: size + style }];
+        // Cropped: a clipped box the picture's size, holding the whole image scaled and shifted inside it.
+        const c = cropBox(width, height, crop);
+        return ["span", { class: `docx-image-node docx-cropped ${cls}`.trim(), style: size + style },
+          ["img", { src, alt, style: `width: ${c.width}px; height: ${c.height}px; margin-left: ${c.left}px; margin-top: ${c.top}px` }]];
       },
     },
 
@@ -382,3 +389,11 @@ export const docxSchema = new Schema({
 });
 
 export type DocxNode = PMNode;
+
+/** Size and offset of the whole image inside a cropped picture's `width` x `height` box (px). */
+export function cropBox(width: number, height: number, crop: NonNullable<ImageAttrs["crop"]>): { width: number; height: number; left: number; top: number } {
+  const w = width / Math.max(0.05, 1 - crop.l - crop.r);
+  const h = height / Math.max(0.05, 1 - crop.t - crop.b);
+  const round = (v: number) => Math.round(v * 100) / 100;
+  return { width: round(w), height: round(h), left: round(-crop.l * w), top: round(-crop.t * h) };
+}

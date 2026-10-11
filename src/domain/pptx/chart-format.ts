@@ -8,7 +8,9 @@ import { ColorContext, hex, resolveColor } from "./color";
 
 const C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
-export type ChartKind = "column" | "bar" | "line" | "area" | "pie" | "doughnut" | "scatter" | "other";
+export type ChartKind = "column" | "bar" | "line" | "area" | "pie" | "doughnut" | "scatter" | "combo" | "other";
+/** A combo chart's series are columns or lines. */
+export type SeriesKind = "column" | "line";
 export type Stacking = "none" | "stacked" | "percent";
 export type LegendPos = "b" | "t" | "l" | "r" | "none";
 
@@ -36,6 +38,8 @@ export interface ChartFormat {
   colors: (string | null)[];
   category: ChartAxis;
   value: ChartAxis;
+  /** Combo charts: each series' type, in series order. */
+  seriesKinds?: SeriesKind[];
 }
 
 /** Default series colours: the theme's accents, else Google's chart palette. */
@@ -125,6 +129,9 @@ interface Parts {
   chart: Element;
   plot: Element;
   type: Element | null;
+  /** Every chart-type element of the plot (a combo has a bar and a line one). */
+  types: Element[];
+  /** Every series of the plot, in series order (c:order), whichever type holds it. */
   series: Element[];
   category: Element | null;
   value: Element | null;
@@ -134,7 +141,8 @@ function parts(xml: Document): Parts | null {
   const chart = xml.getElementsByTagNameNS(C, "chart")[0];
   const plot = kid(chart, "plotArea");
   if (!chart || !plot) return null;
-  const type = Array.from(plot.children).find((c) => c.namespaceURI === C && c.localName.endsWith("Chart")) ?? null;
+  const types = Array.from(plot.children).filter((c) => c.namespaceURI === C && c.localName.endsWith("Chart"));
+  const type = types[0] ?? null;
   const ids = kids(type, "axId").map(val);
   const axes = Array.from(plot.children).filter((c) => c.namespaceURI === C && c.localName.endsWith("Ax") && ids.includes(val(kid(c, "axId"))));
   let category = axes.find((a) => a.localName === "catAx" || a.localName === "dateAx") ?? null;
@@ -144,7 +152,21 @@ function parts(xml: Document): Parts | null {
     category = axes.find((a) => a.localName === "valAx" && ["b", "t"].includes(val(kid(a, "axPos")) ?? "")) ?? null;
     value = axes.find((a) => a.localName === "valAx" && a !== category) ?? null;
   }
-  return { chart, plot, type, series: kids(type, "ser"), category, value };
+  return { chart, plot, type, types, series: orderedSeries(types), category, value };
+}
+
+/** Series of the given chart types in their series order (c:order, as Office lists them). */
+export function orderedSeries(types: Element[]): Element[] {
+  const all = types.flatMap((t) => kids(t, "ser"));
+  const order = (s: Element) => num(kid(s, "order")) ?? all.indexOf(s);
+  return all.map((s, i) => ({ s, i })).sort((a, b) => order(a.s) - order(b.s) || a.i - b.i).map((x) => x.s);
+}
+
+/** A combo: column series and line series sharing one plot. */
+function isCombo(p: Parts | null): boolean {
+  if (!p || p.types.length !== 2) return false;
+  const bar = p.types.find((t) => t.localName === "barChart");
+  return !!bar && val(kid(bar, "barDir")) !== "bar" && p.types.some((t) => t.localName === "lineChart");
 }
 
 function kindOf(type: Element | null): ChartKind {
@@ -196,7 +218,9 @@ function fillOf(spPr: Element | null, ctx: ColorContext, line: boolean): string 
 
 export function readChartFormat(xml: Document, ctx: ColorContext = { scheme: {}, map: {} }): ChartFormat {
   const p = parts(xml);
-  const kind = kindOf(p?.type ?? null);
+  const combo = isCombo(p);
+  const kind: ChartKind = combo ? "combo" : kindOf(p?.type ?? null);
+  const seriesKinds = combo ? p!.series.map((s): SeriesKind => (s.parentElement?.localName === "lineChart" ? "line" : "column")) : undefined;
   const grouping = val(kid(p?.type, "grouping"));
   const titleNode = kid(p?.chart, "title");
   const autoTitle = p && p.series.length === 1 ? richText(kid(p.series[0], "tx")) ?? "" : "Chart Title";
@@ -209,8 +233,9 @@ export function readChartFormat(xml: Document, ctx: ColorContext = { scheme: {},
     const points = new Map(kids(ser, "dPt").map((d) => [Number(val(kid(d, "idx"))), fillOf(kid(d, "spPr"), ctx, false)]));
     // Without cached values (Google's export) the slices are as many as the coloured points say.
     colors = Array.from({ length: Math.max(count, ...[...points.keys()].map((i) => i + 1)) }, (_, i) => points.get(i) ?? null);
-  } else colors = (p?.series ?? []).map((s) => fillOf(kid(s, "spPr"), ctx, kind === "line" || kind === "scatter"));
+  } else colors = (p?.series ?? []).map((s, i) => fillOf(kid(s, "spPr"), ctx, kind === "line" || kind === "scatter" || seriesKinds?.[i] === "line"));
   return {
+    ...(seriesKinds ? { seriesKinds } : {}),
     kind,
     stacking: grouping === "stacked" ? "stacked" : grouping === "percentStacked" ? "percent" : "none",
     title: titleNode && !on(kid(p!.chart, "autoTitleDeleted")) ? richText(titleNode) ?? autoTitle : "",
@@ -226,7 +251,7 @@ export function readChartFormat(xml: Document, ctx: ColorContext = { scheme: {},
 // Writing
 // -----------------------------------------------------------------------------
 
-const TYPE_TAG: Partial<Record<ChartKind, string>> = { column: "barChart", bar: "barChart", line: "lineChart", area: "areaChart", pie: "pieChart", doughnut: "doughnutChart" };
+const TYPE_TAG: Partial<Record<ChartKind, string>> = { column: "barChart", bar: "barChart", line: "lineChart", area: "areaChart", pie: "pieChart", doughnut: "doughnutChart", scatter: "scatterChart" };
 /** Series children every converted chart type accepts. */
 const SER_KEEP = new Set(["idx", "order", "tx", "spPr", "dLbls", "cat", "val", "extLst"]);
 
@@ -246,12 +271,30 @@ function convert(p: Parts, kind: ChartKind, stacking: Stacking): void {
   const next = make(doc, tag);
   const add = (name: string, value: string | number) => next.appendChild(make(doc, name, { val: value }));
   const pie = isPie(kind);
+  const scatter = tag === "scatterChart";
   if (tag === "barChart") add("barDir", kind === "bar" ? "bar" : "col");
-  if (!pie) add("grouping", stacking === "stacked" ? "stacked" : stacking === "percent" ? "percentStacked" : tag === "barChart" ? "clustered" : "standard");
+  if (scatter) add("scatterStyle", "lineMarker");
+  if (!pie && !scatter) add("grouping", stacking === "stacked" ? "stacked" : stacking === "percent" ? "percentStacked" : tag === "barChart" ? "clustered" : "standard");
   add("varyColors", pie ? 1 : 0);
   for (const ser of p.series) {
     const s = make(doc, "ser");
-    for (const c of Array.from(ser.children)) if (SER_KEEP.has(c.localName)) s.appendChild(c);
+    // A scatter chart's series have x and y values where the others have categories and values.
+    const rename: Record<string, string> = scatter ? { cat: "xVal", val: "yVal" } : { xVal: "cat", yVal: "val" };
+    for (const c of Array.from(ser.children)) {
+      const name = rename[c.localName] ?? c.localName;
+      if (!SER_KEEP.has(name) && !(scatter && (name === "xVal" || name === "yVal"))) continue;
+      if (name === c.localName) s.appendChild(c);
+      else s.appendChild(make(doc, name)).append(...Array.from(c.childNodes));
+    }
+    if (scatter) {
+      // xVal before yVal, as the schema orders them.
+      const x = kid(s, "xVal");
+      if (x) s.insertBefore(x, kid(s, "yVal"));
+      // Points without joining lines, as Google's scatter chart.
+      const spPr = kid(s, "spPr") ?? s.insertBefore(make(doc, "spPr"), kid(s, "dLbls") ?? kid(s, "xVal") ?? kid(s, "yVal"));
+      kid(spPr, "ln", NS.a)?.remove();
+      spPr.appendChild(doc.createElementNS(NS.a, "a:ln")).appendChild(doc.createElementNS(NS.a, "a:noFill"));
+    }
     next.appendChild(s);
   }
   const labels = kid(old, "dLbls");
@@ -268,6 +311,16 @@ function convert(p: Parts, kind: ChartKind, stacking: Stacking): void {
     for (const ax of Array.from(p.plot.children)) if (ax.localName.endsWith("Ax") && ids.includes(val(kid(ax, "axId")))) ax.remove();
   } else if (ids.length >= 2 && p.category && p.value) {
     for (const id of ids) add("axId", id!);
+    // Scatter charts have a value axis along the bottom where the others have a category axis.
+    const swap = scatter ? p.category.localName === "catAx" || p.category.localName === "dateAx" : p.category.localName === "valAx";
+    if (swap) {
+      const id = val(kid(p.category, "axId"))!, other = val(kid(p.value, "axId"))!;
+      const [catXml, valXml] = axesXml(Number(id), Number(other)).split("</c:catAx>");
+      const bottom = scatter
+        ? valXml.replace(`<c:axPos val="l"/><c:majorGridlines/>`, `<c:axPos val="b"/>`).replace(`<c:crossAx val="${id}"/>`, `<c:crossAx val="${other}"/>`).replace(`<c:axId val="${other}"/>`, `<c:axId val="${id}"/>`).replace("between", "midCat")
+        : `${catXml}</c:catAx>`;
+      p.category.replaceWith(parse(doc, bottom));
+    }
   } else {
     const used = Array.from(p.plot.getElementsByTagNameNS(C, "axId")).map((a) => Number(val(a)) || 0);
     const cat = Math.max(1000, ...used) + 1;
@@ -327,9 +380,21 @@ export function setChartFormat(xml: Document, next: ChartFormat, ctx: ColorConte
   if (!p?.type) return;
   const doc = xml;
   let was = readChartFormat(xml, ctx);
+  // Leaving a combo: every series back into the column part, which then converts like any column chart.
+  if (was.kind === "combo" && next.kind !== "combo") {
+    const bar = p.types.find((t) => t.localName === "barChart")!;
+    for (const ser of p.series) moveSeries(ser, bar);
+    p.types.filter((t) => t !== bar).forEach((t) => t.remove());
+    p = parts(xml)!;
+    was = readChartFormat(xml, ctx);
+  }
+  if (next.kind === "combo") {
+    p = arrangeCombo(p, was, next.seriesKinds ?? p.series.map((_, i, all) => (i === all.length - 1 && all.length > 1 ? "line" : "column")));
+    was = readChartFormat(xml, ctx);
+  }
   const convertible = (k: ChartKind) => !!TYPE_TAG[k];
   const single = Array.from(p.plot.children).filter((c) => c.localName.endsWith("Chart")).length === 1;
-  if (next.kind !== was.kind && convertible(next.kind) && convertible(was.kind) && single && TYPE_TAG[next.kind] !== p.type.localName) {
+  if (next.kind !== was.kind && convertible(next.kind) && convertible(was.kind) && single && TYPE_TAG[next.kind] !== p.type!.localName) {
     convert(p, next.kind, next.stacking);
     p = parts(xml)!;
     was = readChartFormat(xml, ctx);
@@ -399,7 +464,35 @@ export function setChartFormat(xml: Document, next: ChartFormat, ctx: ColorConte
     } else {
       const ser = p.series[i];
       const spPr = kid(ser, "spPr") ?? place(ser, make(doc, "spPr"), SER_ORDER);
-      setFill(spPr, color, kindNow === "line" || kindNow === "scatter");
+      setFill(spPr, color, kindNow === "line" || kindNow === "scatter" || ser.parentElement?.localName === "lineChart");
     }
   });
+}
+
+/** Move a series into another chart-type element, in series order, keeping only what every type accepts. */
+function moveSeries(ser: Element, into: Element): void {
+  for (const c of Array.from(ser.children)) if (!SER_KEEP.has(c.localName)) c.remove();
+  const order = num(kid(ser, "order")) ?? 0;
+  const after = kids(into, "ser").find((s) => s !== ser && (num(kid(s, "order")) ?? 0) > order);
+  if (after) into.insertBefore(ser, after);
+  else insert(into, ser, TYPE_ORDER);
+}
+
+/** Make the plot a combo: a column part and a line part on the same axes, each series where `kinds` says. */
+function arrangeCombo(p: Parts, was: ChartFormat, kinds: SeriesKind[]): Parts {
+  const doc = p.plot.ownerDocument;
+  if (was.kind !== "combo" && !(p.type?.localName === "barChart" && val(kid(p.type, "barDir")) !== "bar")) convert(p, "column", "none");
+  p = parts(doc)!;
+  const bar = p.types.find((t) => t.localName === "barChart")!;
+  let line = p.types.find((t) => t.localName === "lineChart");
+  if (!line) {
+    line = parse(doc, `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/><c:marker val="1"/></c:lineChart>`);
+    for (const id of kids(bar, "axId")) line.appendChild(make(doc, "axId", { val: val(id)! }));
+    bar.after(line);
+  }
+  p.series.forEach((ser, i) => {
+    const target = kinds[i] === "line" ? line : bar;
+    if (ser.parentElement !== target) moveSeries(ser, target);
+  });
+  return parts(doc)!;
 }

@@ -152,6 +152,11 @@ function shiftSheet(e: Edits, sheet: Sheet, axis: "row" | "col", at: number, cou
     if (rel.type === "table") {
       for (const el of [doc.documentElement, ...Array.from(doc.getElementsByTagNameNS(NS_S, "autoFilter"))]) shiftAttr(el, "ref", o);
       e.wb.pkg.touch(rel.target);
+    } else if (rel.type === "comments") {
+      // Notes move with their cells; ones on deleted cells go (their VML drawing is rebuilt on save).
+      for (const c of Array.from(doc.getElementsByTagNameNS(NS_S, "comment"))) if (!shiftAttr(c, "ref", o)) c.remove();
+      e.wb.pkg.touch(rel.target);
+      if (!doc.getElementsByTagNameNS(NS_S, "comment").length) e.wb.pkg.removeComments(sheet.ref.path);
     } else if (rel.type === "drawing") {
       const tag = axis === "row" ? "row" : "col";
       for (const el of Array.from(doc.getElementsByTagNameNS(XDR, tag))) {

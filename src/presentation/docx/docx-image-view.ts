@@ -1,7 +1,7 @@
 import { Node as PMNode } from "prosemirror-model";
 import { EditorView, NodeView } from "prosemirror-view";
-import { attrsOf, ImageAttrs } from "../../domain/docx/schema";
-import { placementCss, PlacementGeometry, Wrap } from "../../domain/docx/drawing";
+import { attrsOf, cropBox, ImageAttrs } from "../../domain/docx/schema";
+import { placementCss, PlacementGeometry, recrop, Wrap } from "../../domain/docx/drawing";
 
 /** Google Docs' image options, in its order. */
 const WRAPS: [Wrap, string][] = [
@@ -15,6 +15,8 @@ const WRAPS: [Wrap, string][] = [
 export interface ImageActions {
   replace(pos: number): void;
   editAlt(pos: number, current: string): void;
+  /** Ask for a new crop (shares cut off each side); null removes it. */
+  crop(current: ImageAttrs["crop"]): Promise<ImageAttrs["crop"] | undefined>;
 }
 
 /**
@@ -68,6 +70,12 @@ export class DocxImageView implements NodeView {
       if (pos === undefined || !Number.isFinite(value) || value < 0 || value > 96) return;
       this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, distances: { top: value, right: value, bottom: value, left: value } }));
     });
+    button("Crop", () => void actions.crop(attrsOf<ImageAttrs>(this.node).crop).then((crop) => {
+      const pos = this.getPos();
+      if (crop === undefined || pos === undefined) return;
+      const a = attrsOf<ImageAttrs>(this.node);
+      this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, ...recrop(a, crop) }));
+    }));
     button("Alt", () => actions.editAlt(this.getPos()!, attrsOf<ImageAttrs>(this.node).alt));
     button("Replace", () => actions.replace(this.getPos()!));
     button("Delete", () => {
@@ -82,13 +90,18 @@ export class DocxImageView implements NodeView {
     const { src, alt, width, height } = attrsOf<ImageAttrs>(this.node);
     this.img.src = src;
     this.img.alt = alt;
-    this.img.style.width = width ? `${width}px` : "";
-    this.img.style.height = height ? `${height}px` : "";
+    // Cropped: the box keeps the picture's size and clips the whole image, scaled and shifted inside it.
+    const crop = attrsOf<ImageAttrs>(this.node).crop;
+    const box = crop && width && height ? cropBox(width, height, crop) : null;
+    this.img.style.width = box ? `${box.width}px` : width ? `${width}px` : "";
+    this.img.style.height = box ? `${box.height}px` : height ? `${height}px` : "";
+    this.img.style.marginLeft = box ? `${box.left}px` : "";
+    this.img.style.marginTop = box ? `${box.top}px` : "";
     // Floating pictures sit where the document puts them (see drawing.ts).
     const a = attrsOf<ImageAttrs>(this.node);
     const { cls, style } = placementCss(a, a.width ?? 0, this.geometry());
-    this.dom.className = `docx-image ${cls}`.trim() + (this.dom.classList.contains("is-selected") ? " is-selected" : "");
-    this.dom.setAttribute("style", style);
+    this.dom.className = `docx-image ${cls}`.trim() + (box ? " docx-cropped" : "") + (this.dom.classList.contains("is-selected") ? " is-selected" : "");
+    this.dom.setAttribute("style", style + (box ? `; --docx-crop-w: ${width}px; --docx-crop-h: ${height}px` : ""));
     if (this.wrap) this.wrap.value = a.wrap;
     this.moveHandle.disabled = a.wrap === "inline";
     const spacing = this.dom.querySelector<HTMLInputElement>('[aria-label="Image text spacing (px)"]');

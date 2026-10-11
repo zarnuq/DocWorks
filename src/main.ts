@@ -35,11 +35,12 @@ export default class DocWorksPlugin extends Plugin {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<DocWorksSettings> | null) };
     this.addSettingTab(new DocWorksSettingTab(this.app, this));
     this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf, this.settings, () => this.saveSettings()));
-    this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf));
-    this.claimExtension("docx", VIEW_TYPE_DOCX);
-    this.registerView(VIEW_TYPE_XLSX, (leaf: WorkspaceLeaf) => new XlsxView(leaf));
-    this.claimExtension("pptx", VIEW_TYPE_PPTX);
-    this.claimExtension("xlsx", VIEW_TYPE_XLSX);
+    this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf, this.settings));
+    this.registerView(VIEW_TYPE_XLSX, (leaf: WorkspaceLeaf) => new XlsxView(leaf, this.settings));
+    // File types switched off in the settings are left to Obsidian or another plugin.
+    if (this.settings.openDocx) this.claimExtension("docx", VIEW_TYPE_DOCX);
+    if (this.settings.openPptx) this.claimExtension("pptx", VIEW_TYPE_PPTX);
+    if (this.settings.openXlsx) this.claimExtension("xlsx", VIEW_TYPE_XLSX);
     this.app.workspace.onLayoutReady(() => this.nameBackgroundTabs());
 
     for (const [id, name, fromStart] of [
@@ -126,6 +127,19 @@ export default class DocWorksPlugin extends Plugin {
 
 const AUTHOR = { name: "Comment author", desc: "Your name on comments you add to Word documents." };
 
+const PAPER = {
+  name: "Paper colour",
+  desc: "How files open: light or dark pages, slides' surroundings and sheets. Each file's toolbar can still switch.",
+  options: { default: "Light documents, dark slides and sheets", light: "Light", dark: "Dark", obsidian: "Match Obsidian's theme" },
+};
+
+const OPEN = [
+  ["openDocx", "Open Word documents (.docx)"],
+  ["openPptx", "Open PowerPoint presentations (.pptx)"],
+  ["openXlsx", "Open Excel spreadsheets (.xlsx)"],
+] as const;
+const OPEN_DESC = "Turn off to leave this file type to Obsidian or another plugin. Applies after reloading Obsidian.";
+
 const PAGE_SIZE = {
   name: "Word page size",
   desc: "Page view uses each document's own page size, or always US Letter (8.5 × 11 in).",
@@ -145,12 +159,16 @@ class DocWorksSettingTab extends PluginSettingTab {
     return [
       { name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } },
       { name: AUTHOR.name, desc: AUTHOR.desc, control: { type: "text", key: "author", defaultValue: "" } },
+      { name: PAPER.name, desc: PAPER.desc, control: { type: "dropdown", key: "paper", options: PAPER.options, defaultValue: "default" } },
+      ...OPEN.map(([key, name]) => ({ name, desc: OPEN_DESC, control: { type: "toggle" as const, key, defaultValue: true } })),
     ];
   }
 
   async setControlValue(key: string, value: unknown): Promise<void> {
     if (key === "pageSize") this.plugin.settings.pageSize = value === "letter" ? "letter" : "document";
     if (key === "author") this.plugin.settings.author = typeof value === "string" ? value.trim() : "";
+    if (key === "paper" && typeof value === "string" && value in PAPER.options) this.plugin.settings.paper = value as keyof typeof PAPER.options;
+    for (const [open] of OPEN) if (key === open) this.plugin.settings[open] = value !== false;
     await this.plugin.saveSettings();
   }
 
@@ -170,5 +188,15 @@ class DocWorksSettingTab extends PluginSettingTab {
       .setName(AUTHOR.name)
       .setDesc(AUTHOR.desc)
       .addText((t) => t.setValue(this.plugin.settings.author).onChange((v) => void this.setControlValue("author", v)));
+    new Setting(this.containerEl)
+      .setName(PAPER.name)
+      .setDesc(PAPER.desc)
+      .addDropdown((d) => d.addOptions(PAPER.options).setValue(this.plugin.settings.paper).onChange((v) => void this.setControlValue("paper", v)));
+    for (const [key, name] of OPEN) {
+      new Setting(this.containerEl)
+        .setName(name)
+        .setDesc(OPEN_DESC)
+        .addToggle((t) => t.setValue(this.plugin.settings[key]).onChange((v) => void this.setControlValue(key, v)));
+    }
   }
 }

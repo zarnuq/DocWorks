@@ -243,3 +243,30 @@ describe("charts in the grid", () => {
     expect(chartMenu).toHaveBeenCalledWith("xl/charts/chart1.xml", expect.anything());
   });
 });
+
+describe("notes in the grid", () => {
+  it("marks cells with a note in their top right corner, empty cells too", async () => {
+    const { grid, host } = await mount();
+    // B2 has a value; A5 is empty.
+    host.note = (row, col) => (row === 1 && col === 1) || (row === 4 && col === 0) ? "a note" : null;
+    grid.invalidate();
+    grid.render();
+    const corners = ["corner", "top", "left", "main"].flatMap((q) => (grid.ops.get(q) ?? []).filter((o) => o.kind === "corner" && o.color === "#000000"));
+    expect(corners).toHaveLength(2);
+  });
+});
+
+describe("zoom", () => {
+  it("finds the cell under the pointer at any zoom, and paints sharply", async () => {
+    const { grid, edits } = await mount();
+    const s = edits.wb.sheets[0];
+    // The middle of B3 at 100%...
+    const x = HEADER_W + s.colX(1) + s.colWidth(1) / 2, y = HEADER_H + s.rowY(2) + s.rowHeight(2) / 2;
+    expect(grid.hit(x, y)).toMatchObject({ area: "cell", row: 2, col: 1 });
+    // ...is twice as far from the corner at 200%.
+    grid.setZoom(2);
+    expect(grid.zoom).toBe(2);
+    expect(grid.hit(x * 2, y * 2)).toMatchObject({ area: "cell", row: 2, col: 1 });
+    expect(grid.el.style.getPropertyValue("zoom")).toBe("2");
+  });
+});

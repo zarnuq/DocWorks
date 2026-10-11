@@ -51,6 +51,8 @@ export interface GridHost {
   conditional?(row: number, col: number): CfStyle | null;
   /** Whether a cell has a dropdown (list validation). */
   dropdown?(row: number, col: number): boolean;
+  /** A cell's note, if it has one (marked in its corner, shown on hover). */
+  note?(row: number, col: number): string | null;
   /** Whether a cell's value breaks its validation rule (marked, as Sheets does). */
   invalid?(row: number, col: number): boolean;
   /** Show a cell's choices below the point `at` (the arrow's bottom left, in client pixels). */
@@ -58,6 +60,8 @@ export interface GridHost {
   /** Charts on the current sheet: where each sits, and how to draw it into its box. */
   charts?(): { key: string; x: number; y: number; w: number; h: number; draw(el: HTMLElement): void }[];
   chartMenu?(key: string, e: MouseEvent): void;
+  /** A chart dragged (or resized from its corner) to `box`, in sheet pixels. */
+  moveChart?(key: string, box: { x: number; y: number; w: number; h: number }): void;
 }
 
 /** Text to edit for a cell: "=formula", or the value written so that typing it back gives the same value. */
@@ -167,7 +171,9 @@ export class Grid {
     this.canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     this.canvas.addEventListener("click", (e) => {
       const chart = (e.target as HTMLElement).closest<HTMLElement>(".xlsx-chart")?.dataset.chart;
-      if (chart) this.host.chartMenu?.(chart, e);
+      // A drag that just moved the chart isn't a click on it.
+      if (this.chartDragged) this.chartDragged = false;
+      else if (chart) this.host.chartMenu?.(chart, e);
     });
     this.canvas.addEventListener("dblclick", (e) => this.onDoubleClick(e));
     this.canvas.addEventListener("pointermove", (e) => {
@@ -175,7 +181,9 @@ export class Grid {
       const hit = this.hit(e.clientX, e.clientY);
       this.canvas.toggleClass("is-col-resize", hit?.area === "colHeader" && hit.resize !== undefined);
       this.canvas.toggleClass("is-row-resize", hit?.area === "rowHeader" && hit.resize !== undefined);
+      this.showNote(hit?.area === "cell" ? hit : null);
     });
+    this.canvas.addEventListener("pointerleave", () => this.showNote(null));
     this.canvas.addEventListener("contextmenu", (e) => {
       const hit = this.hit(e.clientX, e.clientY);
       if (!hit) return;
@@ -517,7 +525,7 @@ export class Grid {
     }
     const x0 = s.colX(q.cols[0]) + q.ox, x1 = s.colX(q.cols[q.cols.length - 1] + 1) + q.ox;
     const y0 = s.rowY(q.rows[0]) + q.oy, y1 = s.rowY(q.rows[q.rows.length - 1] + 1) + q.oy;
-    if (s.showGrid) {
+    if (chrome ? s.showGrid : this.printGridlines ?? s.showGrid) {
       for (const c of q.cols) ops.push({ kind: "line", x1: s.colX(c + 1) + q.ox - 1, y1: y0, x2: s.colX(c + 1) + q.ox - 1, y2: y1, color: pal.line, width: 1 });
       for (const r of q.rows) ops.push({ kind: "line", x1: x0, y1: s.rowY(r + 1) + q.oy - 1, x2: x1, y2: s.rowY(r + 1) + q.oy - 1, color: pal.line, width: 1 });
     }
@@ -586,8 +594,19 @@ export class Grid {
     };
     for (const m of merges) drawCell(m.r1, m.c1, m);
     for (const row of q.rows) for (const col of q.cols) if (!covered(row, col)) drawCell(row, col, { r1: row, c1: col, r2: row, c2: col });
-    ops.push(...fills, ...borders, ...texts);
-    paint(q.canvas, q.w, q.h, ops, scale);
+    // Notes: a small triangle in the cell's top right corner, as Sheets marks them (empty cells too).
+    const notes: Op[] = [];
+    if (this.host.note)
+      for (const row of q.rows)
+        for (const col of q.cols) {
+          if (covered(row, col) && !merges.some((m) => m.r1 === row && m.c1 === col)) continue;
+          if (!this.host.note(row, col)) continue;
+          const m = merges.find((x) => x.r1 === row && x.c1 === col);
+          notes.push({ kind: "corner", x: s.colX((m?.c2 ?? col) + 1) + q.ox - 1, y: s.rowY(row) + q.oy, color: this.dark ? "#e8eaed" : "#000000" });
+        }
+    ops.push(...fills, ...borders, ...texts, ...notes);
+    // Painted at the screen's resolution times the zoom, so zoomed text stays sharp.
+    paint(q.canvas, q.w, q.h, ops, scale ?? (window.devicePixelRatio || 1) * this.zoom);
 
     // Pictures float over the cells.
     for (const p of this.host.pictures?.() ?? []) {
@@ -603,6 +622,7 @@ export class Grid {
       const el = make("xlsx-chart", px, py, ch.w, ch.h);
       el.dataset.chart = ch.key;
       ch.draw(el);
+      if (this.host.moveChart) el.createDiv({ cls: "xlsx-chart-handle", attr: { "aria-label": "Resize chart" } });
     }
     if (!chrome) {
       q.overlay.replaceChildren(frag);
@@ -678,10 +698,42 @@ export class Grid {
   // ---------------------------------------------------------------------------
 
   /** What's under a point (client coordinates). */
+  private notePopup: HTMLElement | null = null;
+  private noteAt = "";
+  /** Show a cell's note beside it while the pointer is over the cell (null hides it). */
+  private showNote(at: { row: number; col: number } | null): void {
+    const text = at ? this.host.note?.(at.row, at.col) ?? null : null;
+    const key = text && at ? `${at.row}:${at.col}` : "";
+    if (key === this.noteAt) return;
+    this.noteAt = key;
+    this.notePopup?.remove();
+    this.notePopup = null;
+    if (!text || !at) return;
+    const cell = this.boxOf({ r1: at.row, c1: at.col, r2: at.row, c2: at.col });
+    const width = this.canvas.getBoundingClientRect().width / this.zoom;
+    this.notePopup = this.canvas.createDiv({ cls: "xlsx-note-popup", text });
+    this.notePopup.setCssProps({ "--xlsx-note-x": `${Math.min(cell.x + cell.w + 4, width - 220)}px`, "--xlsx-note-y": `${cell.y}px` });
+  }
+
+  /** Printing: draw gridlines (the print setting) instead of following the sheet's view. */
+  printGridlines: boolean | null = null;
+
+  /** Set while a chart drag ends, so the click that follows doesn't open its menu. */
+  private chartDragged = false;
+
+  /** Zoom (1 = 100%): the grid is drawn larger or smaller; pointer positions are scaled back. */
+  zoom = 1;
+  setZoom(zoom: number): void {
+    this.zoom = zoom;
+    this.el.setCssProps({ zoom: String(zoom) });
+    this.invalidate();
+  }
+
   hit(clientX: number, clientY: number): Hit | null {
     const s = this.sheet;
     const box = this.canvas.getBoundingClientRect();
-    const x = clientX - box.left, y = clientY - box.top;
+    // Client positions are on screen; the grid's own pixels are that divided by the zoom.
+    const x = (clientX - box.left) / this.zoom, y = (clientY - box.top) / this.zoom;
     const fw = s.colX(s.frozen.cols), fh = s.rowY(s.frozen.rows);
     const sx = x - HEADER_W < fw ? x - HEADER_W : x - HEADER_W + this.scroll.scrollLeft;
     const sy = y - HEADER_H < fh ? y - HEADER_H : y - HEADER_H + this.scroll.scrollTop;
@@ -735,9 +787,30 @@ export class Grid {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target === this.input && this.edit) return;
-    // A chart's menu opens on click (see the constructor): opened on press, the release would close it.
-    if (target.closest<HTMLElement>(".xlsx-chart")?.dataset.chart) {
+    // A chart's menu opens on click (see the constructor): opened on press, the release would close it. Dragging
+    // moves the chart; dragging its corner handle resizes it.
+    const chartEl = target.closest<HTMLElement>(".xlsx-chart");
+    if (chartEl?.dataset.chart) {
       e.preventDefault();
+      const key = chartEl.dataset.chart;
+      const ch = this.host.charts?.().find((c) => c.key === key);
+      if (!ch || !this.host.moveChart) return;
+      const resize = !!target.closest(".xlsx-chart-handle");
+      const left = Number.parseFloat(chartEl.style.getPropertyValue("--x")) || 0, top = Number.parseFloat(chartEl.style.getPropertyValue("--y")) || 0;
+      let box = { x: ch.x, y: ch.y, w: ch.w, h: ch.h };
+      let moved = false;
+      this.chartDragged = false;
+      this.track((m) => {
+        const dx = (m.clientX - e.clientX) / this.zoom, dy = (m.clientY - e.clientY) / this.zoom;
+        if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+        moved = true;
+        box = resize ? { ...box, w: Math.max(60, ch.w + dx), h: Math.max(40, ch.h + dy) } : { ...box, x: Math.max(0, ch.x + dx), y: Math.max(0, ch.y + dy) };
+        chartEl.setCssProps({ "--x": `${left + box.x - ch.x}px`, "--y": `${top + box.y - ch.y}px`, "--w": `${box.w}px`, "--h": `${box.h}px` });
+      }, () => {
+        if (!moved) return;
+        this.chartDragged = true;
+        this.host.moveChart?.(key, box);
+      }, e);
       return;
     }
     const dropBtn = target.closest<HTMLElement>(".xlsx-dropdown-btn");
@@ -818,7 +891,7 @@ export class Grid {
       };
       showGuide();
       this.track((m) => {
-        size = Math.max(axis === "col" ? 8 : 6, size0 + (axis === "col" ? m.clientX : m.clientY) - start);
+        size = Math.max(axis === "col" ? 8 : 6, size0 + ((axis === "col" ? m.clientX : m.clientY) - start) / this.zoom);
         showGuide();
       }, () => {
         this.guide.hide();

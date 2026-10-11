@@ -22,6 +22,8 @@ export interface SlideClip {
     xml: string;
     layout: { path: string; name: string; type: string; master: string | null } | null;
     rels: { id: string; uri: string; target: string; external: boolean; resources?: ResourceBundle }[];
+    /** Speaker notes, as plain text. */
+    notes: string;
   }[];
   /** Each source master with its layouts, theme and pictures, for keeping the source look in another deck. */
   masters: Map<string, ResourceBundle>;
@@ -171,7 +173,7 @@ export class PptxDocument extends OoxmlPackage {
    * Copy slides for pasting into this or another deck: each slide's XML, its layout's name and type, and everything
    * it links to (pictures, media, charts with their workbooks), captured now so later edits don't change the copy.
    */
-  // ponytail: speaker notes aren't copied; add them with the notes master mapping if someone needs them.
+  // ponytail: speaker notes travel as plain text (their formatting isn't kept).
   async copySlides(indexes: number[]): Promise<SlideClip> {
     const slides: SlideClip["slides"] = [];
     const masters = new Map<string, ResourceBundle>();
@@ -191,7 +193,7 @@ export class PptxDocument extends OoxmlPackage {
         }
         rels.push({ id: rel.id, uri: rel.uri, target: rel.target, external: rel.external, resources: rel.external ? undefined : await this.captureResources([rel.target]) });
       }
-      slides.push({ xml: new XMLSerializer().serializeToString(this.xml(src.path)!), layout, rels });
+      slides.push({ xml: new XMLSerializer().serializeToString(this.xml(src.path)!), layout, rels, notes: this.notesText(index) });
     }
     return { doc: this, slides, masters, size: { ...this.slideSize } };
   }
@@ -246,6 +248,7 @@ export class PptxDocument extends OoxmlPackage {
       this.parts.set(relsPathOf(path), rels);
       this.touch(relsPathOf(path));
       at = this.registerSlide(path, at);
+      if (slide.notes) this.setNotes(at, slide.notes);
     }
     const { cx, cy } = this.slideSize;
     if (clip.size.cx !== cx || clip.size.cy !== cy) {

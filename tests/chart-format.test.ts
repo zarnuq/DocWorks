@@ -218,3 +218,78 @@ describe("chart rendering", () => {
     expect(niceTicks(-3, 9)).toEqual([-5, -2.5, 0, 2.5, 5, 7.5, 10]);
   });
 });
+
+describe("combo charts (columns and lines together)", () => {
+  const three: ChartData = { categories: ["Q1", "Q2"], series: [{ name: "A", values: [1, 2] }, { name: "B", values: [3, 4] }, { name: "Trend", values: [2, 3] }] };
+
+  it("turns a column chart into a combo with a type per series, sharing the axes, and reads it back", async () => {
+    const { xml } = await chart("barChart", three);
+    const f = edit(xml, (f) => {
+      f.kind = "combo";
+      f.seriesKinds = ["column", "line", "line"];
+    });
+    expect(f.kind).toBe("combo");
+    expect(f.seriesKinds).toEqual(["column", "line", "line"]);
+    const bar = local(xml, "barChart")[0], line = local(xml, "lineChart")[0];
+    expect(bar.getElementsByTagNameNS(C, "ser")).toHaveLength(1);
+    expect(line.getElementsByTagNameNS(C, "ser")).toHaveLength(2);
+    const ids = (e: Element) => Array.from(e.children).filter((c) => c.localName === "axId").map((a) => a.getAttribute("val"));
+    expect(ids(line)).toEqual(ids(bar));
+    // The data still lists every series, in order.
+    expect(chartData(xml).series.map((s) => s.name)).toEqual(["A", "B", "Trend"]);
+    expect(f.colors).toHaveLength(3);
+  });
+
+  it("moves a series between columns and lines, and back to a plain chart", async () => {
+    const { xml } = await chart("barChart", three);
+    edit(xml, (f) => {
+      f.kind = "combo";
+      f.seriesKinds = ["column", "column", "line"];
+    });
+    const again = edit(xml, (f) => (f.seriesKinds = ["line", "column", "line"]));
+    // Series keep their order (c:order), whichever part of the plot they sit in.
+    expect(again.seriesKinds).toEqual(["line", "column", "line"]);
+    expect(chartData(xml).series.map((s) => s.name)).toEqual(["A", "B", "Trend"]);
+    const plain = edit(xml, (f) => (f.kind = "line"));
+    expect(plain.kind).toBe("line");
+    expect(local(xml, "barChart")).toHaveLength(0);
+    expect(local(xml, "lineChart")[0].getElementsByTagNameNS(C, "ser")).toHaveLength(3);
+  });
+
+  it("draws columns and lines in one plot", () => {
+    const host = document.createElement("div");
+    const base = readChartFormat(new DOMParser().parseFromString(`<c:chartSpace xmlns:c="${C}"/>`, "application/xml"));
+    renderChart(host, { path: "x", type: "barChart", data: three, format: { ...base, kind: "combo", seriesKinds: ["column", "column", "line"], legend: "none" } }, { w: 400, h: 300 });
+    expect(host.querySelectorAll("rect.chart-mark")).toHaveLength(4);
+    expect(host.querySelectorAll("polyline.chart-mark")).toHaveLength(1);
+  });
+});
+
+describe("scatter charts", () => {
+  const xy: ChartData = { categories: ["1", "2", "10"], series: [{ name: "Y", values: [5, 6, 7] }] };
+
+  it("converts a line chart to a scatter chart (x values, two value axes) and back", async () => {
+    const { xml } = await chart("lineChart", xy);
+    const f = edit(xml, (f) => (f.kind = "scatter"));
+    expect(f.kind).toBe("scatter");
+    const ser = local(xml, "ser")[0];
+    expect(Array.from(ser.children).map((c) => c.localName)).toEqual(expect.arrayContaining(["xVal", "yVal"]));
+    expect(local(xml, "catAx")).toHaveLength(0);
+    expect(local(xml, "valAx")).toHaveLength(2);
+    expect(chartData(xml).categories).toEqual(["1", "2", "10"]);
+    const back = edit(xml, (f) => (f.kind = "line"));
+    expect(back.kind).toBe("line");
+    expect(local(xml, "catAx")).toHaveLength(1);
+    expect(Array.from(local(xml, "ser")[0].children).map((c) => c.localName)).toEqual(expect.arrayContaining(["cat", "val"]));
+  });
+
+  it("places points at their x values, not evenly", () => {
+    const host = document.createElement("div");
+    const base = readChartFormat(new DOMParser().parseFromString(`<c:chartSpace xmlns:c="${C}"/>`, "application/xml"));
+    renderChart(host, { path: "x", type: "scatterChart", data: xy, format: { ...base, kind: "scatter", legend: "none" } }, { w: 400, h: 300 });
+    const xs = Array.from(host.querySelectorAll("circle.chart-mark")).map((c) => Number(c.getAttribute("cx")));
+    expect(xs).toHaveLength(3);
+    // 1, 2 and 10: the second point sits much nearer the first than the third.
+    expect(xs[1] - xs[0]).toBeLessThan((xs[2] - xs[1]) / 4);
+  });
+});

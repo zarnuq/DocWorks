@@ -93,6 +93,20 @@ export class OoxmlPackage {
     this.touched.add(path);
   }
 
+  /** Whether a part changed since the last save. */
+  protected isTouched(path: string): boolean {
+    return this.touched.has(path);
+  }
+
+  /** Remove a non-XML part (and its content type override) from the package. */
+  protected dropBinary(path: string): void {
+    this.binaryEdits.delete(path);
+    this.managedBinary.delete(path);
+    this.originalBinary.delete(path);
+    this.zip.remove(path);
+    this.removePart(path);
+  }
+
   xml(path: string): Document | null {
     return this.parts.get(path) ?? null;
   }

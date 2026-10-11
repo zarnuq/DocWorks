@@ -358,6 +358,7 @@ class Reader {
         width: px("cx"),
         height: px("cy"),
         alt: drawing.getElementsByTagNameNS(NS.wp, "docPr")[0]?.getAttribute("descr") ?? "",
+        crop: cropOf(drawing),
         ...placementOf(drawing),
       },
       null,
@@ -420,4 +421,13 @@ export function startsWordPage(el: Element): boolean {
     if (["t", "tab", "drawing", "pict", "object", "sym", "br"].includes(node.localName)) return false;
   }
   return false;
+}
+
+/** A picture's crop (a:srcRect in its blip fill, in thousandths of a percent), or null when it isn't cropped. */
+export function cropOf(drawing: Element): { l: number; t: number; r: number; b: number } | null {
+  const rect = Array.from(drawing.getElementsByTagNameNS(NS.a, "srcRect")).find((e) => e.parentElement?.localName === "blipFill");
+  if (!rect) return null;
+  const side = (k: string) => (Number(rect.getAttribute(k)) || 0) / 100000;
+  const crop = { l: side("l"), t: side("t"), r: side("r"), b: side("b") };
+  return crop.l || crop.t || crop.r || crop.b ? crop : null;
 }

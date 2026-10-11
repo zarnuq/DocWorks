@@ -133,9 +133,16 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
 
   // Axes charts. Values are stacked (and made fractions of the total for 100%) before scaling.
   const horizontal = f.kind === "bar";
-  const stacked = f.stacking !== "none" && f.kind !== "scatter";
+  const combo = f.kind === "combo";
+  /** Series drawn as lines (a line chart, or a combo's line series); the rest of a combo are columns. */
+  const isLine = (j: number) => f.kind === "line" || (combo && f.seriesKinds?.[j] === "line");
+  const stacked = f.stacking !== "none" && f.kind !== "scatter" && !combo;
   const percent = f.stacking === "percent";
   const n = categories.length;
+  // A scatter chart's categories are x values: placed by value along a numeric axis.
+  const xs = categories.map(Number);
+  const numericX = f.kind === "scatter" && n > 0 && categories.every((c, i) => c.trim() !== "" && Number.isFinite(xs[i]));
+  const xTicks = numericX ? niceTicks(Math.min(...xs), Math.max(...xs)) : [];
   const totals = categories.map((_, i) => series.reduce((s, ser) => s + Math.abs(ser.values[i] || 0), 0) || 1);
   const shown = series.map((s) => s.values.map((v, i) => (percent ? (v || 0) / totals[i] : v || 0)));
   /** Start and end of each series' segment per category. */
@@ -191,8 +198,11 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
     return horizontal ? box.left + t * plotW : box.bottom - t * plotH;
   };
   const band = (horizontal ? plotH : plotW) / n;
+  const xLo = xTicks[0] ?? 0, xHi = xTicks[xTicks.length - 1] ?? 1;
+  const xScale = (v: number) => box.left + ((v - xLo) / (xHi - xLo || 1)) * plotW;
   /** Centre of category `i`: left to right for columns, bottom to top for bars (Office's order), unless reversed. */
   const centre = (i: number) => {
+    if (numericX) return xScale(xs[i]);
     const k = f.category.reversed ? n - 1 - i : i;
     return horizontal ? box.bottom - band * (k + 0.5) : box.left + band * (k + 0.5);
   };
@@ -204,14 +214,17 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
     if (f.value.visible)
       node(svg, "text", horizontal ? { x: p, y: box.bottom + FONT * 1.3, "text-anchor": "middle", "font-size": FONT, fill: INK } : { x: box.left - 4, y: p + FONT / 3, "text-anchor": "end", "font-size": FONT, fill: INK }, tickLabels[k]);
   }
-  if (f.category.gridlines)
+  if (f.category.gridlines && numericX) for (const t of xTicks) node(svg, "line", { x1: xScale(t), x2: xScale(t), y1: box.top, y2: box.bottom, stroke: GRID });
+  else if (f.category.gridlines)
     for (let i = 0; i <= n; i++) {
       const p = horizontal ? box.bottom - band * i : box.left + band * i;
       node(svg, "line", horizontal ? { x1: box.left, x2: box.right, y1: p, y2: p, stroke: GRID } : { x1: p, x2: p, y1: box.top, y2: box.bottom, stroke: GRID });
     }
   const zero = scale(0);
   node(svg, "line", horizontal ? { x1: zero, x2: zero, y1: box.top, y2: box.bottom, stroke: LINE } : { x1: box.left, x2: box.right, y1: zero, y2: zero, stroke: LINE });
-  if (f.category.visible) {
+  if (f.category.visible && numericX) {
+    for (const t of xTicks) node(svg, "text", { x: xScale(t), y: box.bottom + FONT * 1.3, "text-anchor": "middle", "font-size": FONT, fill: INK }, formatNumber(t, f.category.format));
+  } else if (f.category.visible) {
     // Labels fit their slot: shortened with "…", and only every k-th one when even short ones would collide.
     const charW = FONT * 0.55;
     // Room for the longest label, or 8 characters, whichever is less, decides how many slots a label may use.
@@ -233,13 +246,16 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
   };
   const labelText = (j: number, i: number) => formatNumber(percent ? shown[j][i] : series[j].values[i], percent ? "0%" : f.value.format);
 
-  if (f.kind === "column" || f.kind === "bar" || f.kind === "other") {
+  if (f.kind === "column" || f.kind === "bar" || f.kind === "other" || combo) {
     const group = band * 0.6;
-    const thick = stacked ? group : group / series.length;
+    const bars = spans.map((_, j) => j).filter((j) => !isLine(j));
+    const thick = stacked ? group : group / Math.max(1, bars.length);
     spans.forEach((vals, j) => {
+      if (isLine(j)) return;
+      const slot = bars.indexOf(j);
       vals.forEach(([a, b], i) => {
         const p1 = scale(a), p2 = scale(b);
-        const offset = centre(i) - group / 2 + (stacked ? 0 : thick * j);
+        const offset = centre(i) - group / 2 + (stacked ? 0 : thick * slot);
         const rect = horizontal
           ? { x: Math.min(p1, p2), y: offset, width: Math.abs(p2 - p1), height: Math.max(0.5, thick - 1) }
           : { x: offset, y: Math.min(p1, p2), width: Math.max(0.5, thick - 1), height: Math.abs(p2 - p1) };
@@ -247,7 +263,7 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
         if (f.labels) label(labelText(j, i), stacked ? (p1 + p2) / 2 : p2, offset + thick / 2, b < a, stacked);
       });
     });
-    return;
+    if (!combo) return;
   }
   // Lines, areas and scatter points: one point per category at its centre.
   const point = (i: number, v: number) => (horizontal ? `${scale(v)},${centre(i)}` : `${centre(i)},${scale(v)}`);
@@ -259,7 +275,8 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
     });
   }
   spans.forEach((vals, j) => {
-    if (f.kind === "line") node(svg, "polyline", { points: vals.map(([, b], i) => point(i, b)).join(" "), fill: "none", stroke: color(j), "stroke-width": 2, class: "chart-mark" });
+    if (combo && !isLine(j)) return;
+    if (isLine(j)) node(svg, "polyline", { points: vals.map(([, b], i) => point(i, b)).join(" "), fill: "none", stroke: color(j), "stroke-width": 2, class: "chart-mark" });
     if (f.kind !== "area") vals.forEach(([, b], i) => node(svg, "circle", { cx: horizontal ? scale(b) : centre(i), cy: horizontal ? centre(i) : scale(b), r: 2.5, fill: color(j), class: "chart-mark" }));
     if (f.labels) vals.forEach(([, b], i) => label(labelText(j, i), scale(b), centre(i), false, false));
   });

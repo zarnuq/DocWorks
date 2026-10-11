@@ -14,11 +14,11 @@ import { docxSchema as schema } from "../../domain/docx/schema";
 export interface PagesOptions {
   /** Current page geometry, or null for the continuous (pageless) view. */
   setup(): PageSetup | null;
-  /** Header / footer content for a 1-based page number out of `total`. */
-  header(page: number, total: number): Node | null;
+  /** Header / footer content for a 1-based page number out of `total`; `pos` is where the page starts (its section). */
+  header(page: number, total: number, pos: number): Node | null;
   /** Keep with next / keep lines together for a paragraph, with its style applied; default: its own settings only. */
   keep?(node: PMNode): { next: boolean; lines: boolean };
-  footer(page: number, total: number): Node | null;
+  footer(page: number, total: number, pos: number): Node | null;
   /** The page size setting, for sections with their own page size (default: the document's). */
   pageSize?(): PageSize;
   /** Pages Word laid the document out on (docProps/app.xml), when known and the page size is the document's. */
@@ -256,6 +256,8 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   }
   const { starts, pageNumbers, fills, spacers, pages } = layout;
   const offsets = flowBlocks(doc).map((b) => b.pos);
+  const pageStarts = [...starts.map((i, k) => ({ pos: offsets[i], page: pageNumbers[k + 1] })), ...spacers.map((s) => ({ pos: s.pos, page: s.page + 1 }))].sort((a, b) => a.pos - b.pos);
+  const startOf = (page: number) => (page === 1 ? 0 : pageStarts.find((s) => s.page === page)?.pos ?? 0);
 
   const part = (cls: string, content: Node | null) => {
     const el = createDiv({ cls, attr: { contenteditable: "false" } });
@@ -264,9 +266,9 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   };
   /** Footer of `page`, the grey space, header of the next page. */
   const gapParts = (gap: HTMLElement, page: number) => {
-    gap.appendChild(part("docx-page-foot", opts.footer(page, pages)));
+    gap.appendChild(part("docx-page-foot", opts.footer(page, pages, startOf(page))));
     gap.createDiv({ cls: "docx-page-space" });
-    gap.appendChild(part("docx-page-head", opts.header(page + 1, pages)));
+    gap.appendChild(part("docx-page-head", opts.header(page + 1, pages, startOf(page + 1))));
   };
   // Blank space that pads a page to its full height; a squeezed page (negative fill) pulls its gap up instead.
   const fill = (k: number, gap: HTMLElement) => {
@@ -291,7 +293,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   };
 
   const decos = [
-    Decoration.widget(0, () => part("docx-page-first", opts.header(1, pages)), { side: -1, key: `first-${gen}`, ignoreSelection: true }),
+    Decoration.widget(0, () => part("docx-page-first", opts.header(1, pages, 0)), { side: -1, key: `first-${gen}`, ignoreSelection: true }),
     ...starts.map((i, k) =>
       Decoration.widget(
         offsets[i],
@@ -311,13 +313,12 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
       () => {
         const last = createDiv({ cls: "docx-page-last", attr: { contenteditable: "false" } });
         last.appendChild(fill(fills.length - 1, last));
-        last.appendChild(part("docx-page-foot", opts.footer(pages, pages)));
+        last.appendChild(part("docx-page-foot", opts.footer(pages, pages, startOf(pages))));
         return last;
       },
       { side: 1, key: `last-${gen}`, ignoreSelection: true }
     ),
   ];
-  const pageStarts = [...starts.map((i, k) => ({ pos: offsets[i], page: pageNumbers[k + 1] })), ...spacers.map((s) => ({ pos: s.pos, page: s.page + 1 }))].sort((a, b) => a.pos - b.pos);
   return { pages, decorations: DecorationSet.create(doc, decos), bands, pageStarts };
 }
 

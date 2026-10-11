@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
 import { App, localData, Modal, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { PptxView } from "../src/presentation/pptx/pptx-view";
-import { DocxView, DocWorksSettings } from "../src/presentation/docx/docx-view";
+import { DEFAULT_SETTINGS, DocxView, DocWorksSettings } from "../src/presentation/docx/docx-view";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { readAnimations, readTransition } from "../src/domain/pptx/animation";
@@ -303,7 +303,7 @@ describe("DocxView page size setting", () => {
       pgSz.setAttributeNS(W, "w:h", "16838");
     }
     const bytes = await docx.save();
-    const settings: DocWorksSettings = { pageSize: "letter", author: "" };
+    const settings: DocWorksSettings = { ...DEFAULT_SETTINGS, pageSize: "letter" as const, author: "" };
     const app = new App();
     app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, settings);
@@ -390,7 +390,7 @@ describe("DocxView header and footer suggestions", () => {
     const app = new App();
     app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
     const saved = vi.spyOn(app.vault, "modifyBinary");
-    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { pageSize: "document", author: "Ada" });
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, pageSize: "document" as const, author: "Ada" });
     document.body.appendChild(view.containerEl);
     await open(view, "hf.docx");
     const v = view as any;
@@ -410,7 +410,7 @@ describe("DocxView header and footer suggestions", () => {
   it("records header edits as suggestions while suggesting, lists them for review and accepts or rejects them", async () => {
     const app = new App();
     app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
-    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { pageSize: "document", author: "Ada" });
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, pageSize: "document" as const, author: "Ada" });
     document.body.appendChild(view.containerEl);
     await open(view, "hf.docx");
     const v = view as any;
@@ -439,7 +439,7 @@ describe("DocxView comment author", () => {
     const app = new App();
     app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
     const saved = vi.spyOn(app.vault, "modifyBinary");
-    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { pageSize: "document", author: "Ada" });
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, pageSize: "document" as const, author: "Ada" });
     document.body.appendChild(view.containerEl);
     const file = await open(view, "suggestions.docx");
     const v = view as any;
@@ -474,7 +474,7 @@ describe("DocxView comment author", () => {
     await view.onUnloadFile(file);
   });
   it("signs comments with the author name from settings", async () => {
-    const settings: DocWorksSettings = { pageSize: "document", author: "Ada Lovelace" };
+    const settings: DocWorksSettings = { ...DEFAULT_SETTINGS, pageSize: "document" as const, author: "Ada Lovelace" };
     const app = new App();
     app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
     const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, settings);

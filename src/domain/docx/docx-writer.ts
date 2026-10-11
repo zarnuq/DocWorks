@@ -2,7 +2,7 @@ import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, escapeXml } from "../../core/utils/xml";
 import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, TableAttrs, TableBorders, XmlAttrs } from "./schema";
 import { placementAttrs, placementOf, setPlacement } from "./drawing";
-import { bordersOf, EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
+import { bordersOf, cropOf, EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
 
 export interface WriteContext {
   /** Unique id for a new wp:docPr. */
@@ -524,6 +524,8 @@ class Writer {
     if (!xml) {
       const r = this.import(this.newDrawingRun(rId ?? "", width ?? 300, height ?? 200, alt));
       const a = attrsOf<ImageAttrs>(node);
+      const blip = r.getElementsByTagNameNS(NS.a, "blip")[0];
+      if (a.crop && blip) this.setCrop(blip, a.crop);
       if (a.wrap !== "inline") setPlacement(r, placementAttrs(a));
       return r;
     }
@@ -548,11 +550,23 @@ class Writer {
     if (docPr && (docPr.getAttribute("descr") ?? "") !== alt) docPr.setAttribute("descr", alt);
     const blip = r.getElementsByTagNameNS(NS.a, "blip")[0];
     if (blip && rId && blip.getAttributeNS(NS.r, "embed") !== rId) blip.setAttributeNS(NS.r, "r:embed", rId);
+    const crop = attrsOf<ImageAttrs>(node).crop;
+    if (blip && JSON.stringify(crop) !== JSON.stringify(cropOf(r))) this.setCrop(blip, crop);
     const a = attrsOf<ImageAttrs>(node);
     const now = placementAttrs(a);
     const was = placementOf(r.getElementsByTagNameNS(NS.w, "drawing")[0] ?? null);
     if (JSON.stringify(now) !== JSON.stringify(was)) setPlacement(r, now);
     return r;
+  }
+
+  /** Replace the picture's crop rectangle (a:srcRect sits right after the blip). */
+  private setCrop(blip: Element, crop: ImageAttrs["crop"]): void {
+    const fill = blip.parentElement!;
+    Array.from(fill.children).filter((c) => c.localName === "srcRect").forEach((c) => c.remove());
+    if (!crop) return;
+    const rect = blip.ownerDocument.createElementNS(NS.a, "a:srcRect");
+    for (const k of ["l", "t", "r", "b"] as const) if (crop[k]) rect.setAttribute(k, String(Math.round(crop[k] * 100000)));
+    fill.insertBefore(rect, blip.nextSibling);
   }
 
   private newDrawingRun(rId: string, widthPx: number, heightPx: number, alt: string): string {

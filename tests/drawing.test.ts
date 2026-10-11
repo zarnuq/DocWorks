@@ -126,7 +126,7 @@ describe("picture options in the editor", () => {
     let picture: InstanceType<typeof DocxImageView>;
     const view = new EditorView(document.body.appendChild(document.createElement("div")), {
       state: EditorState.create({ doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, img)) }),
-      nodeViews: { image: (n, v, pos) => picture = new DocxImageView(n, v, pos, { replace: () => {}, editAlt: () => {} }) },
+      nodeViews: { image: (n, v, pos) => picture = new DocxImageView(n, v, pos, { replace: () => {}, editAlt: () => {}, crop: async () => undefined }) },
     });
     Object.defineProperty(view.dom, "offsetWidth", { value: 800 });
     vi.spyOn(view.dom, "getBoundingClientRect").mockReturnValue({ width: 400, left: 0, top: 0 } as DOMRect);
@@ -152,7 +152,7 @@ describe("picture options in the editor", () => {
     const view = new EditorView(document.body.appendChild(document.createElement("div")), {
       state: EditorState.create({ doc }),
       dispatchTransaction: tr => { edits++; view.updateState(view.state.apply(tr)); },
-      nodeViews: { image: (node, v, getPos) => new DocxImageView(node, v, getPos, { replace: () => {}, editAlt: () => {} }) },
+      nodeViews: { image: (node, v, getPos) => new DocxImageView(node, v, getPos, { replace: () => {}, editAlt: () => {}, crop: async () => undefined }) },
     });
     const handle = view.dom.querySelector<HTMLElement>('[aria-label="Move image"]')!;
     handle.dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 100, bubbles: true }));
@@ -175,7 +175,7 @@ describe("picture options in the editor", () => {
     const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, [img, schema.text("text")]));
     const view = new EditorView(document.body.appendChild(document.createElement("div")), {
       state: EditorState.create({ doc }),
-      nodeViews: { image: (node, v, getPos) => new DocxImageView(node, v, getPos, { replace: () => {}, editAlt: () => {} }) },
+      nodeViews: { image: (node, v, getPos) => new DocxImageView(node, v, getPos, { replace: () => {}, editAlt: () => {}, crop: async () => undefined }) },
     });
     const dom = view.dom.querySelector<HTMLElement>(".docx-image")!;
     expect(dom.style.float).toBe("left");

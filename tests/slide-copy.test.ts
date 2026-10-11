@@ -117,4 +117,15 @@ describe("copying slides", () => {
     expect(title(master)).toBe(Math.round(srcTitle * 0.75));
     expect(title(own)).toBe(ownBefore);
   });
+
+  it("brings the slides' speaker notes along", async () => {
+    const from = await source();
+    from.setNotes(1, "Talk about the chart.\nThen the logo.");
+    const to = await PptxDocument.load(await blankPptx());
+    to.pasteSlides(await from.copySlides([0, 1]), 0);
+    expect(to.notesText(1)).toBe("");
+    expect(to.notesText(2)).toBe("Talk about the chart.\nThen the logo.");
+    const back = await PptxDocument.load(await to.save());
+    expect(back.notesText(2)).toBe("Talk about the chart.\nThen the logo.");
+  });
 });

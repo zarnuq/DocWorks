@@ -4,7 +4,7 @@ import { NS, escapeXml } from "../../core/utils/xml";
 import { parseXml, resolvePath } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { nextShapeId } from "./slide-edit";
-import { axesXml, ChartFormat, readChartFormat, setChartFormat } from "./chart-format";
+import { axesXml, ChartFormat, orderedSeries, readChartFormat, setChartFormat } from "./chart-format";
 export const CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 export interface ChartData {
@@ -26,8 +26,10 @@ const elements = (e: Element | Document, name: string) => Array.from(e.getElemen
 const first = (e: Element | Document, name: string) => elements(e, name)[0];
 const child = (e: Element, name: string) => Array.from(e.children).find(c => c.namespaceURI === CHART_NS && c.localName === name);
 const points = (e?: Element) => e ? elements(e, "pt").sort((a, b) => Number(a.getAttribute("idx")) - Number(b.getAttribute("idx"))).map(p => first(p, "v")?.textContent ?? "") : [];
+/** Every series of the chart, in series order (a combo's sit in two chart-type elements). */
+const seriesOf = (xml: Document) => orderedSeries(Array.from(first(xml, "plotArea")?.children ?? []).filter((c) => c.namespaceURI === CHART_NS && c.localName.endsWith("Chart")));
 export function chartData(xml: Document): ChartData {
-  const series = elements(xml, "ser");
+  const series = seriesOf(xml);
   const category = series[0] && (child(series[0], "cat") ?? child(series[0], "xVal"));
   return { categories: points(category), series: series.map((ser, i) => ({ name: points(child(ser, "tx"))[0] ?? first(child(ser, "tx") ?? ser, "v")?.textContent ?? `Series ${i + 1}`, values: points(child(ser, "val") ?? child(ser, "yVal")).map(Number) })) };
 }
@@ -86,7 +88,7 @@ export async function prepareChartEdit(doc: PptxDocument, path: string, data: Ch
 }> {
   validate(data);
   const xml = doc.xml(path)!.cloneNode(true) as Document;
-  const series = elements(xml, "ser");
+  const series = seriesOf(xml);
   if (series.length !== data.series.length)
     throw new Error("Keep the imported chart's series count");
   const external = first(xml, "externalData")?.getAttributeNS(NS.r, "id");

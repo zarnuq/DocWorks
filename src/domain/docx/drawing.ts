@@ -187,3 +187,17 @@ export function textBoxOf(xml: string): { paragraphs: string[]; width: number; h
     line: ln && !kid(ln, NS.a, "noFill") ? color(kid(ln, NS.a, "solidFill")) : null,
   };
 }
+
+type Crop = { l: number; t: number; r: number; b: number };
+/** New size for a picture whose crop changes: the image keeps its scale, so the drawn box grows or shrinks with what shows. */
+export function recrop(pic: { width: number | null; height: number | null; crop: Crop | null }, crop: Crop | null): { width: number | null; height: number | null; crop: Crop | null } {
+  const was = pic.crop ?? { l: 0, t: 0, r: 0, b: 0 };
+  const now = crop ?? { l: 0, t: 0, r: 0, b: 0 };
+  const w = (1 - now.l - now.r) / (1 - was.l - was.r);
+  const h = (1 - now.t - now.b) / (1 - was.t - was.b);
+  return {
+    width: pic.width === null ? null : Math.round(pic.width * w),
+    height: pic.height === null ? null : Math.round(pic.height * h),
+    crop: now.l || now.t || now.r || now.b ? now : null,
+  };
+}
