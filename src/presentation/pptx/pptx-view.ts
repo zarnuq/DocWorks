@@ -263,6 +263,18 @@ export class PptxView extends FileView {
     const body = this.contentEl.createDiv({ cls: "pptx-body" });
     this.thumbsEl = body.createDiv({ cls: "pptx-thumbs" });
     this.thumbsEl.tabIndex = 0;
+    // Delete / Backspace on the thumbnails deletes the current slide (a deck keeps at least one).
+    this.thumbsEl.addEventListener("keydown", (e) => {
+      if ((e.key !== "Delete" && e.key !== "Backspace") || e.target !== this.thumbsEl || !this.doc) return;
+      e.preventDefault();
+      const count = this.doc.slides().length;
+      if (count < 2) return;
+      const i = this.index;
+      this.mutate((d) => {
+        d.deleteSlide(i);
+        this.index = Math.min(i, count - 2);
+      });
+    });
     // Thumbnails are drawn THUMB_WIDTH wide; shrink them to the room the panel leaves (scroll bar, narrow windows).
     // Measured from the panel (its scroll bar space is always reserved), not the thumbnails: scaling them must not
     // change what's measured, or the scroll bar coming and going makes them flicker.

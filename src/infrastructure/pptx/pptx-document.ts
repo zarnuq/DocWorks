@@ -25,6 +25,8 @@ export interface SlideClip {
   }[];
   /** Each source master with its layouts, theme and pictures, for keeping the source look in another deck. */
   masters: Map<string, ResourceBundle>;
+  /** The source deck's slide size; slides pasted into a deck of another size are fitted to it. */
+  size: { cx: number; cy: number };
 }
 
 const REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
@@ -191,13 +193,15 @@ export class PptxDocument extends OoxmlPackage {
       }
       slides.push({ xml: new XMLSerializer().serializeToString(this.xml(src.path)!), layout, rels });
     }
-    return { doc: this, slides, masters };
+    return { doc: this, slides, masters, size: { ...this.slideSize } };
   }
 
   /** Paste copied slides after slide `after`, in order. Returns the last pasted slide's index. */
   pasteSlides(clip: SlideClip, after: number): number {
     let at = after;
     const layouts = this.layouts();
+    /** Parts this paste adds, fitted to this deck's size at the end. */
+    const added: string[] = [];
     /** Source master -> its copy here, with the copy's layouts by source layout path (Google's "keep original styles"). */
     const imported = new Map<string, Map<string, string>>();
     const layoutCopy = (layout: NonNullable<SlideClip["slides"][number]["layout"]>): string | null => {
@@ -207,6 +211,7 @@ export class PptxDocument extends OoxmlPackage {
         const bundle = clip.masters.get(layout.master);
         if (!bundle) return null;
         paths = this.importResources(bundle);
+        added.push(...paths.values());
         this.registerMaster(paths.get(layout.master)!);
         imported.set(layout.master, paths);
       }
@@ -215,6 +220,7 @@ export class PptxDocument extends OoxmlPackage {
     for (const slide of clip.slides) {
       const path = this.nextPartPath("ppt/slides/slide", ".xml");
       this.parts.set(path, parseXml(slide.xml)!);
+      added.push(path);
       const rels = this.emptyRels();
       const add = (id: string, uri: string, target: string, external: boolean) => {
         const el = rels.createElementNS(NS.pkgRels, "Relationship");
@@ -231,11 +237,27 @@ export class PptxDocument extends OoxmlPackage {
       if (layout) add(this.layoutRelId(slide), `${REL_TYPE}slideLayout`, layout, false);
       for (const rel of slide.rels) {
         if (rel.external || !rel.resources) add(rel.id, rel.uri, rel.target, rel.external);
-        else add(rel.id, rel.uri, this.importResources(rel.resources).get(rel.target)!, false);
+        else {
+          const paths = this.importResources(rel.resources);
+          added.push(...paths.values());
+          add(rel.id, rel.uri, paths.get(rel.target)!, false);
+        }
       }
       this.parts.set(relsPathOf(path), rels);
       this.touch(relsPathOf(path));
       at = this.registerSlide(path, at);
+    }
+    const { cx, cy } = this.slideSize;
+    if (clip.size.cx !== cx || clip.size.cy !== cy) {
+      // Google's import: content from a deck of another size is scaled to fit, text included.
+      const s = Math.min(cx / clip.size.cx, cy / clip.size.cy);
+      for (const path of added) {
+        const xml = this.parts.get(path);
+        if (!xml) continue;
+        this.fitPart(path, xml, clip.size, this.slideSize);
+        scaleText(xml, s);
+        this.touch(path);
+      }
     }
     return at;
   }
@@ -603,32 +625,36 @@ export class PptxDocument extends OoxmlPackage {
    */
   // ponytail: font sizes are not scaled; shrink text by hand after big downsizes.
   setSlideSize(cx: number, cy: number): void {
-    const { cx: ox, cy: oy } = this.slideSize;
-    const sx = cx / ox;
-    const sy = cy / oy;
-    const s = Math.min(sx, sy);
-    for (const [path, xml] of this.parts) {
-      const kind = /^ppt\/(slides|slideLayouts|slideMasters)\/[^/]+\.xml$/.exec(path)?.[1];
-      if (!kind) continue;
-      for (const item of Array.from(xml.getElementsByTagNameNS(NS.p, "spTree")[0]?.children ?? [])) {
-        if (!xfrmOf(item)) continue;
-        const r = itemRect(item);
-        if (kind !== "slides" && item.localName !== "pic" && item.localName !== "graphicFrame") {
-          setItemRect(item, { x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy });
-        } else {
-          // Uniform size around the center, which moves with the stretch (slides: with the fit).
-          const [mx, my, ox2, oy2] = kind === "slides" ? [s, s, (cx - ox * s) / 2, (cy - oy * s) / 2] : [sx, sy, 0, 0];
-          const ccx = (r.x + r.w / 2) * mx + ox2;
-          const ccy = (r.y + r.h / 2) * my + oy2;
-          setItemRect(item, { x: ccx - (r.w * s) / 2, y: ccy - (r.h * s) / 2, w: r.w * s, h: r.h * s });
-        }
-      }
-    }
+    for (const [path, xml] of this.parts) this.fitPart(path, xml, this.slideSize, { cx, cy });
     const sz = this.parts.get(PRESENTATION)!.getElementsByTagNameNS(NS.p, "sldSz")[0];
     sz.setAttribute("cx", String(Math.round(cx)));
     sz.setAttribute("cy", String(Math.round(cy)));
     sz.removeAttribute("type");
     this.slideSize = { cx: Math.round(cx), cy: Math.round(cy) };
+  }
+
+  /** Fit a slide, layout or master made for slide size `from` to size `to`, as `setSlideSize` describes. */
+  private fitPart(path: string, xml: Document, from: { cx: number; cy: number }, to: { cx: number; cy: number }): void {
+    const kind = /^ppt\/(slides|slideLayouts|slideMasters)\/[^/]+\.xml$/.exec(path)?.[1];
+    if (!kind) return;
+    const { cx: ox, cy: oy } = from;
+    const { cx, cy } = to;
+    const sx = cx / ox;
+    const sy = cy / oy;
+    const s = Math.min(sx, sy);
+    for (const item of Array.from(xml.getElementsByTagNameNS(NS.p, "spTree")[0]?.children ?? [])) {
+      if (!xfrmOf(item)) continue;
+      const r = itemRect(item);
+      if (kind !== "slides" && item.localName !== "pic" && item.localName !== "graphicFrame") {
+        setItemRect(item, { x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy });
+      } else {
+        // Uniform size around the center, which moves with the stretch (slides: with the fit).
+        const [mx, my, ox2, oy2] = kind === "slides" ? [s, s, (cx - ox * s) / 2, (cy - oy * s) / 2] : [sx, sy, 0, 0];
+        const ccx = (r.x + r.w / 2) * mx + ox2;
+        const ccy = (r.y + r.h / 2) * my + oy2;
+        setItemRect(item, { x: ccx - (r.w * s) / 2, y: ccy - (r.h * s) / 2, w: r.w * s, h: r.h * s });
+      }
+    }
   }
 
   // --- Sections ------------------------------------------------------------------
@@ -748,5 +774,15 @@ export class PptxDocument extends OoxmlPackage {
     list.insertBefore(el, ids[index] ?? null);
     done();
     return index;
+  }
+}
+
+/** Scale every text size (run, list-level default and end-of-paragraph properties) in a part by `s`. */
+function scaleText(xml: Document, s: number): void {
+  for (const name of ["rPr", "defRPr", "endParaRPr"]) {
+    for (const el of Array.from(xml.getElementsByTagNameNS(NS.a, name))) {
+      const sz = Number(el.getAttribute("sz"));
+      if (sz) el.setAttribute("sz", String(Math.max(100, Math.round(sz * s))));
+    }
   }
 }

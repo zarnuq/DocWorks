@@ -3,6 +3,7 @@ import { blankPptx } from "../src/infrastructure/blank";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { addChart, chartData, chartWorkbook } from "../src/domain/pptx/chart";
 import { addPicture, addTextBox } from "../src/domain/pptx/slide-edit";
+import { itemRect } from "../src/domain/pptx/arrange";
 import { parseSlide, plainText, slideColors } from "../src/domain/pptx/slide-model";
 
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
@@ -85,5 +86,34 @@ describe("copying slides", () => {
     expect(text(from, 3)).not.toContain("Added later");
     const back = await PptxDocument.load(await from.save());
     expect(back.slides()).toHaveLength(4);
+  });
+
+  it("fits slides pasted from a deck of another size, text included, like Google's import", async () => {
+    const from = await source();
+    from.setSlideSize(12192000, 6858000);
+    const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const firstBox = (doc: PptxDocument, i: number) => Array.from(doc.xml(doc.slides()[i].path)!.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "sp")).find((sp) => sp.textContent?.includes("With a picture"))!;
+    const box = firstBox(from, 1);
+    const before = itemRect(box);
+    const run = box.getElementsByTagNameNS(A, "rPr")[0] ?? box.getElementsByTagNameNS(A, "endParaRPr")[0];
+    run.setAttribute("sz", "4000");
+    const to = await PptxDocument.load(await blankPptx());
+    to.setSlideSize(9144000, 5143500);
+    to.pasteSlides(await from.copySlides([1]), 0);
+    const pasted = firstBox(to, 1);
+    const after = itemRect(pasted);
+    expect(after.w).toBeCloseTo(before.w * 0.75, -2);
+    expect(after.x).toBeCloseTo(before.x * 0.75, -2);
+    const size = (pasted.getElementsByTagNameNS(A, "rPr")[0] ?? pasted.getElementsByTagNameNS(A, "endParaRPr")[0]).getAttribute("sz");
+    expect(size).toBe("3000");
+    // The master it brought fits the new size too, and its title text shrinks with it.
+    const master = to.masterOf(to.layoutOf(to.slides()[1].path)!)!;
+    const own = to.masterOf(to.layoutOf(to.slides()[0].path)!)!;
+    const right = (path: string) => Math.max(...Array.from(to.xml(path)!.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "sp")).map((sp) => { const r = itemRect(sp); return r.x + r.w; }));
+    expect(right(master)).toBeLessThanOrEqual(9144000 + 1);
+    const title = (path: string) => Number(to.xml(path)!.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "titleStyle")[0].getElementsByTagNameNS(A, "defRPr")[0].getAttribute("sz"));
+    const srcTitle = Number(from.xml(from.masterOf(from.layoutOf(from.slides()[1].path)!)!)!.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "titleStyle")[0].getElementsByTagNameNS(A, "defRPr")[0].getAttribute("sz"));
+    expect(title(master)).toBe(Math.round(srcTitle * 0.75));
+    expect(title(own)).toBe(srcTitle);
   });
 });

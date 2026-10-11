@@ -173,6 +173,25 @@ describe("PptxView thumbnails", () => {
   });
 });
 
+describe("PptxView deleting slides from the thumbnails", () => {
+  it("deletes the current slide with Delete or Backspace, but never the last one", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    await open(view, "a.pptx");
+    const v = view as any;
+    v.mutate((d: any) => d.addSlide(0));
+    const count = v.doc.slides().length;
+    v.thumbsEl.focus();
+    v.thumbsEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    expect(v.doc.slides()).toHaveLength(count - 1);
+    v.thumbsEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+    expect(v.doc.slides()).toHaveLength(count - 2);
+    while (v.doc.slides().length > 1) v.thumbsEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    v.thumbsEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    expect(v.doc.slides()).toHaveLength(1);
+    expect(v.index).toBe(0);
+  });
+});
+
 describe("PptxView empty text boxes", () => {
   it("puts the caret inside the empty line when an empty placeholder is clicked", async () => {
     const { blankPptx } = await import("../src/infrastructure/blank");

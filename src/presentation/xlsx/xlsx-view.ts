@@ -60,6 +60,8 @@ export class XlsxView extends FileView {
   private formatSelect: HTMLSelectElement | null = null;
   private toggles = new Map<string, HTMLElement>();
   private clip: Clip | null = null;
+  /** The next paste event (from the menu) pastes values only. */
+  private valuesOnly = false;
   private dirty = false;
   private saveTimer: number | null = null;
   private saving: Promise<void> = Promise.resolve();
@@ -593,7 +595,9 @@ export class XlsxView extends FileView {
   private onPaste(e: ClipboardEvent): void {
     if (!this.grid || this.grid.edit || !e.clipboardData) return;
     e.preventDefault();
-    this.pasteFrom(e.clipboardData.getData("text/plain"));
+    const valuesOnly = this.valuesOnly;
+    this.valuesOnly = false;
+    this.pasteFrom(e.clipboardData.getData("text/plain"), valuesOnly);
   }
 
   private pasteFrom(text: string, valuesOnly = false): void {
@@ -608,23 +612,18 @@ export class XlsxView extends FileView {
     if (area) this.grid!.selectRect(area);
   }
 
-  /** Copy from a menu (no clipboard event): write text and HTML through the async clipboard. */
-  private async copyCommand(cut: boolean): Promise<void> {
-    this.clip = copyRange(this.sheet, this.sel, cut);
-    const { text, html } = this.clip;
-    try {
-      await navigator.clipboard.write([new ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) })]);
-    } catch {
-      await navigator.clipboard.writeText(text);
-    }
-  }
-
-  private async pasteCommand(valuesOnly = false): Promise<void> {
-    try {
-      this.pasteFrom(await navigator.clipboard.readText(), valuesOnly);
-    } catch {
-      new Notice("Use Ctrl+V to paste here.");
-    }
+  /**
+   * Cut / copy / paste from a menu: the app runs the edit command on the grid's input, which raises the same
+   * clipboard events as the keyboard shortcuts (no direct clipboard reads or writes).
+   */
+  private editCommand(command: "copy" | "cut" | "paste", valuesOnly = false): void {
+    if (!this.grid) return;
+    this.valuesOnly = valuesOnly;
+    this.grid.input.focus();
+    const contents = (window.require("electron") as { remote: { getCurrentWebContents(): Record<typeof command, () => void> } }).remote.getCurrentWebContents();
+    contents[command]();
+    // The event arrives shortly after; a later Ctrl+V must not paste values only.
+    window.setTimeout(() => (this.valuesOnly = false), 1000);
   }
 
   // ---------------------------------------------------------------------------
@@ -878,10 +877,10 @@ export class XlsxView extends FileView {
     const item = (title: string, icon: string, run: () => void) => menu.addItem((it) => it.setTitle(title).setIcon(icon).onClick(run));
     const rows = `${r.r2 - r.r1 + 1} ${r.r2 > r.r1 ? "rows" : "row"}`;
     const cols = `${r.c2 - r.c1 + 1} ${r.c2 > r.c1 ? "columns" : "column"}`;
-    item("Cut", "scissors", () => void this.copyCommand(true));
-    item("Copy", "copy", () => void this.copyCommand(false));
-    item("Paste", "clipboard", () => void this.pasteCommand());
-    item("Paste values only", "clipboard-type", () => void this.pasteCommand(true));
+    item("Cut", "scissors", () => this.editCommand("cut"));
+    item("Copy", "copy", () => this.editCommand("copy"));
+    item("Paste", "clipboard", () => this.editCommand("paste"));
+    item("Paste values only", "clipboard-type", () => this.editCommand("paste", true));
     menu.addSeparator();
     if (hit.area !== "colHeader") {
       item(`Insert ${rows} above`, "arrow-up", () => this.change(() => ops.insertRows(ed, this.sheet, r.r1, r.r2 - r.r1 + 1)));

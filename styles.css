@@ -1544,14 +1544,27 @@ textarea.pptx-notes {
   opacity: 0.65;
 }
 
+/* Indent markers are drawn as border triangles, which every supported Obsidian version renders. */
+.docx-ruler-handle.is-left-indent,
+.docx-ruler-handle.is-right-indent,
+.docx-ruler-handle.is-first-indent {
+  box-sizing: content-box;
+  width: 0;
+  height: 0;
+  background: transparent;
+  border: 5px solid transparent;
+}
+
 .docx-ruler-handle.is-left-indent,
 .docx-ruler-handle.is-right-indent {
   top: 34px;
-  clip-path: polygon(0 100%, 50% 0, 100% 100%);
+  border-top-width: 0;
+  border-bottom: 9px solid var(--interactive-accent);
 }
 
 .docx-ruler-handle.is-first-indent {
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  border-bottom-width: 0;
+  border-top: 9px solid var(--interactive-accent);
 }
 
 .docx-ruler-handle.is-tab {
