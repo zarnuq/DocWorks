@@ -122,6 +122,43 @@ describe("PptxView theme", () => {
   });
 });
 
+describe("PptxView slide copy and paste", () => {
+  it("copies a slide in one deck and pastes it into another, from the slide menu and with Ctrl+C / Ctrl+V on the thumbnails", async () => {
+    const a = mount(PptxView, "sample.pptx");
+    await open(a, "a.pptx");
+    const b = mount(PptxView, "sample.pptx");
+    await open(b, "b.pptx");
+    const va = a as any, vb = b as any;
+    const count = vb.doc.slides().length;
+    // Menu: Copy slide on A's second slide, Paste on B's first.
+    const MenuStub = (await import("./obsidian-stub")).Menu as any;
+    const items: any[] = [];
+    vi.spyOn(MenuStub.prototype, "addItem").mockImplementation(function (this: any, cb: any) {
+      const item: any = { title: "", onClick: (f: any) => ((item.run = f), item), setTitle: (t: string) => ((item.title = t), item), setIcon: () => item, setChecked: () => item, setDisabled: () => item };
+      cb(item);
+      items.push(item);
+      return this;
+    });
+    va.slideMenu(1);
+    expect(items.map((i) => i.title)).toEqual(expect.arrayContaining(["Copy slide", "Cut slide"]));
+    items.find((i) => i.title === "Copy slide").run();
+    await va.copying;
+    items.length = 0;
+    vb.slideMenu(0);
+    await items.find((i) => i.title === "Paste slide").run();
+    expect(vb.doc.slides()).toHaveLength(count + 1);
+    expect(vb.index).toBe(1);
+    // Keyboard on the thumbnails: Ctrl+C in A, Ctrl+V in B.
+    va.thumbsEl.focus();
+    const keys = (v: any) => v.scope.keys as { mods: string[]; key: string; fn: () => boolean | void }[];
+    expect(keys(va).find((k) => k.key === "c" && k.mods.length === 1)!.fn()).toBe(false);
+    await va.copying;
+    vb.thumbsEl.focus();
+    expect(keys(vb).find((k) => k.key === "v" && k.mods.length === 1)!.fn()).toBe(false);
+    expect(vb.doc.slides()).toHaveLength(count + 2);
+  });
+});
+
 describe("PptxView thumbnails", () => {
   it("has a + button under the last thumbnail that adds a slide at the end", async () => {
     const view = mount(PptxView, "sample.pptx");

@@ -5,7 +5,7 @@ import { itemRect, setItemRect, xfrmOf } from "../../domain/pptx/arrange";
 import { parseSlide, plainText } from "../../domain/pptx/slide-model";
 import { Fill, writeFill } from "../../domain/pptx/shape-style";
 import { TABLE_STYLES } from "../../domain/pptx/table";
-import { OoxmlPackage, PackageSnapshot, parseXml, relsPathOf } from "../ooxml/ooxml-package";
+import { OoxmlPackage, PackageSnapshot, parseXml, relsPathOf, ResourceBundle } from "../ooxml/ooxml-package";
 
 export interface SlideRef {
   path: string;
@@ -14,6 +14,29 @@ export interface SlideRef {
 }
 
 export type PptxSnapshot = PackageSnapshot;
+
+/** Slides copied by `copySlides`, ready to paste into any deck. */
+export interface SlideClip {
+  doc: PptxDocument;
+  slides: {
+    xml: string;
+    layout: { path: string; name: string; type: string; master: string | null } | null;
+    rels: { id: string; uri: string; target: string; external: boolean; resources?: ResourceBundle }[];
+  }[];
+  /** Each source master with its layouts, theme and pictures, for keeping the source look in another deck. */
+  masters: Map<string, ResourceBundle>;
+}
+
+const REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+
+/** `target` relative to the folder of part `from`. */
+function relativeTarget(from: string, target: string): string {
+  const base = from.split("/").slice(0, -1);
+  const parts = target.split("/");
+  let common = 0;
+  while (common < base.length && common < parts.length - 1 && base[common] === parts[common]) common++;
+  return [...base.slice(common).map(() => ".."), ...parts.slice(common)].join("/");
+}
 
 export interface LayoutRef {
   path: string;
@@ -140,6 +163,105 @@ export class PptxDocument extends OoxmlPackage {
     }
     this.parts.set(relsPathOf(path), rels);
     return this.registerSlide(path, index);
+  }
+
+  /**
+   * Copy slides for pasting into this or another deck: each slide's XML, its layout's name and type, and everything
+   * it links to (pictures, media, charts with their workbooks), captured now so later edits don't change the copy.
+   */
+  // ponytail: speaker notes aren't copied; add them with the notes master mapping if someone needs them.
+  async copySlides(indexes: number[]): Promise<SlideClip> {
+    const slides: SlideClip["slides"] = [];
+    const masters = new Map<string, ResourceBundle>();
+    for (const index of indexes) {
+      const src = this.slides()[index];
+      if (!src) continue;
+      const rels: SlideClip["slides"][number]["rels"] = [];
+      let layout: SlideClip["slides"][number]["layout"] = null;
+      for (const rel of this.rels(src.path)) {
+        if (rel.type === "notesSlide") continue;
+        if (rel.type === "slideLayout") {
+          const root = this.xml(rel.target)?.documentElement;
+          const master = this.masterOf(rel.target);
+          layout = { path: rel.target, name: root?.getElementsByTagNameNS(NS.p, "cSld")[0]?.getAttribute("name") ?? "", type: root?.getAttribute("type") ?? "cust", master };
+          if (master && !masters.has(master)) masters.set(master, await this.captureResources([master]));
+          continue;
+        }
+        rels.push({ id: rel.id, uri: rel.uri, target: rel.target, external: rel.external, resources: rel.external ? undefined : await this.captureResources([rel.target]) });
+      }
+      slides.push({ xml: new XMLSerializer().serializeToString(this.xml(src.path)!), layout, rels });
+    }
+    return { doc: this, slides, masters };
+  }
+
+  /** Paste copied slides after slide `after`, in order. Returns the last pasted slide's index. */
+  pasteSlides(clip: SlideClip, after: number): number {
+    let at = after;
+    const layouts = this.layouts();
+    /** Source master -> its copy here, with the copy's layouts by source layout path (Google's "keep original styles"). */
+    const imported = new Map<string, Map<string, string>>();
+    const layoutCopy = (layout: NonNullable<SlideClip["slides"][number]["layout"]>): string | null => {
+      if (!layout.master) return null;
+      let paths = imported.get(layout.master);
+      if (!paths) {
+        const bundle = clip.masters.get(layout.master);
+        if (!bundle) return null;
+        paths = this.importResources(bundle);
+        this.registerMaster(paths.get(layout.master)!);
+        imported.set(layout.master, paths);
+      }
+      return paths.get(layout.path) ?? null;
+    };
+    for (const slide of clip.slides) {
+      const path = this.nextPartPath("ppt/slides/slide", ".xml");
+      this.parts.set(path, parseXml(slide.xml)!);
+      const rels = this.emptyRels();
+      const add = (id: string, uri: string, target: string, external: boolean) => {
+        const el = rels.createElementNS(NS.pkgRels, "Relationship");
+        el.setAttribute("Id", id);
+        el.setAttribute("Type", uri);
+        el.setAttribute("Target", external ? target : relativeTarget(path, target));
+        if (external) el.setAttribute("TargetMode", "External");
+        rels.documentElement.appendChild(el);
+      };
+      // The same layout in this deck; else one of the same name, then the same kind, then the first.
+      const own = clip.doc === this && slide.layout && layouts.some((l) => l.path === slide.layout!.path) ? slide.layout.path : null;
+      // Another deck's slide brings its own master and layouts; a missing one falls back to a layout here.
+      const layout = own ?? (slide.layout && clip.doc !== this ? layoutCopy(slide.layout) : null) ?? layouts.find((l) => l.name === slide.layout?.name)?.path ?? layouts.find((l) => l.type === slide.layout?.type)?.path ?? this.firstLayout();
+      if (layout) add(this.layoutRelId(slide), `${REL_TYPE}slideLayout`, layout, false);
+      for (const rel of slide.rels) {
+        if (rel.external || !rel.resources) add(rel.id, rel.uri, rel.target, rel.external);
+        else add(rel.id, rel.uri, this.importResources(rel.resources).get(rel.target)!, false);
+      }
+      this.parts.set(relsPathOf(path), rels);
+      this.touch(relsPathOf(path));
+      at = this.registerSlide(path, at);
+    }
+    return at;
+  }
+
+  /** Add an imported master to the presentation, renumbering its layout ids above every id in use. */
+  private registerMaster(master: string): void {
+    const pres = this.parts.get(PRESENTATION)!;
+    const ids = [pres, ...this.rels(PRESENTATION).filter((r) => r.type === "slideMaster").map((r) => this.parts.get(r.target))]
+      .flatMap((d) => (d ? [...Array.from(d.getElementsByTagNameNS(NS.p, "sldMasterId")), ...Array.from(d.getElementsByTagNameNS(NS.p, "sldLayoutId"))] : []))
+      .map((e) => Number(e.getAttribute("id")) || 0);
+    let next = Math.max(2147483647, ...ids) + 1;
+    const rId = this.addRel(PRESENTATION, "slideMaster", master);
+    let list = pres.getElementsByTagNameNS(NS.p, "sldMasterIdLst")[0];
+    if (!list) list = pres.documentElement.insertBefore(pres.createElementNS(NS.p, "p:sldMasterIdLst"), pres.documentElement.firstElementChild);
+    const el = list.appendChild(pres.createElementNS(NS.p, "p:sldMasterId"));
+    el.setAttribute("id", String(next++));
+    el.setAttributeNS(NS.r, "r:id", rId);
+    for (const id of Array.from(this.parts.get(master)!.getElementsByTagNameNS(NS.p, "sldLayoutId"))) id.setAttribute("id", String(next++));
+    this.touch(PRESENTATION);
+    this.touch(master);
+  }
+
+  /** A relationship id for the layout that the slide's own ids don't use. */
+  private layoutRelId(slide: SlideClip["slides"][number]): string {
+    const used = new Set(slide.rels.map((r) => r.id));
+    for (let n = 1; ; n++) if (!used.has(`rId${n}`)) return `rId${n}`;
   }
 
   deleteSlide(index: number): void {

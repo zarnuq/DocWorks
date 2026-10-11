@@ -50,6 +50,8 @@ export interface ParagraphAttrs {
   /** Keep with next / keep lines together; null = from the style. */
   keepNext: boolean | null;
   keepLines: boolean | null;
+  /** Borders and shading as CSS (display only). */
+  frame: string | null;
 }
 export interface CellAttrs {
   key: string | null;
@@ -146,6 +148,7 @@ export const docxSchema = new Schema({
         sectPr: { default: null },
         keepNext: { default: null },
         keepLines: { default: null },
+        frame: { default: null },
       },
       parseDOM: [
         { tag: "p" },
@@ -161,6 +164,7 @@ export const docxSchema = new Schema({
         if (a.lineSpacing) style.push(`line-height: ${a.lineSpacing}`);
         if (a.indent) style.push(`margin-left: ${a.indent * 36}pt`);
         if (a.rightIndent !== null) style.push(`margin-right: ${a.rightIndent}pt`);
+        if (a.frame) style.push(a.frame);
         const attrs: Record<string, string> = {};
         if (style.length) attrs.style = style.join("; ");
         if (a.style) attrs["data-style"] = a.style;

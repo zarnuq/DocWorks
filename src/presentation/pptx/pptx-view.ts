@@ -3,7 +3,7 @@ import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../doma
 import { chartPalette, ChartFormat, setChartFormat } from "../../domain/pptx/chart-format";
 import { chartFormatForm, defaultChartFormat } from "../common/chart-form";
 import { Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
-import { dropIndex, PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
+import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
 import {
   CONNECTORS,
@@ -49,6 +49,8 @@ import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagrap
 export const VIEW_TYPE_PPTX = "doc-works-pptx-view";
 
 const THUMB_WIDTH = 168;
+/** Panel padding (2 × 8), slide number column (14) and gap (6), thumbnail border (2 × 2). */
+const THUMB_CHROME = 40;
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 72, 96];
 const MIN_SIZE_EMU = 91440;
 const EMU_PER_PT = 12700;
@@ -110,6 +112,8 @@ function caretIntoEmptyLine(textEl: HTMLElement): void {
 
 /** Copied slide items, shared by every open presentation. */
 let clipboard: { clip: Clip; slidePath: string; pastes: number } | null = null;
+/** Slides copied from any open deck (Copy slide / Ctrl+C on the thumbnails). */
+let slideClipboard: SlideClip | null = null;
 const extOf = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowerCase();
 
 export class PptxView extends FileView {
@@ -141,6 +145,7 @@ export class PptxView extends FileView {
   private lastStageWidth = 0;
 
   private thumbsEl!: HTMLElement;
+  private thumbObserver: ResizeObserver | null = null;
   private stageEl!: HTMLElement;
   private slideHostEl!: HTMLElement;
   private notesEl!: HTMLTextAreaElement;
@@ -183,8 +188,14 @@ export class PptxView extends FileView {
       this.openFind();
       return false;
     });
+    // On the thumbnails, copy / cut / paste act on whole slides.
+    const slideKeys: Record<string, () => void> = { c: () => void this.copySlide(false), x: () => void this.copySlide(true), v: () => void this.pasteSlides() };
     for (const [mods, key, run] of keys) {
       this.scope.register(mods, key, () => {
+        if (mods.length === 1 && slideKeys[key] && this.thumbsEl && document.activeElement === this.thumbsEl) {
+          slideKeys[key]();
+          return false;
+        }
         if (!this.stageEl || document.activeElement !== this.stageEl) return true;
         run();
         return false;
@@ -251,6 +262,19 @@ export class PptxView extends FileView {
     this.buildToolbar(this.contentEl.createDiv({ cls: "dw-toolbar pptx-toolbar" }));
     const body = this.contentEl.createDiv({ cls: "pptx-body" });
     this.thumbsEl = body.createDiv({ cls: "pptx-thumbs" });
+    this.thumbsEl.tabIndex = 0;
+    // Thumbnails are drawn THUMB_WIDTH wide; shrink them to the room the panel leaves (scroll bar, narrow windows).
+    // Measured from the panel (its scroll bar space is always reserved), not the thumbnails: scaling them must not
+    // change what's measured, or the scroll bar coming and going makes them flicker.
+    const fitThumbs = () => {
+      const width = this.thumbsEl.clientWidth;
+      if (!width) return;
+      const room = width - THUMB_CHROME;
+      this.thumbsEl.setCssProps({ "--pptx-thumb-zoom": String(Math.min(1, Math.max(0.3, room / THUMB_WIDTH))) });
+    };
+    this.thumbObserver?.disconnect();
+    this.thumbObserver = new ResizeObserver(fitThumbs);
+    this.thumbObserver.observe(this.thumbsEl);
     this.stageEl = body.createDiv({ cls: "pptx-stage" });
     this.stageEl.tabIndex = 0;
     // Ctrl / Cmd + wheel zooms the slide.
@@ -319,6 +343,8 @@ export class PptxView extends FileView {
   async onUnloadFile(_file: TFile): Promise<void> {
     this.unloadFonts?.();
     this.unloadFonts = null;
+    this.thumbObserver?.disconnect();
+    this.thumbObserver = null;
     document.removeEventListener("selectionchange", this.onSelectionChange);
     window.removeEventListener("blur", this.onWindowBlur);
     this.resizeObserver?.disconnect();
@@ -409,7 +435,11 @@ export class PptxView extends FileView {
         imageUrl: this.imageUrl,
         slideNumber: i + 1,
       });
-      item.onclick = () => this.goTo(i);
+      item.onclick = () => {
+        this.goTo(i);
+        // Copy / paste on the thumbnails act on slides.
+        this.thumbsEl.focus();
+      };
       item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         this.goTo(i);
@@ -463,6 +493,9 @@ export class PptxView extends FileView {
     const count = this.doc?.slides().length ?? 0;
     item("New slide", "plus", () => this.mutate((d) => (this.index = d.addSlide(i))));
     item("Duplicate slide", "copy", () => this.mutate((d) => (this.index = d.duplicateSlide(i))));
+    item("Copy slide", "clipboard-copy", () => void this.copySlide(false));
+    item("Cut slide", "scissors", () => void this.copySlide(true));
+    if (slideClipboard) item("Paste slide", "clipboard-paste", () => void this.pasteSlides());
     item("Delete slide", "trash", () => this.mutate((d) => d.deleteSlide(i)));
     item(this.doc?.isHidden(i) ? "Show slide" : "Hide slide", "eye-off", () => this.mutate((d) => d.setHidden(i, !d.isHidden(i))));
     menu.addSeparator();
@@ -470,6 +503,31 @@ export class PptxView extends FileView {
     if (i < count - 1) item("Move down", "arrow-down", () => this.mutate((d) => d.moveSlide(i, (this.index = i + 1))));
     item("Add section here", "list-plus", () => void this.addSection(i));
     return menu;
+  }
+
+  /** The pending copy of the current slide (for paste to wait on). */
+  copying: Promise<void> | null = null;
+
+  /** Copy (or cut) the current slide, for pasting into this or another open deck. */
+  private copySlide(cut: boolean): Promise<void> {
+    const doc = this.doc;
+    if (!doc) return Promise.resolve();
+    const index = this.index;
+    this.copying = (async () => {
+      slideClipboard = await doc.copySlides([index]);
+      if (cut && doc === this.doc && doc.slides().length > 1) this.mutate((d) => d.deleteSlide(index));
+      new Notice(cut ? "Slide cut" : "Slide copied");
+    })();
+    return this.copying;
+  }
+
+  /** Paste copied slides after the current one; the destination's layouts and theme apply. */
+  private async pasteSlides(): Promise<void> {
+    const clip = slideClipboard;
+    if (!this.doc || !clip) return;
+    this.mutate((d) => (this.index = d.pasteSlides(clip, this.index)));
+    await this.loadMedia();
+    this.renderAll();
   }
 
   private sectionMenu(k: number): Menu {

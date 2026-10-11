@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
+import { blankDocx } from "../src/infrastructure/blank";
 import { fixture, W } from "./helpers";
 
 const load = () => DocxDocument.load(fixture("sample.docx"));
@@ -92,5 +93,15 @@ describe("ensureParagraphStyles", () => {
     const h2 = Array.from(back.stylesXml()!.getElementsByTagNameNS(W, "style")).find((s) => s.getAttributeNS(W, "styleId") === "Heading2")!;
     expect(h2.getElementsByTagNameNS(W, "name")[0].getAttributeNS(W, "val")).toBe("heading 2");
     expect(h2.getElementsByTagNameNS(W, "outlineLvl")[0].getAttributeNS(W, "val")).toBe("1");
+  });
+});
+
+describe("comments without paragraph ids", () => {
+  it("lists a comment whose paragraph has no w14:paraId as a thread of its own, not a reply", async () => {
+    const docx = await DocxDocument.load(await blankDocx());
+    const a = docx.addComment("First", "Ann");
+    const b = docx.addComment("Second", "Bo");
+    const list = docx.comments();
+    expect(list.map((c) => [c.id, c.parentId])).toEqual([[a, undefined], [b, undefined]]);
   });
 });

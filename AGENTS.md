@@ -42,6 +42,8 @@ Not done yet: comments/notes (preserved), icon sets and time-period rules (prese
 
 - Extend animation effect authoring beyond the basic presets; compound timing and motion paths are editable.
 - Done 2026-10-11: structural / header-footer suggestions, chart formatting (`domain/pptx/chart-format.ts` + renderer), per-section page sizes (`sectionSetups`, `sectionWidthsPlugin`; every page is drawn as wide as the widest, narrower ones shaded), text on both sides of pictures (`domain/docx/wrap.ts`, `presentation/docx/docx-wrap.ts`). Justified lines beside pictures are spread per side; several pictures are planned together; narrower pages get their own edge.
+- Slides copy / cut / paste between decks (thumbnail menu, Ctrl+C/X/V on the thumbnails): `PptxDocument.copySlides` / `pasteSlides`; another deck's slide brings its master, layouts and theme (Google's "keep original styles"); speaker notes aren't copied.
+- README demo files: `~/notes/Doc Works Demo/Doc Works - Field Study.{docx,pptx}` and `Doc Works - Household Budget.xlsx`.
 - SmartArt data editing and combo / 3-D / scatter chart editing remain open. For spreadsheets see "Not done yet" above.
 
 ## Handy dev facts

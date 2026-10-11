@@ -162,3 +162,23 @@ describe("cell margins", () => {
     expect(td.style.paddingRight).toBe("");
   });
 });
+
+describe("paragraph borders and shading", () => {
+  const read = (pPr: string) => {
+    const body = new DOMParser().parseFromString(`<w:body xmlns:w="${W}"><w:p><w:pPr>${pPr}</w:pPr><w:r><w:t>Callout</w:t></w:r></w:p></w:body>`, "application/xml").documentElement;
+    const doc = readDocx(body, { imageSrc: () => null, hyperlinkHref: () => null }).doc;
+    return DOMSerializer.fromSchema(schema).serializeNode(doc.firstChild!, { document }) as HTMLElement;
+  };
+  it("draws a paragraph's borders and shading (a callout box, a rule under a heading)", () => {
+    const el = read(`<w:pBdr><w:left w:val="single" w:sz="24" w:space="8" w:color="2E75B6"/><w:bottom w:val="dashed" w:sz="8" w:space="1" w:color="auto"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="EAF2FB"/>`);
+    expect(el.style.borderLeft).toBe("4px solid rgb(46, 117, 182)");
+    expect(el.style.borderBottom).toMatch(/^1\.33+px dashed/);
+    expect(el.style.paddingLeft).toBe("8pt");
+    expect(el.style.backgroundColor).toBe("rgb(234, 242, 251)");
+  });
+  it("ignores automatic shading and missing borders", () => {
+    const el = read(`<w:shd w:val="clear" w:color="auto" w:fill="auto"/>`);
+    expect(el.style.backgroundColor).toBe("");
+    expect(el.style.borderLeft).toBe("");
+  });
+});

@@ -4,7 +4,7 @@
  * differs, so formatting the editor doesn't model is kept.
  */
 import { NS } from "../../core/utils/xml";
-import { ColorContext, resolveColor } from "./color";
+import { ColorContext, hex, resolveColor } from "./color";
 
 const C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
@@ -41,7 +41,10 @@ export interface ChartFormat {
 /** Default series colours: the theme's accents, else Google's chart palette. */
 export function chartPalette(ctx?: ColorContext): string[] {
   const accents = [1, 2, 3, 4, 5, 6].map((i) => ctx?.scheme[`accent${i}`]).filter((c): c is string => !!c);
-  return accents.length === 6 ? accents : ["#4285F4", "#EA4335", "#FBBC04", "#34A853", "#FF6D01", "#46BDC6"];
+  const base = accents.length === 6 ? accents : ["#4285F4", "#EA4335", "#FBBC04", "#34A853", "#FF6D01", "#46BDC6"];
+  // Series 7-12: the same colours darker (Office uses 60% of each accent).
+  const shade = (c: string) => hex([1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) * 0.6));
+  return [...base, ...base.map(shade)];
 }
 
 // -----------------------------------------------------------------------------

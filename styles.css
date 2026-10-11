@@ -17,7 +17,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--size-4-2);
+  /* Rows of button groups sit close together; groups in a row keep their spacing. */
+  gap: var(--size-2-1) var(--size-4-2);
   padding: var(--size-4-1) var(--size-4-3);
   border-bottom: var(--border-width) solid var(--background-modifier-border);
   background: var(--background-secondary);
@@ -499,6 +500,7 @@ img.docx-behind,
   width: 200px;
   flex-shrink: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 12px 8px;
   border-right: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
@@ -509,7 +511,7 @@ img.docx-behind,
 
 .pptx-thumb {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
   cursor: pointer;
   align-items: start;
@@ -541,6 +543,12 @@ img.docx-behind,
   border: 2px solid transparent;
   border-radius: 3px;
   overflow: hidden;
+  min-width: 0;
+}
+
+/* Scaled to fit the panel (pptx-view sets the factor). */
+.pptx-thumb-slide > .pptx-slide {
+  zoom: var(--pptx-thumb-zoom, 1);
 }
 
 .pptx-thumb.is-active .pptx-thumb-slide {
@@ -1574,7 +1582,11 @@ textarea.pptx-notes {
 
 .docx-review-card textarea {
   width: 100%;
-  resize: vertical;
+  resize: none;
+  /* Grows with its text, so a comment is read whole without a scroll bar. */
+  field-sizing: content;
+  min-height: 2.4em;
+  overflow: hidden;
   font-size: var(--font-ui-small);
 }
 

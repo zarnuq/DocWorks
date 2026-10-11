@@ -25,6 +25,16 @@ const edit = (xml: Document, change: (f: ChartFormat) => void) => {
 };
 const local = (xml: Document, name: string) => Array.from(xml.getElementsByTagNameNS(C, name));
 
+describe("chart palette", () => {
+  it("goes on past six series with darker shades of the six colours, as Office does", async () => {
+    const { chartPalette } = await import("../src/domain/pptx/chart-format");
+    const p = chartPalette();
+    expect(p.length).toBeGreaterThanOrEqual(12);
+    expect(new Set(p).size).toBe(p.length);
+    expect(p[6]).not.toBe(p[0]);
+  });
+});
+
 describe("chart format", () => {
   it("reads a new chart as a clustered column chart with a bottom legend and value gridlines", async () => {
     const { xml } = await chart();

@@ -277,8 +277,11 @@ export class DocxDocument extends OoxmlPackage {
     const ids = new Map(comments.map(c => [this.commentParaId(c), wVal(c, "id")!]));
     const extensions = new Map(Array.from(this.partOf("commentsExtended")?.getElementsByTagNameNS(W15, "commentEx") ?? []).map(e => [e.getAttributeNS(W15, "paraId"), e]));
     return comments.map((c) => {
-      const ex = extensions.get(this.commentParaId(c));
-      const parentId = ids.get(ex?.getAttributeNS(W15, "paraIdParent") ?? null);
+      // Comments without a paragraph id (Google Docs, LibreOffice, older Word) have no extension and no parent.
+      const paraId = this.commentParaId(c);
+      const ex = paraId ? extensions.get(paraId) : undefined;
+      const parentRef = ex?.getAttributeNS(W15, "paraIdParent");
+      const parentId = parentRef ? ids.get(parentRef) : undefined;
       return ({
       id: wVal(c, "id") ?? "",
       author: wVal(c, "author") ?? "",

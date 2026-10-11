@@ -72,6 +72,25 @@ export interface ParagraphProps {
   markFont: string | null;
   keepNext: boolean | null;
   keepLines: boolean | null;
+  /** Borders and shading as CSS (display only; the XML keeps the details). */
+  frame: string | null;
+}
+
+/** w:pBdr / w:shd as CSS: borders (width from eighths of a point, w:space as padding) and the fill. */
+function frameCss(pPr: Element | null): string | null {
+  const css: string[] = [];
+  const bdr = w(pPr, "pBdr");
+  for (const side of ["top", "left", "bottom", "right"]) {
+    const b = w(bdr, side);
+    const val = wVal(b);
+    if (!b || !val || val === "none" || val === "nil") continue;
+    const px = Math.max(1, Math.round(((Number(wVal(b, "sz") ?? 4) / 8) * 4) / 3 * 100) / 100);
+    const style = val === "double" ? "double" : /dash/i.test(val) ? "dashed" : /dot/i.test(val) ? "dotted" : "solid";
+    css.push(`border-${side}: ${px}px ${style} ${hex(wVal(b, "color")) ?? "#000000"}`, `padding-${side}: ${Number(wVal(b, "space") ?? 0)}pt`);
+  }
+  const fill = hex(wVal(w(pPr, "shd"), "fill"));
+  if (fill) css.push(`background-color: ${fill}`);
+  return css.length ? css.join("; ") : null;
 }
 
 const pt = (twips: string | null) => (twips === null ? null : Math.round((Number(twips) / 20) * 100) / 100);
@@ -108,6 +127,7 @@ export function paragraphProps(pPr: Element | null): ParagraphProps {
     markFont: wVal(w(w(pPr, "rPr"), "rFonts"), "ascii") ?? wVal(w(w(pPr, "rPr"), "rFonts"), "hAnsi"),
     keepNext: w(pPr, "keepNext") ? isOn(w(pPr, "keepNext")) : null,
     keepLines: w(pPr, "keepLines") ? isOn(w(pPr, "keepLines")) : null,
+    frame: frameCss(pPr),
   };
 }
 
