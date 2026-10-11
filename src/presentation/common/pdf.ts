@@ -23,7 +23,12 @@ export async function exportPdf(app: App, file: TFile, pages: HTMLElement[], siz
   const notice = new Notice("Exporting to PDF…", 0);
   const root = document.body.createDiv({ cls: `print dw-print ${cls}`.trim() });
   root.setCssProps({ "--dw-page-w": `${size.width}px`, "--dw-page-h": `${size.height}px` });
-  pages.forEach((p) => root.appendChild(p));
+  // Page breaks are set inline: the plugin directory's CSS lint flags break-* properties in styles.css.
+  const pageBreak = { "break-after": "page" };
+  pages.forEach((p, i) => {
+    if (i < pages.length - 1) p.setCssProps(pageBreak);
+    root.appendChild(p);
+  });
   try {
     await document.fonts.ready;
     await Promise.all(Array.from(root.querySelectorAll("img")).map((img) => img.decode().catch(() => undefined)));

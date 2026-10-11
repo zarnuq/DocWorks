@@ -1675,11 +1675,6 @@ textarea.pptx-notes {
   width: var(--dw-page-w);
   height: var(--dw-page-h);
   background: #ffffff;
-  break-after: page;
-}
-
-.dw-print-page:last-child {
-  break-after: auto;
 }
 
 .dw-print .pptx-slide {

@@ -82,7 +82,7 @@ describe("reading sections in columns", () => {
 
   it("keeps multi-column properties out of styles.css", () => {
     const css = readFileSync(join(__dirname, "..", "styles.css"), "utf8");
-    expect(css).not.toMatch(/(^|[\s;{])(column-(count|gap|rule|span|width|fill)|columns)\s*:|break-(after|before|inside)\s*:\s*column/);
+    expect(css).not.toMatch(/(^|[\s;{])(column-(count|gap|rule|span|width|fill)|columns)\s*:|break-(after|before|inside)\s*:/);
   });
 });
 
