@@ -98,6 +98,22 @@ describe("shape format panel", () => {
   });
 });
 
+describe("format panel layout", () => {
+  it("opens fill and line, folds the rest, and keeps a section open across edits once opened", async () => {
+    const { change, field } = await setup("rect");
+    const group = (name: string) => field(name).closest("details")!;
+    expect(group("Transparency %").open).toBe(true);
+    expect(group("Shadow").open).toBe(false);
+    expect(group("X (in)").open).toBe(false);
+    group("X (in)").open = true;
+    group("X (in)").dispatchEvent(new Event("toggle"));
+    change("Y (in)", "2");
+    expect(group("X (in)").open).toBe(true);
+    group("X (in)").open = false;
+    group("X (in)").dispatchEvent(new Event("toggle"));
+  });
+});
+
 describe("text box settings", () => {
   it("edits anchor, autofit, wrapping and margins", async () => {
     const { model, change } = await setup("rect");

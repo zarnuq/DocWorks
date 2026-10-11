@@ -99,6 +99,7 @@ describe("copying slides", () => {
     run.setAttribute("sz", "4000");
     const to = await PptxDocument.load(await blankPptx());
     to.setSlideSize(9144000, 5143500);
+    const ownBefore = Number(to.xml(to.masterOf(to.layoutOf(to.slides()[0].path)!)!)!.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "titleStyle")[0].getElementsByTagNameNS(A, "defRPr")[0].getAttribute("sz"));
     to.pasteSlides(await from.copySlides([1]), 0);
     const pasted = firstBox(to, 1);
     const after = itemRect(pasted);
@@ -114,6 +115,6 @@ describe("copying slides", () => {
     const title = (path: string) => Number(to.xml(path)!.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "titleStyle")[0].getElementsByTagNameNS(A, "defRPr")[0].getAttribute("sz"));
     const srcTitle = Number(from.xml(from.masterOf(from.layoutOf(from.slides()[1].path)!)!)!.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "titleStyle")[0].getElementsByTagNameNS(A, "defRPr")[0].getAttribute("sz"));
     expect(title(master)).toBe(Math.round(srcTitle * 0.75));
-    expect(title(own)).toBe(srcTitle);
+    expect(title(own)).toBe(ownBefore);
   });
 });

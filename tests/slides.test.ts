@@ -114,11 +114,36 @@ describe("slide size", () => {
     const box = addShape(doc.xml(path)!, "ellipse", { x: 1000000, y: 2000000, w: 4000000, h: 2000000 });
     const logo = addPicture(doc.xml(doc.layouts()[0].path)!, { x: 0, y: 0, w: 1000000, h: 1000000 }, "rId99", "logo.png");
     doc.setSlideSize(9144000, 6858000);
-    const s = 0.75;
-    const dy = (6858000 - 6858000 * s) / 2;
-    expect(itemRect(box)).toEqual({ x: 750000, y: Math.round(2000000 * s + dy), w: 3000000, h: 1500000 });
+    // As large as it can be while staying on the slide: here its left edge meets the slide's.
+    const r = itemRect(box);
+    expect(r.x).toBe(0);
+    expect(r.w / r.h).toBeCloseTo(2, 3);
+    expect(r.w).toBeGreaterThan(3000000);
+    expect(r.w).toBeLessThan(4000000);
+    expect(r.y + r.h / 2 - 6858000 / 2).toBeCloseTo((3000000 - 6858000 / 2) * (r.w / 4000000), -2);
     // A picture keeps its aspect ratio; its center moves with the stretch.
     expect(itemRect(logo)).toEqual({ x: 0, y: 125000, w: 750000, h: 750000 });
+  });
+
+  it("shrinks text with the boxes, and switching back restores the slide instead of shrinking it again", async () => {
+    const doc = await blank();
+    const path = doc.slides()[0].path;
+    const box = addShape(doc.xml(path)!, "rect", { x: 0, y: 1000000, w: 12192000, h: 2000000 });
+    const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const rPr = doc.xml(path)!.createElementNS(A, "a:endParaRPr");
+    rPr.setAttribute("sz", "4000");
+    box.getElementsByTagNameNS(A, "p")[0].appendChild(rPr);
+    const before = itemRect(box);
+    doc.setSlideSize(9144000, 6858000);
+    expect(itemRect(box).w).toBe(9144000);
+    expect(rPr.getAttribute("sz")).toBe("3000");
+    doc.setSlideSize(12192000, 6858000);
+    const after = itemRect(box);
+    expect(after.x).toBeCloseTo(before.x, -2);
+    expect(after.y).toBeCloseTo(before.y, -2);
+    expect(after.w).toBeCloseTo(before.w, -2);
+    expect(after.h).toBeCloseTo(before.h, -2);
+    expect(rPr.getAttribute("sz")).toBe("4000");
   });
 });
 

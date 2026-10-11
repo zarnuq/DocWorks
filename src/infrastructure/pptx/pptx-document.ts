@@ -620,12 +620,16 @@ export class PptxDocument extends OoxmlPackage {
 
   /**
    * Change the slide size. Masters and layouts stretch to it, so placeholders
-   * fill the new shape; slide content is scaled uniformly to fit and centered
-   * (PowerPoint's "Ensure fit"). Pictures and frames keep their aspect ratio.
+   * fill the new shape; slide content is scaled uniformly and centered, as large as it can be without leaving
+   * the slide (at least PowerPoint's "Ensure fit"), so switching back and forth restores it rather than
+   * shrinking it each time. Text sizes scale with it. Pictures and frames keep their aspect ratio.
    */
-  // ponytail: font sizes are not scaled; shrink text by hand after big downsizes.
   setSlideSize(cx: number, cy: number): void {
-    for (const [path, xml] of this.parts) this.fitPart(path, xml, this.slideSize, { cx, cy });
+    const s = this.fitScale({ cx, cy });
+    for (const [path, xml] of this.parts) {
+      if (!this.fitPart(path, xml, this.slideSize, { cx, cy }, s)) continue;
+      if (s !== 1) scaleText(xml, s);
+    }
     const sz = this.parts.get(PRESENTATION)!.getElementsByTagNameNS(NS.p, "sldSz")[0];
     sz.setAttribute("cx", String(Math.round(cx)));
     sz.setAttribute("cy", String(Math.round(cy)));
@@ -633,15 +637,38 @@ export class PptxDocument extends OoxmlPackage {
     this.slideSize = { cx: Math.round(cx), cy: Math.round(cy) };
   }
 
-  /** Fit a slide, layout or master made for slide size `from` to size `to`, as `setSlideSize` describes. */
-  private fitPart(path: string, xml: Document, from: { cx: number; cy: number }, to: { cx: number; cy: number }): void {
+  /**
+   * The slide content scale for a new size: "Ensure fit" (the old slide fits) at least, and up to the larger
+   * stretch while every slide's content, scaled about the centre, stays on the slide.
+   */
+  private fitScale(to: { cx: number; cy: number }): number {
+    const { cx: ox, cy: oy } = this.slideSize;
+    const lo = Math.min(to.cx / ox, to.cy / oy);
+    let s = Math.max(to.cx / ox, to.cy / oy);
+    for (const slide of this.slides()) {
+      for (const item of Array.from(this.xml(slide.path)?.getElementsByTagNameNS(NS.p, "spTree")[0]?.children ?? [])) {
+        if (!xfrmOf(item)) continue;
+        const r = itemRect(item);
+        for (const x of [r.x, r.x + r.w]) if (Math.abs(x - ox / 2) > 0) s = Math.min(s, to.cx / 2 / Math.abs(x - ox / 2));
+        for (const y of [r.y, r.y + r.h]) if (Math.abs(y - oy / 2) > 0) s = Math.min(s, to.cy / 2 / Math.abs(y - oy / 2));
+      }
+    }
+    return Math.max(lo, s);
+  }
+
+  /**
+   * Fit a slide, layout or master made for slide size `from` to size `to`, as `setSlideSize` describes; slide
+   * content is scaled by `s` (default: the old slide just fits). False for other parts.
+   */
+  private fitPart(path: string, xml: Document, from: { cx: number; cy: number }, to: { cx: number; cy: number }, scale?: number): boolean {
     const kind = /^ppt\/(slides|slideLayouts|slideMasters)\/[^/]+\.xml$/.exec(path)?.[1];
-    if (!kind) return;
+    if (!kind) return false;
     const { cx: ox, cy: oy } = from;
     const { cx, cy } = to;
     const sx = cx / ox;
     const sy = cy / oy;
-    const s = Math.min(sx, sy);
+    // Pictures on layouts and masters keep "Ensure fit"; slide content takes `scale`.
+    const s = kind === "slides" ? (scale ?? Math.min(sx, sy)) : Math.min(sx, sy);
     for (const item of Array.from(xml.getElementsByTagNameNS(NS.p, "spTree")[0]?.children ?? [])) {
       if (!xfrmOf(item)) continue;
       const r = itemRect(item);
@@ -655,6 +682,7 @@ export class PptxDocument extends OoxmlPackage {
         setItemRect(item, { x: ccx - (r.w * s) / 2, y: ccy - (r.h * s) / 2, w: r.w * s, h: r.h * s });
       }
     }
+    return true;
   }
 
   // --- Sections ------------------------------------------------------------------

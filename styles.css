@@ -1035,6 +1035,57 @@ textarea.pptx-notes {
   font-size: var(--font-ui-smaller);
 }
 
+/* Shape panel: actions in even columns instead of one per line. */
+.pptx-props-buttons.is-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pptx-props-buttons.is-grid.is-thirds {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pptx-props-buttons.is-grid button {
+  min-width: 0;
+  padding-inline: var(--size-2-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Collapsible sections (format options). */
+.pptx-props-group > summary.pptx-props-title {
+  cursor: pointer;
+  user-select: none;
+}
+
+.pptx-props-group:not([open]) > summary.pptx-props-title {
+  margin-bottom: 0;
+  color: var(--text-muted);
+}
+
+.pptx-props-group > .pptx-props-section {
+  margin-bottom: var(--size-4-2);
+}
+
+.pptx-props-sub {
+  margin: var(--size-2-2) 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* Two short fields per line: X / Y, width / height, margins. */
+.pptx-props-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--size-4-3);
+}
+
+.pptx-props-pair .pptx-props-row input[type="number"] {
+  width: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Edges of text shapes: drag to move, click to select without editing text. */
 .pptx-edge {
   position: absolute;

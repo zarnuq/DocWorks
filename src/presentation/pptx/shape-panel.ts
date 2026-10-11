@@ -39,9 +39,8 @@ export interface ArrangeControl {
 const ALIGN: [string, Alignment][] = [["Left", "left"], ["Center", "center"], ["Right", "right"], ["Top", "top"], ["Middle", "middle"], ["Bottom", "bottom"]];
 const ORDER: [string, ZOrder][] = [["Bring to front", "front"], ["Bring forward", "forward"], ["Send backward", "backward"], ["Send to back", "back"]];
 
-function title(host: HTMLElement, text: string): HTMLElement {
-  host.createDiv({ cls: "pptx-props-title", text });
-  return host.createDiv({ cls: "pptx-props-buttons" });
+function title(host: HTMLElement, text: string, columns = 2): HTMLElement {
+  return sectionIn(host, text).createDiv({ cls: columns === 3 ? "pptx-props-buttons is-grid is-thirds" : "pptx-props-buttons is-grid" });
 }
 
 /** Align, distribute and group buttons for the current selection. */
@@ -51,7 +50,7 @@ function arrangeButtons(host: HTMLElement, a: ArrangeControl, withOrder: boolean
     const order = title(host, "Arrange");
     for (const [text, to] of ORDER) btn(order, text, () => a.order(to));
   }
-  const align = title(host, a.count === 1 ? "Align to slide" : "Align");
+  const align = title(host, a.count === 1 ? "Align to slide" : "Align", 3);
   for (const [text, mode] of ALIGN) btn(align, text, () => a.align(mode));
   if (a.count >= 3) {
     const dist = title(host, "Distribute");
@@ -88,14 +87,24 @@ const withAlpha = (c: string, a: number) =>
   (a >= 1 ? c.slice(0, 7) : c.slice(0, 7) + Math.round(a * 255).toString(16).padStart(2, "0")).toUpperCase();
 const round2 = (n: number) => String(Math.round(n * 100) / 100);
 
+/** Sections open until closed (and closed ones stay closed) while the panel is rebuilt after each edit. */
+const openSections = new Set(["Fill", "Line", "Crop", "Table", "Cell fill", "Table fill", "Borders"]);
+
+/** A collapsible section, like Google Slides' format options. */
 function sectionIn(host: HTMLElement, title: string): HTMLElement {
-  host.createDiv({ cls: "pptx-props-title", text: title });
-  return host.createDiv({ cls: "pptx-props-section" });
+  const details = host.createEl("details", { cls: "pptx-props-group" });
+  details.open = openSections.has(title);
+  details.createEl("summary", { cls: "pptx-props-title", text: title });
+  details.addEventListener("toggle", () => (details.open ? openSections.add(title) : openSections.delete(title)));
+  return details.createDiv({ cls: "pptx-props-section" });
 }
 
-function row(parent: HTMLElement, label: string): HTMLElement {
+/** Two short fields side by side (X / Y, width / height, margins). */
+const pair = (parent: HTMLElement) => parent.createDiv({ cls: "pptx-props-pair" });
+
+function row(parent: HTMLElement, label: string, text = label): HTMLElement {
   const r = parent.createEl("label", { cls: "pptx-props-row" });
-  r.createSpan({ text: label });
+  r.createSpan({ text });
   return r;
 }
 
@@ -107,14 +116,15 @@ function select(parent: HTMLElement, label: string, options: [string, string][],
   return s;
 }
 
-function input(parent: HTMLElement, label: string, type: string, value: string, onChange: (v: string) => void, attrs: Record<string, string> = {}): HTMLInputElement {
-  const i = row(parent, label).createEl("input", { type, value, attr: { "data-field": label, ...attrs } });
+function input(parent: HTMLElement, label: string, type: string, value: string, onChange: (v: string) => void, attrs: Record<string, string> = {}, text = label): HTMLInputElement {
+  const i = row(parent, label, text).createEl("input", { type, value, attr: { "data-field": label, ...attrs } });
   i.addEventListener("change", () => onChange(i.value));
   return i;
 }
 
-const number = (parent: HTMLElement, label: string, value: number, onChange: (v: number) => void, step = "0.01") =>
-  input(parent, label, "number", round2(value), (v) => Number.isFinite(Number(v)) && v !== "" && onChange(Number(v)), { step });
+/** A number field; `text` is a shorter visible label (the field keeps `label` as its name). */
+const number = (parent: HTMLElement, label: string, value: number, onChange: (v: number) => void, step = "0.01", text = label) =>
+  input(parent, label, "number", round2(value), (v) => Number.isFinite(Number(v)) && v !== "" && onChange(Number(v)), { step }, text);
 
 /** Fill type, colors, transparency and gradient angle; `none` is the label/value for "no own fill". */
 function fillControls(s: HTMLElement, fill: Fill | null, setFill: (f: Fill | null) => void, none: [string, string][], label = "Type", plain = DEFAULT_COLOR): void {
@@ -226,14 +236,15 @@ const SIZES: [string, number, number][] = [
 export function buildSlidePanel(host: HTMLElement, ctl: SlideControl): void {
   host.replaceChildren();
   host.createDiv({ cls: "pptx-props-heading", text: "Slide" });
-  const s = sectionIn(host, "Layout");
+  // Each part is a single labelled row, so no section headings repeating the labels.
+  const s = host.createDiv({ cls: "pptx-props-section" });
   select(s, "Layout", ctl.layouts.map((l) => [l.name || "Untitled layout", l.path]), ctl.layout, (p) => ctl.setLayout(p));
 
-  const bg = sectionIn(host, "Background");
+  const bg = host.createDiv({ cls: "pptx-props-section" });
   fillControls(bg, ctl.background, (f) => ctl.setBackground(f), [["From layout", "layout"]], "Background", "#FFFFFF");
   bg.createEl("button", { text: "Apply to all slides" }).addEventListener("click", () => ctl.applyBackgroundToAll());
 
-  const size = sectionIn(host, "Slide size");
+  const size = host.createDiv({ cls: "pptx-props-section" });
   const current = `${ctl.size.cx}x${ctl.size.cy}`;
   const options: [string, string][] = SIZES.map(([name, cx, cy]) => [name, `${cx}x${cy}`]);
   if (!options.some(([, v]) => v === current)) {
@@ -312,8 +323,10 @@ export function buildShapePanel(host: HTMLElement, shape: ShapeModel, ctl: Panel
     const wrap = row(s, "Wrap text").createEl("input", { type: "checkbox", attr: { "data-field": "Wrap text" } });
     wrap.checked = text.wrap;
     wrap.addEventListener("change", () => body({ wrap: wrap.checked }));
-    for (const [label, key] of [["Left margin (in)", "l"], ["Right margin (in)", "r"], ["Top margin (in)", "t"], ["Bottom margin (in)", "b"]] as const) {
-      number(s, label, text.insets[key] / EMU_PER_INCH, (v) => body({ insets: { ...text.insets, [key]: Math.max(0, v) * EMU_PER_INCH } }));
+    s.createDiv({ cls: "pptx-props-sub", text: "Margins (in)" });
+    const margins = pair(s);
+    for (const [label, key, short] of [["Left margin (in)", "l", "Left"], ["Right margin (in)", "r", "Right"], ["Top margin (in)", "t", "Top"], ["Bottom margin (in)", "b", "Bottom"]] as const) {
+      number(margins, label, text.insets[key] / EMU_PER_INCH, (v) => body({ insets: { ...text.insets, [key]: Math.max(0, v) * EMU_PER_INCH } }), "0.01", short);
     }
   }
 
@@ -321,29 +334,31 @@ export function buildShapePanel(host: HTMLElement, shape: ShapeModel, ctl: Panel
   const s = section("Position and size");
   const r = shape.rect;
   const setR = (patch: Partial<typeof r>) => edit((el) => setRect(el, { ...r, ...patch }));
-  number(s, "X (in)", r.x / EMU_PER_INCH, (v) => setR({ x: v * EMU_PER_INCH }));
-  number(s, "Y (in)", r.y / EMU_PER_INCH, (v) => setR({ y: v * EMU_PER_INCH }));
-  number(s, "Width (in)", r.w / EMU_PER_INCH, (v) => {
+  s.createDiv({ cls: "pptx-props-sub", text: "Inches" });
+  const box = pair(s);
+  number(box, "X (in)", r.x / EMU_PER_INCH, (v) => setR({ x: v * EMU_PER_INCH }), "0.01", "X");
+  number(box, "Y (in)", r.y / EMU_PER_INCH, (v) => setR({ y: v * EMU_PER_INCH }), "0.01", "Y");
+  number(box, "Width (in)", r.w / EMU_PER_INCH, (v) => {
     const w = Math.max(0, v * EMU_PER_INCH);
     setR(ctl.lockAspect && r.w ? { w, h: (r.h * w) / r.w } : { w });
-  });
-  number(s, "Height (in)", r.h / EMU_PER_INCH, (v) => {
+  }, "0.01", "W");
+  number(box, "Height (in)", r.h / EMU_PER_INCH, (v) => {
     const h = Math.max(0, v * EMU_PER_INCH);
     setR(ctl.lockAspect && r.h ? { h, w: (r.w * h) / r.h } : { h });
-  });
+  }, "0.01", "H");
   const lock = row(s, "Lock aspect ratio").createEl("input", { type: "checkbox", attr: { "data-field": "Lock aspect ratio" } });
   lock.checked = ctl.lockAspect;
   lock.addEventListener("change", () => (ctl.lockAspect = lock.checked));
   if (shape.el.localName !== "graphicFrame") {
     number(s, "Rotation (°)", shape.rot, (v) => edit((el) => setTransform(el, { rot: v })), "1");
-    const flips = s.createDiv({ cls: "pptx-props-buttons" });
+    const flips = s.createDiv({ cls: "pptx-props-buttons is-grid" });
     const flipBtn = (text: string, fn: () => void) => flips.createEl("button", { text }).addEventListener("click", fn);
     flipBtn("Flip horizontal", () => edit((el) => setTransform(el, { flipH: !shape.flipH })));
     flipBtn("Flip vertical", () => edit((el) => setTransform(el, { flipV: !shape.flipV })));
   }
 
   // --- Arrange ---------------------------------------------------------------
-  const order = section("Arrange").createDiv({ cls: "pptx-props-buttons" });
+  const order = title(host, "Arrange");
   for (const [label, to] of ORDER) {
     order.createEl("button", { text: label }).addEventListener("click", () => edit((el) => reorder(el, to)));
   }
