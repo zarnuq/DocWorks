@@ -812,25 +812,50 @@ export class DocxView extends FileView {
       ]);
     });
 
-    // Tracked changes (from the saved XML plus the current edits)
+    // Tracked changes (from the saved XML plus the current edits), in the body and in headers / footers
     panel.createDiv({ cls: "docx-review-title", text: "Tracked changes" });
     writeBody(docx.body, doc, this.origins, docx);
-    const changes = revisions(docx.body);
+    const parts = HF_PARTS.flatMap((part) => {
+      const root = docx.headerFooter(...splitPart(part));
+      const [kind, type] = splitPart(part);
+      const name = `${kind === "header" ? "Header" : "Footer"}${type === "default" ? "" : type === "first" ? " (first page)" : " (even pages)"}`;
+      return root ? [{ root, name }] : [];
+    });
+    const changes = [
+      ...revisions(docx.body).map((r) => ({ r, where: null as { root: Element; name: string } | null })),
+      ...parts.flatMap((where) => revisions(where.root).map((r) => ({ r, where }))),
+    ];
     if (!changes.length) {
       panel.createDiv({ cls: "docx-review-empty", text: "No tracked changes." });
       return;
     }
+    /** Accept or reject in the body (`where` null) or one header / footer part. */
+    const decide = (accept: boolean, where: { root: Element } | null, ids?: Set<string>) => {
+      const fn = (root: Element) => (accept ? acceptRevisions(root, ids) : rejectRevisions(root, ids));
+      if (where) {
+        fn(where.root);
+        this.readAllHF();
+        this.markDirty();
+        this.renderReview();
+        if (this.editor) repaginate(this.editor);
+      } else this.rewriteBody(fn);
+    };
     const all = panel.createDiv({ cls: "docx-review-actions" });
-    all.createEl("button", { text: "Accept all" }).addEventListener("click", () => this.rewriteBody((b) => acceptRevisions(b)));
-    all.createEl("button", { text: "Reject all" }).addEventListener("click", () => this.rewriteBody((b) => rejectRevisions(b)));
+    const everything = (accept: boolean) => {
+      for (const where of parts) (accept ? acceptRevisions : rejectRevisions)(where.root);
+      if (parts.length) this.readAllHF();
+      this.rewriteBody((b) => (accept ? acceptRevisions(b) : rejectRevisions(b)));
+    };
+    all.createEl("button", { text: "Accept all" }).addEventListener("click", () => everything(true));
+    all.createEl("button", { text: "Reject all" }).addEventListener("click", () => everything(false));
     const kinds = { insert: "Inserted", delete: "Deleted", format: "Formatted" };
-    for (const r of changes) {
+    for (const { r, where } of changes) {
       const c = panel.createDiv({ cls: `docx-review-card docx-change-${r.kind}` });
-      c.createDiv({ cls: "docx-review-meta", text: `${kinds[r.kind]}${r.author ? ` by ${r.author}` : ""}` });
+      c.createDiv({ cls: "docx-review-meta", text: `${kinds[r.kind]}${r.author ? ` by ${r.author}` : ""}${where ? ` · ${where.name}` : ""}` });
       c.createDiv({ cls: "docx-review-text", text: r.text.slice(0, 200) || "(formatting)" });
       const row = c.createDiv({ cls: "docx-review-actions" });
-      row.createEl("button", { text: "Accept" }).addEventListener("click", () => this.rewriteBody((b) => acceptRevisions(b, new Set([r.id]))));
-      row.createEl("button", { text: "Reject" }).addEventListener("click", () => this.rewriteBody((b) => rejectRevisions(b, new Set([r.id]))));
+      row.createEl("button", { text: "Accept" }).addEventListener("click", () => decide(true, where, new Set([r.id])));
+      row.createEl("button", { text: "Reject" }).addEventListener("click", () => decide(false, where, new Set([r.id])));
     }
   }
 
@@ -949,11 +974,21 @@ export class DocxView extends FileView {
   private headerFooterDialog(): void {
     const docx = this.docx;
     if (!docx || !this.ctx) return;
-    const modal = new HeaderFooterModal(this.app, this.ctx, docx, (part) => this.hfReadContext(part), () => {
+    // The dialog edits the body's final w:sectPr (header references, first page option), which the editor also keeps
+    // as its doc attribute: bring the body up to date first, and the attribute after.
+    const editor = this.editor;
+    if (editor) writeBody(docx.body, editor.state.doc, this.origins, docx);
+    const modal = new HeaderFooterModal(this.app, this.ctx, docx, (part) => this.hfReadContext(part), () => (this.suggesting ? this.settings.author : null), () => {
       this.readAllHF();
+      const last = docx.body.lastElementChild;
+      if (this.editor && last?.localName === "sectPr") {
+        const sectPr = new XMLSerializer().serializeToString(last);
+        if (sectPr !== this.editor.state.doc.attrs.sectPr) this.editor.dispatch(this.editor.state.tr.setDocAttribute("sectPr", sectPr).setMeta("addToHistory", false));
+      }
       this.dirty = true;
       void this.saveNow();
       if (this.editor) repaginate(this.editor);
+      this.renderReview();
     });
     modal.open();
   }
@@ -1175,6 +1210,8 @@ class HeaderFooterModal extends Modal {
     private ctx: EditorContext,
     private docx: DocxDocument,
     private readContext: (part: HFPart) => { imageSrc: (id: string) => string | null; hyperlinkHref: (id: string) => string | null },
+    /** The suggestion author while the document is in suggesting mode, else null. */
+    private suggestAuthor: () => string | null,
     private onDone: () => void
   ) {
     super(app);
@@ -1219,6 +1256,8 @@ class HeaderFooterModal extends Modal {
       const view: EditorView = new EditorView(host, {
         state: EditorState.create({ doc, plugins: docxPlugins(this.ctx) }),
         dispatchTransaction: (tr) => {
+          const author = this.suggestAuthor();
+          if (author) tr = suggestTransaction(tr, origins, this.docx, this.readContext(part), author);
           view.updateState(view.state.apply(tr));
           if (tr.docChanged) this.editors.get(part)!.changed = this.changed = true;
         },

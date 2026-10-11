@@ -3,6 +3,7 @@ import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
 import { Edits } from "../src/domain/xlsx/commands";
 import { Grid, GridHost, HEADER_H, HEADER_W, editText } from "../src/presentation/xlsx/grid";
+import type { Op } from "../src/presentation/xlsx/paint";
 import { xlsx, sheetXml } from "./xlsx-fixtures";
 
 afterEach(() => document.body.empty());
@@ -35,7 +36,10 @@ async function mount(bytes?: Uint8Array) {
 }
 
 const key = (grid: Grid, k: string, opts: KeyboardEventInit = {}) => grid.input.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...opts }));
-const texts = (grid: Grid, quad: string) => Array.from(grid.el.querySelectorAll(`.xlsx-quad-${quad} .xlsx-cell`)).map((c) => c.textContent);
+type TextOp = Extract<Op, { kind: "text" }>;
+const textOps = (grid: Grid, quad: string) => (grid.ops.get(quad) ?? []).filter((o): o is TextOp => o.kind === "text");
+const texts = (grid: Grid, quad: string) => textOps(grid, quad).map((o) => o.text);
+const allTexts = (grid: Grid) => ["corner", "top", "left", "main"].flatMap((q) => textOps(grid, q));
 
 describe("grid rendering", () => {
   it("draws cell text with formats, frozen rows in their own pane", async () => {
@@ -43,13 +47,14 @@ describe("grid rendering", () => {
     expect(texts(grid, "top")).toEqual(["Name", "Notes", "Double"]);
     expect(texts(grid, "main")).toContain("2024-01-01");
     expect(texts(grid, "main")).toContain("#DIV/0!");
-    expect(grid.el.querySelectorAll(".xlsx-quad-top .xlsx-box").length).toBe(2);
+    expect((grid.ops.get("top") ?? []).filter((o) => o.kind === "rect")).toHaveLength(2);
+    expect(textOps(grid, "top")[0]).toMatchObject({ font: expect.stringMatching(/^bold 14.6+7?px "Calibri"/), color: "#FF0000", align: "center" });
   });
 
   it("only creates elements for the visible part of a huge sheet", async () => {
     const rows = Array.from({ length: 20000 }, (_, i) => `<row r="${i + 1}"><c r="A${i + 1}"><v>${i}</v></c><c r="B${i + 1}"><v>${i}</v></c></row>`).join("");
     const { grid } = await mount(await xlsx({ sheets: [sheetXml(rows)] }));
-    const n = grid.el.querySelectorAll(".xlsx-cell").length;
+    const n = allTexts(grid).length;
     expect(n).toBeGreaterThan(20);
     expect(n).toBeLessThan(200);
     expect(grid.el.querySelectorAll("*").length).toBeLessThan(2000);
@@ -58,17 +63,18 @@ describe("grid rendering", () => {
   it("labels headers and highlights the selected ones", async () => {
     const { grid } = await mount();
     grid.select({ row: 1, col: 1 });
-    const heads = Array.from(grid.el.querySelectorAll(".xlsx-colheads .xlsx-head")).map((h) => h.textContent);
-    expect(heads.slice(0, 3)).toEqual(["A", "B", "C"]);
-    expect(Array.from(grid.el.querySelectorAll(".xlsx-head.is-selected")).map((h) => h.textContent)).toEqual(["B", "2"]);
+    const heads = (k: string) => (grid.ops.get(k) ?? []).filter((o): o is TextOp => o.kind === "text");
+    expect(heads("colheads1").slice(0, 3).map((o) => o.text)).toEqual(["A", "B", "C"]);
+    const bold = [...heads("colheads1"), ...heads("rowheads0"), ...heads("rowheads1")].filter((o) => o.font.startsWith("bold")).map((o) => o.text);
+    expect(bold).toEqual(["B", "2"]);
   });
 
   it("lets text run over empty cells to its right", async () => {
     const { grid, edits } = await mount();
     edits.input(edits.wb.sheets[0], 8, 0, "a long piece of text");
     grid.render();
-    const cell = Array.from(grid.el.querySelectorAll<HTMLElement>(".xlsx-cell")).find((c) => c.textContent === "a long piece of text")!;
-    expect(parseFloat(cell.style.getPropertyValue("--w"))).toBeGreaterThan(64 * 3);
+    const cell = allTexts(grid).find((o) => o.text === "a long piece of text")!;
+    expect(cell.w).toBeGreaterThan(64 * 3);
   });
 });
 
@@ -188,14 +194,14 @@ describe("grid dark theme", () => {
     edits.format(s, { r1: 9, c1: 0, r2: 9, c2: 0 }, { fill: "#FFFFFF" });
     grid.dark = true;
     grid.invalidate();
-    const cell = (t: string) => Array.from(grid.el.querySelectorAll<HTMLElement>(".xlsx-cell")).find((c) => c.textContent === t)!;
-    expect(cell("plain").style.color).toBe("");
-    expect(cell("Name").style.color).toBe("rgb(255, 0, 0)");
-    const boxes = Array.from(grid.el.querySelectorAll<HTMLElement>(".xlsx-box")).map((b) => b.style.backgroundColor);
-    expect(boxes).not.toContain("rgb(255, 255, 255)");
+    const cell = (t: string) => allTexts(grid).find((o) => o.text === t)!;
+    expect(cell("plain").color).toBe("#e3e3e3");
+    expect(cell("Name").color).toBe("#FF0000");
+    const fills = ["top", "main"].flatMap((q) => grid.ops.get(q) ?? []).filter((o) => o.kind === "rect").map((o) => (o as { color: string }).color);
+    expect(fills).not.toContain("#FFFFFF");
     grid.dark = false;
     grid.invalidate();
-    expect(cell("plain").style.color).toBe("rgb(0, 0, 0)");
+    expect(cell("plain").color).toBe("#000000");
   });
 });
 

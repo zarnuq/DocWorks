@@ -123,3 +123,40 @@ export function setMediaPlayback(slide: Document, shape: Element, patch: Partial
     conditions.replaceChildren(cond);
   }
 }
+
+/**
+ * Vault paths to try for media the deck links to instead of embedding (`r:link` with TargetMode="External"), best
+ * first. Only audio / video files inside the vault: a relative link is resolved from the deck's folder, and any
+ * link (absolute paths from the author's machine, or one leaving the vault) falls back to a same-named file beside
+ * the deck, as PowerPoint does. Web links are refused, so nothing is ever fetched.
+ */
+export function linkedMediaCandidates(target: string, deckPath: string): string[] {
+  let t = target.trim();
+  if (/^file:/i.test(t)) t = t.replace(/^file:\/*/i, "/");
+  else if (/^[a-z][a-z0-9+.-]+:/i.test(t) && !/^[a-z]:[\\/]/i.test(t)) return [];
+  try {
+    t = decodeURIComponent(t);
+  } catch {
+    // keep it as written
+  }
+  t = t.replace(/\\/g, "/");
+  const name = t.slice(t.lastIndexOf("/") + 1);
+  if (!MEDIA_MIME[name.slice(name.lastIndexOf(".") + 1).toLowerCase()]) return [];
+  const dir = deckPath.includes("/") ? deckPath.slice(0, deckPath.lastIndexOf("/")) : "";
+  const beside = dir ? `${dir}/${name}` : name;
+  const absolute = t.startsWith("/") || /^[a-z]:\//i.test(t);
+  const out: string[] = [];
+  if (!absolute) {
+    const parts = dir ? dir.split("/") : [];
+    let inside = true;
+    for (const seg of t.split("/")) {
+      if (seg === "..") {
+        if (!parts.length) inside = false;
+        parts.pop();
+      } else if (seg && seg !== ".") parts.push(seg);
+    }
+    if (inside) out.push(parts.join("/"));
+  }
+  if (!out.includes(beside)) out.push(beside);
+  return out;
+}

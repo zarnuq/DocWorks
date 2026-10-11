@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { undo, redo, history } from "prosemirror-history";
+import { joinBackward, splitBlock } from "prosemirror-commands";
+import { cmd } from "../src/presentation/docx/docx-editor";
 import { blankDocx } from "../src/infrastructure/blank";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { readDocx } from "../src/domain/docx/docx-reader";
@@ -150,5 +152,99 @@ describe("suggestion recording", () => {
     const accepted = t.xml();
     acceptRevisions(accepted);
     expect(readDocx(accepted, context).doc.lastChild!.textContent).toBe("La!");
+  });
+});
+
+describe("structural suggestions", () => {
+  const p = (t: string) => s.nodes.paragraph.create(null, t ? s.text(t) : undefined);
+  const cell = (t: string) => s.nodes.table_cell.create(null, p(t));
+  const table = () => s.nodes.table.create(null, [s.nodes.table_row.create(null, [cell("a"), cell("b")]), s.nodes.table_row.create(null, [cell("c"), cell("d")])]);
+  /** Text of every paragraph, "|" between them. */
+  const lines = (body: Element) => {
+    const out: string[] = [];
+    readDocx(body, context).doc.descendants(n => (n.isTextblock ? (out.push(n.textContent), false) : true));
+    return out.join("|");
+  };
+  async function suggest(blocks: ReturnType<typeof p>[], cursor: number, run: (st: EditorState, d: (tr: EditorState["tr"]) => void) => unknown) {
+    const pkg = await DocxDocument.load(await blankDocx());
+    writeBody(pkg.body, s.nodes.doc.create(null, blocks), new Map(), pkg);
+    const original = lines(pkg.body);
+    const { doc, origins } = readDocx(pkg.body, context);
+    let state = EditorState.create({ doc });
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, cursor)));
+    let plainEdit = state;
+    run(plainEdit, tr => { plainEdit = plainEdit.apply(tr); });
+    run(state, tr => { state = state.apply(suggestTransaction(tr, origins, pkg, context, "Ada")); });
+    writeBody(pkg.body, state.doc, origins, pkg);
+    const body = pkg.body;
+    const accepted = body.cloneNode(true) as Element, rejected = body.cloneNode(true) as Element;
+    acceptRevisions(accepted);
+    rejectRevisions(rejected);
+    const want = pkg.body.ownerDocument.createElementNS(NS.w, "w:body");
+    writeBody(want, plainEdit.doc, new Map(), pkg);
+    return { body, state, original, edited: lines(want), accepted, rejected, kinds: revisions(body).map(r => [r.kind, r.text]) };
+  }
+
+  it("records Enter inside a paragraph as an inserted paragraph mark only", async () => {
+    const r = await suggest([p("Hello world")], 7, (st, d) => splitBlock(st, d));
+    expect(r.kinds).toEqual([["insert", "¶"]]);
+    expect(lines(r.accepted)).toBe("Hello |world");
+    expect(lines(r.rejected)).toBe("Hello world");
+    expect(r.state.selection.$from.parent.textContent).toBe("world");
+    expect(r.state.selection.$from.parentOffset).toBe(0);
+  });
+  it("records joining two paragraphs as a deleted paragraph mark only", async () => {
+    const r = await suggest([p("Hello"), p("world")], 8, (st, d) => joinBackward(st, d));
+    expect(r.kinds).toEqual([["delete", "¶"]]);
+    expect(lines(r.accepted)).toBe("Helloworld");
+    expect(lines(r.rejected)).toBe("Hello|world");
+    expect(r.state.selection.$from.parent.textContent).toBe("world");
+    expect(r.state.selection.$from.parentOffset).toBe(0);
+  });
+  it("records an added table column as inserted cells and a grid change", async () => {
+    const r = await suggest([p("x"), table()], 6, (st, d) => cmd.addColumn(true)(st, d));
+    expect(r.kinds.filter(k => k[1] === "cell")).toHaveLength(2);
+    expect(lines(r.accepted)).toBe(r.edited);
+    expect(lines(r.rejected)).toBe(r.original);
+    expect(r.rejected.getElementsByTagNameNS(NS.w, "gridCol")).toHaveLength(2);
+    expect(r.accepted.getElementsByTagNameNS(NS.w, "gridCol")).toHaveLength(3);
+    expect(r.accepted.getElementsByTagNameNS(NS.w, "tblGrid")).toHaveLength(1);
+  });
+  it("records a deleted table column as deleted cells that stay visible until accepted", async () => {
+    const r = await suggest([p("x"), table()], 6, (st, d) => cmd.deleteColumn(st, d));
+    expect(r.kinds.filter(k => k[1] === "cell")).toHaveLength(2);
+    expect(r.body.getElementsByTagNameNS(NS.w, "tc")).toHaveLength(4);
+    expect(lines(r.accepted)).toBe("x|b|d");
+    expect(lines(r.rejected)).toBe(r.original);
+  });
+  it("keeps a recorded column deletion through later edits in the table", async () => {
+    const r = await suggest([p("x"), table()], 6, (st, d) => cmd.deleteColumn(st, d));
+    const read = readDocx(r.body, context);
+    const pkg = await DocxDocument.load(await blankDocx());
+    let state = EditorState.create({ doc: read.doc });
+    let at = -1;
+    state.doc.descendants((n, pos) => { if (n.isText && n.text === "d") at = pos; });
+    state = state.apply(suggestTransaction(state.tr.insertText("!", at + 1), read.origins, pkg, context, "Ada"));
+    const body = r.body.cloneNode(true) as Element;
+    writeBody(body, state.doc, read.origins, pkg);
+    const rejected = body.cloneNode(true) as Element;
+    rejectRevisions(rejected);
+    expect(lines(rejected)).toBe(r.original);
+    acceptRevisions(body);
+    expect(lines(body)).toBe("x|b|d!");
+  });
+  it("records merged cells so that accepting merges and rejecting restores both cells", async () => {
+    const r = await suggest([p("x"), table()], 6, (st, d) => cmd.mergeRight(st, d));
+    expect(lines(r.accepted)).toBe(r.edited);
+    expect(lines(r.rejected)).toBe(r.original);
+    expect(r.rejected.getElementsByTagNameNS(NS.w, "gridSpan")).toHaveLength(0);
+  });
+  it("records a deleted table as deleted rows, and an inserted table as inserted rows", async () => {
+    const del = await suggest([p("x"), table()], 6, (st, d) => cmd.deleteTable(st, d));
+    expect(lines(del.accepted)).toBe("x");
+    expect(lines(del.rejected)).toBe(del.original);
+    const ins = await suggest([p("x")], 1, (st, d) => cmd.insertTable(2, 2)(st, d));
+    expect(lines(ins.accepted)).toBe(ins.edited);
+    expect(lines(ins.rejected)).toBe("x");
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
-import { App, localData, TFile, WorkspaceLeaf } from "./obsidian-stub";
+import { App, localData, Modal, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { PptxView } from "../src/presentation/pptx/pptx-view";
 import { DocxView, DocWorksSettings } from "../src/presentation/docx/docx-view";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
@@ -325,6 +325,55 @@ describe("DocxView header and footer", () => {
     const last = host.querySelector(".ProseMirror")!.appendChild(createDiv({ cls: "docx-page-last" }));
     last.createDiv({ cls: "docx-page-fill" }).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     expect(dialog).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("DocxView header and footer suggestions", () => {
+  it("keeps a header made in the header dialog when the document is saved", async () => {
+    const app = new App();
+    app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
+    const saved = vi.spyOn(app.vault, "modifyBinary");
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { pageSize: "document", author: "Ada" });
+    document.body.appendChild(view.containerEl);
+    await open(view, "hf.docx");
+    const v = view as any;
+    expect(v.docx.headerFooter("header", "default")).toBeNull();
+    const opened = vi.spyOn(Modal.prototype, "open");
+    v.headerFooterDialog();
+    const modal = opened.mock.contexts[0] as Modal;
+    const header = (modal as any).editors.get("header:default").view;
+    header.dispatch(header.state.tr.insertText("Title", 1));
+    modal.close();
+    v.editor.dispatch(v.editor.state.tr.insertText("x", 1));
+    await view.requestSave();
+    const back = await DocxDocument.load(saved.mock.calls.at(-1)![1]);
+    expect(back.headerFooter("header", "default")?.textContent).toBe("Title");
+  });
+
+  it("records header edits as suggestions while suggesting, lists them for review and accepts or rejects them", async () => {
+    const app = new App();
+    app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { pageSize: "document", author: "Ada" });
+    document.body.appendChild(view.containerEl);
+    await open(view, "hf.docx");
+    const v = view as any;
+    v.suggesting = true;
+    const opened = vi.spyOn(Modal.prototype, "open");
+    v.headerFooterDialog();
+    const modal = opened.mock.contexts[0] as Modal;
+    const header = (modal as any).editors.get("header:default").view;
+    header.dispatch(header.state.tr.insertText("Draft ", 1));
+    modal.close();
+    const root = v.docx.headerFooter("header", "default") as Element;
+    expect(root.getElementsByTagNameNS(W, "ins")[0]?.textContent).toBe("Draft ");
+    v.reviewOpen = true;
+    v.renderReview();
+    const review = view.contentEl.querySelector(".docx-review")!;
+    const card = Array.from(review.querySelectorAll(".docx-review-card")).find(c => c.textContent!.includes("Draft"))!;
+    expect(card.textContent).toContain("Header");
+    Array.from(card.querySelectorAll("button")).find(b => b.textContent === "Reject")!.click();
+    expect(v.docx.headerFooter("header", "default").getElementsByTagNameNS(W, "ins")).toHaveLength(0);
+    expect(v.docx.headerFooter("header", "default").textContent).not.toContain("Draft");
   });
 });
 

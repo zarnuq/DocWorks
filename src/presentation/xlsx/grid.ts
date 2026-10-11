@@ -10,6 +10,8 @@ import { formatValue, isDateFormat } from "../../domain/xlsx/number-format";
 import { numText } from "../../domain/xlsx/formula-evaluator";
 import { Cell, Sheet } from "../../domain/xlsx/workbook-model";
 import { Picture } from "../../domain/xlsx/drawing";
+import { fontStack } from "../../core/utils/fonts";
+import { Op, paint } from "./paint";
 
 export const HEADER_W = 46;
 export const HEADER_H = 24;
@@ -72,6 +74,13 @@ function luminance(hex: string): number {
 
 interface Quadrant {
   el: HTMLElement;
+  canvas: HTMLCanvasElement;
+  /** DOM over the canvas: selection, reference boxes, filter buttons, pictures. */
+  overlay: HTMLElement;
+  /** Pane size in CSS pixels. */
+  w: number;
+  h: number;
+  name?: string;
   rows: number[];
   cols: number[];
   /** Offset from sheet coordinates to quadrant coordinates. */
@@ -107,6 +116,8 @@ export class Grid {
   private boxCache = new Map<number, Record<string, string>>();
   /** Font properties last copied onto the editor. */
   private editorFont: string[] = [];
+  /** Obsidian's interface font for header labels (a canvas can't use CSS variables), read once. */
+  private uiFont = getComputedStyle(document.body).getPropertyValue("--font-interface").trim() || "sans-serif";
   /** Dark theme: white fills and black text on unfilled cells take the theme's colors instead. */
   dark = false;
   /** Viewport size for environments without layout (tests). */
@@ -120,9 +131,19 @@ export class Grid {
     this.scroll = this.el.createDiv({ cls: "xlsx-scroll" });
     this.spacer = this.scroll.createDiv({ cls: "xlsx-spacer" });
     this.canvas = this.scroll.createDiv({ cls: "xlsx-canvas", attr: { role: "grid" } });
-    this.quads = ["corner", "top", "left", "main"].map((q) => this.canvas.createDiv({ cls: `xlsx-quad xlsx-quad-${q}` }));
-    this.colHeads = [0, 1].map(() => this.canvas.createDiv({ cls: "xlsx-heads xlsx-colheads" }));
-    this.rowHeads = [0, 1].map(() => this.canvas.createDiv({ cls: "xlsx-heads xlsx-rowheads" }));
+    this.quads = ["corner", "top", "left", "main"].map((q) => {
+      const el = this.canvas.createDiv({ cls: `xlsx-quad xlsx-quad-${q}` });
+      el.createEl("canvas", { cls: "xlsx-paint" });
+      el.createDiv({ cls: "xlsx-overlay" });
+      return el;
+    });
+    const heads = (cls: string) => [0, 1].map(() => {
+      const el = this.canvas.createDiv({ cls: `xlsx-heads ${cls}` });
+      el.createEl("canvas", { cls: "xlsx-paint" });
+      return el;
+    });
+    this.colHeads = heads("xlsx-colheads");
+    this.rowHeads = heads("xlsx-rowheads");
     this.corner = this.canvas.createDiv({ cls: "xlsx-corner", attr: { "aria-label": "Select all" } });
     this.frozenLines = [this.canvas.createDiv({ cls: "xlsx-frozen-line is-row" }), this.canvas.createDiv({ cls: "xlsx-frozen-line" })];
     this.guide = this.canvas.createDiv({ cls: "xlsx-guide" });
@@ -331,14 +352,15 @@ export class Grid {
     const used = s.used();
     if (used) this.grow(used.r2, used.c2);
     this.grow(s.frozen.rows, s.frozen.cols);
+    // Read every layout value before writing to the DOM: a read after a write forces a full layout each frame.
     const { width, height } = this.viewport();
+    const sl = this.scroll.scrollLeft, st = this.scroll.scrollTop;
+    // Near the end: add rows / columns, like scrolling a long sheet.
+    if (st + height > HEADER_H + s.rowY(this.nRows) - 400) this.grow(this.nRows + 100, 0);
+    if (sl + width > HEADER_W + s.colX(this.nCols) - 200) this.grow(0, this.nCols + 5);
     const totalW = s.colX(this.nCols), totalH = s.rowY(this.nRows);
     this.spacer.setCssProps({ "--xlsx-w": `${HEADER_W + totalW}px`, "--xlsx-h": `${HEADER_H + totalH}px` });
     this.canvas.setCssProps({ "--xlsx-vw": `${width}px`, "--xlsx-vh": `${height}px` });
-    const sl = this.scroll.scrollLeft, st = this.scroll.scrollTop;
-    // Near the end: add rows / columns, like scrolling a long sheet.
-    if (st + height > HEADER_H + totalH - 400) this.grow(this.nRows + 100, 0);
-    if (sl + width > HEADER_W + totalW - 200) this.grow(0, this.nCols + 5);
 
     const F = s.frozen.rows, C = s.frozen.cols;
     const fw = s.colX(C), fh = s.rowY(F);
@@ -348,11 +370,23 @@ export class Grid {
     const place = (el: HTMLElement, x: number, y: number, w: number, h: number) =>
       el.setCssProps({ "--x": `${x}px`, "--y": `${y}px`, "--w": `${Math.max(0, w)}px`, "--h": `${Math.max(0, h)}px` });
 
+    const pane = (i: number, rows: number[], cols: number[], ox: number, oy: number, w: number, h: number): Quadrant => ({
+      el: this.quads[i],
+      canvas: this.quads[i].querySelector("canvas")!,
+      overlay: this.quads[i].querySelector<HTMLElement>(".xlsx-overlay")!,
+      name: ["corner", "top", "left", "main"][i],
+      rows,
+      cols,
+      ox,
+      oy,
+      w: Math.max(0, w),
+      h: Math.max(0, h),
+    });
     const quads: Quadrant[] = [
-      { el: this.quads[0], rows: frozenRows, cols: frozenCols, ox: 0, oy: 0 },
-      { el: this.quads[1], rows: frozenRows, cols, ox: -(fw + sl) + fw, oy: 0 },
-      { el: this.quads[2], rows, cols: frozenCols, ox: 0, oy: -(fh + st) + fh },
-      { el: this.quads[3], rows, cols, ox: -(fw + sl) + fw, oy: -(fh + st) + fh },
+      pane(0, frozenRows, frozenCols, 0, 0, fw, fh),
+      pane(1, frozenRows, cols, 0, 0, vw - fw, fh),
+      pane(2, rows, frozenCols, 0, 0, fw, vh - fh),
+      pane(3, rows, cols, 0, 0, vw - fw, vh - fh),
     ];
     place(this.quads[0], HEADER_W, HEADER_H, fw, fh);
     place(this.quads[1], HEADER_W + fw, HEADER_H, vw - fw, fh);
@@ -378,32 +412,40 @@ export class Grid {
     place(this.colHeads[1], HEADER_W + fw, 0, vw - fw, HEADER_H);
     place(this.rowHeads[0], 0, HEADER_H, HEADER_W, fh);
     place(this.rowHeads[1], 0, HEADER_H + fh, HEADER_W, vh - fh);
-    const head = (parent: HTMLElement, label: string, x: number, y: number, w: number, h: number, on: boolean) => {
-      const el = parent.createDiv({ cls: on ? "xlsx-head is-selected" : "xlsx-head", text: label });
-      place(el, x, y, w, h);
+    const pal = this.palette();
+    const font = `11px ${this.uiFont}`;
+    const headOps = (labels: { text: string; x: number; y: number; w: number; h: number; on: boolean }[], w: number, h: number) => {
+      const ops: Op[] = [{ kind: "rect", x: 0, y: 0, w, h, color: pal.head }];
+      for (const l of labels) {
+        if (l.on) ops.push({ kind: "rect", x: l.x, y: l.y, w: l.w, h: l.h, color: pal.headOn });
+        ops.push({ kind: "line", x1: l.x + l.w - 1, y1: l.y, x2: l.x + l.w - 1, y2: l.y + l.h, color: pal.border, width: 1 });
+        ops.push({ kind: "line", x1: l.x, y1: l.y + l.h - 1, x2: l.x + l.w, y2: l.y + l.h - 1, color: pal.border, width: 1 });
+        ops.push({ kind: "text", x: l.x, y: l.y, w: l.w, h: l.h, text: l.text, font: (l.on ? "bold " : "") + font, size: 11, color: l.on ? pal.headOnInk : pal.headInk, align: "center", valign: "center", wrap: false, underline: false, strike: false, pad: 0 });
+      }
+      return ops;
     };
-    for (const [k, list, ox] of [[0, frozenCols, 0], [1, cols, -sl - fw]] as const) {
-      const parent = this.colHeads[k];
-      parent.empty();
-      for (const c of list) head(parent, colName(c), s.colX(c) + ox, 0, s.colWidth(c), HEADER_H, c >= sel.c1 && c <= sel.c2);
+    for (const [k, list, ox, w] of [[0, frozenCols, 0, fw], [1, cols, -sl - fw, vw - fw]] as const) {
+      const ops = headOps(list.map((c) => ({ text: colName(c), x: s.colX(c) + ox, y: 0, w: s.colWidth(c), h: HEADER_H, on: c >= sel.c1 && c <= sel.c2 })), Math.max(0, w), HEADER_H);
+      this.ops.set(`colheads${k}`, ops);
+      paint(this.colHeads[k].querySelector("canvas")!, Math.max(0, w), HEADER_H, ops);
     }
-    for (const [k, list, oy] of [[0, frozenRows, 0], [1, rows, -st - fh]] as const) {
-      const parent = this.rowHeads[k];
-      parent.empty();
-      for (const r of list) head(parent, String(r + 1), 0, s.rowY(r) + oy, HEADER_W, s.rowHeight(r), r >= sel.r1 && r <= sel.r2);
+    for (const [k, list, oy, h] of [[0, frozenRows, 0, fh], [1, rows, -st - fh, vh - fh]] as const) {
+      const ops = headOps(list.map((r) => ({ text: String(r + 1), x: 0, y: s.rowY(r) + oy, w: HEADER_W, h: s.rowHeight(r), on: r >= sel.r1 && r <= sel.r2 })), HEADER_W, Math.max(0, h));
+      this.ops.set(`rowheads${k}`, ops);
+      paint(this.rowHeads[k].querySelector("canvas")!, HEADER_W, Math.max(0, h), ops);
     }
 
     // The editor / keyboard sink sits on the active cell.
     const a = this.cellBox(this.active.row, this.active.col);
-    const box = this.boxOf(a);
+    const box = this.boxOf(a, { left: sl, top: st });
     place(this.input, box.x, box.y, box.w, box.h);
     this.input.toggleClass("is-editing", !!this.edit);
     this.input.setAttribute("aria-label", `${cellName(this.active.row, this.active.col)} ${s.display(this.active.row, this.active.col).text}`);
     // While editing, the editor shows the cell's font.
     const cell = this.edit ? s.at(this.active.row, this.active.col) : undefined;
-    const font = Object.fromEntries(Object.entries(cell ? this.css(cell.style, false) : {}).filter(([k]) => /^(font|color)/.test(k)));
-    this.input.setCssProps({ ...Object.fromEntries(this.editorFont.map((k) => [k, ""])), ...font });
-    this.editorFont = Object.keys(font);
+    const editFont = Object.fromEntries(Object.entries(cell ? this.css(cell.style, false) : {}).filter(([k]) => /^(font|color)/.test(k)));
+    this.input.setCssProps({ ...Object.fromEntries(this.editorFont.map((k) => [k, ""])), ...editFont });
+    this.editorFont = Object.keys(editFont);
   }
 
   /** The rectangle (sheet coordinates) a cell occupies, merged ranges included. */
@@ -412,38 +454,56 @@ export class Grid {
   }
 
   /** Canvas position of a cell rectangle (clamped into the pane the top-left cell is in). */
-  private boxOf(r: Rect): { x: number; y: number; w: number; h: number } {
+  private boxOf(r: Rect, scroll = { left: this.scroll.scrollLeft, top: this.scroll.scrollTop }): { x: number; y: number; w: number; h: number } {
     const s = this.sheet;
-    const sl = r.c1 >= s.frozen.cols ? this.scroll.scrollLeft : 0, st = r.r1 >= s.frozen.rows ? this.scroll.scrollTop : 0;
+    const sl = r.c1 >= s.frozen.cols ? scroll.left : 0, st = r.r1 >= s.frozen.rows ? scroll.top : 0;
     return { x: HEADER_W + s.colX(r.c1) - sl, y: HEADER_H + s.rowY(r.r1) - st, w: s.colX(r.c2 + 1) - s.colX(r.c1), h: s.rowY(r.r2 + 1) - s.rowY(r.r1) };
   }
 
-  /** Draw part of the sheet into `el` without selection or editing marks (for printing). */
-  drawRange(el: HTMLElement, r: Rect): void {
+  /** Draw part of the sheet into `el` without selection or editing marks (for printing), painted at `scale`. */
+  drawRange(el: HTMLElement, r: Rect, scale = 3): void {
     const s = this.sheet;
     const rows: number[] = [], cols: number[] = [];
     for (let i = r.r1; i <= r.r2; i++) if (s.rowHeight(i) > 0) rows.push(i);
     for (let i = r.c1; i <= r.c2; i++) if (s.colWidth(i) > 0) cols.push(i);
-    this.drawQuadrant({ el, rows, cols, ox: -s.colX(r.c1), oy: -s.rowY(r.r1) }, false);
+    const canvas = el.createEl("canvas", { cls: "xlsx-paint" });
+    const overlay = el.createDiv({ cls: "xlsx-overlay" });
+    const w = s.colX(r.c2 + 1) - s.colX(r.c1), h = s.rowY(r.r2 + 1) - s.rowY(r.r1);
+    this.drawQuadrant({ el, canvas, overlay, rows, cols, ox: -s.colX(r.c1), oy: -s.rowY(r.r1), w, h }, false, scale);
   }
 
-  private drawQuadrant(q: Quadrant, chrome = true): void {
+  /** Colors the canvas can't take from CSS variables. */
+  private palette() {
+    return this.dark
+      ? { ink: "#e3e3e3", line: "#3c4043", head: "#282a2c", headInk: "#9aa0a6", headOn: "#394457", headOnInk: "#a8c7fa", border: "#5f6368" }
+      : { ink: "#000000", line: "#e1e3e1", head: "#f8f9fa", headInk: "#444746", headOn: "#d3e3fd", headOnInk: "#0b57d0", border: "#c4c7c5" };
+  }
+
+  /** Paint operations of the last frame per pane ("corner", "top", "left", "main", "colheads", "rowheads"). */
+  readonly ops = new Map<string, Op[]>();
+
+  private drawQuadrant(q: Quadrant, chrome = true, scale?: number): void {
     const s = this.sheet;
+    const pal = this.palette();
     const frag = createFragment();
     const make = (cls: string, x: number, y: number, w: number, h: number) => {
       const el = frag.createDiv({ cls });
       el.setCssProps({ "--x": `${x}px`, "--y": `${y}px`, "--w": `${Math.max(0, w)}px`, "--h": `${Math.max(0, h)}px` });
       return el;
     };
+    const ops: Op[] = [];
+    const fills: Op[] = [], borders: Op[] = [], texts: Op[] = [];
+    if (q.name) this.ops.set(q.name, ops);
     if (!q.rows.length || !q.cols.length) {
-      q.el.replaceChildren();
+      paint(q.canvas, q.w, q.h, [], scale);
+      q.overlay.replaceChildren();
       return;
     }
     const x0 = s.colX(q.cols[0]) + q.ox, x1 = s.colX(q.cols[q.cols.length - 1] + 1) + q.ox;
     const y0 = s.rowY(q.rows[0]) + q.oy, y1 = s.rowY(q.rows[q.rows.length - 1] + 1) + q.oy;
     if (s.showGrid) {
-      for (const c of q.cols) make("xlsx-vline", s.colX(c + 1) + q.ox - 1, y0, 1, y1 - y0);
-      for (const r of q.rows) make("xlsx-hline", x0, s.rowY(r + 1) + q.oy - 1, x1 - x0, 1);
+      for (const c of q.cols) ops.push({ kind: "line", x1: s.colX(c + 1) + q.ox - 1, y1: y0, x2: s.colX(c + 1) + q.ox - 1, y2: y1, color: pal.line, width: 1 });
+      for (const r of q.rows) ops.push({ kind: "line", x1: x0, y1: s.rowY(r + 1) + q.oy - 1, x2: x1, y2: s.rowY(r + 1) + q.oy - 1, color: pal.line, width: 1 });
     }
     const view: Rect = { r1: q.rows[0], c1: q.cols[0], r2: q.rows[q.rows.length - 1], c2: q.cols[q.cols.length - 1] };
     const merges = s.merges.filter((m) => m.r1 <= view.r2 && view.r1 <= m.r2 && m.c1 <= view.c2 && view.c1 <= m.c2);
@@ -457,15 +517,23 @@ export class Grid {
       if (!cell) return;
       const x = s.colX(r.c1) + q.ox, y = s.rowY(r.r1) + q.oy;
       const w = s.colX(r.c2 + 1) - s.colX(r.c1), h = s.rowY(r.r2 + 1) - s.rowY(r.r1);
-      let boxCss = this.css(cell.style, true);
-      if (this.dark && boxCss["background-color"] === "#FFFFFF") {
-        boxCss = { ...boxCss };
-        delete boxCss["background-color"];
-      }
-      if (Object.keys(boxCss).length) make("xlsx-box", x - 1, y - 1, w + 1, h + 1).setCssProps(boxCss);
-      const shown = s.display(row, col);
-      if (!shown.text && !this.host.isStale(cell)) return;
       const fmt = s.wb.styles.format(cell.style);
+      const fill = this.dark && fmt.fill === "#FFFFFF" ? null : fmt.fill;
+      if (fill) fills.push({ kind: "rect", x: x - 1, y: y - 1, w: w + 1, h: h + 1, color: fill });
+      const box = this.css(cell.style, true);
+      for (const side of ["left", "right", "top", "bottom"] as const) {
+        const m = /^(\d+)px (\w+) (#[0-9A-Fa-f]{6})/.exec(box[`border-${side}`] ?? "");
+        if (!m) continue;
+        const bx = side === "left" ? x - 1 : side === "right" ? x + w - 1 : x - 1;
+        const by = side === "top" ? y - 1 : side === "bottom" ? y + h - 1 : y - 1;
+        const vertical = side === "left" || side === "right";
+        const dash = m[2] === "dashed" ? [4, 2] : m[2] === "dotted" ? [1, 2] : undefined;
+        borders.push({ kind: "line", x1: bx, y1: by, x2: vertical ? bx : x + w, y2: vertical ? y + h : by, color: m[3], width: Number(m[1]), dash });
+      }
+      const shown = s.display(row, col);
+      const stale = this.host.isStale(cell);
+      if (stale) texts.push({ kind: "corner", x: x + w - 1, y, color: "#e37400" });
+      if (!shown.text) return;
       const isNum = typeof cell.value === "number";
       const align = fmt.hAlign !== "general" ? fmt.hAlign : isNum ? "right" : typeof cell.value === "boolean" || typeof cell.value === "object" ? "center" : "left";
       // Unwrapped left-aligned text runs on over empty cells to its right.
@@ -473,37 +541,45 @@ export class Grid {
       if (!fmt.wrap && align === "left" && !isNum && r.c1 === r.c2) {
         for (let c = col + 1; c <= view.c2 && blank(row, c); c++) tw += s.colWidth(c);
       }
-      const t = make("xlsx-cell", x, y, tw, h);
-      const props: Record<string, string> = { ...this.css(cell.style, false) };
-      props["justify-content"] = align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start";
-      props["text-align"] = align;
       // Automatic text on a filled cell stays dark in the dark theme, as on paper; dark text on no fill turns light.
-      const filled = "background-color" in boxCss;
-      if (!props.color && filled) props.color = "#000000";
-      if (this.dark && !filled && props.color && luminance(props.color) < 0.25) delete props.color;
-      if (shown.color) props.color = shown.color;
-      t.setCssProps(props);
-      t.createSpan({ text: shown.text });
-      if (fmt.wrap) t.addClass("is-wrapped");
-      if (this.host.isStale(cell)) {
-        t.addClass("is-stale");
-        t.setAttribute("title", "This result may be out of date: its formula uses a function that can't be calculated here yet.");
-      } else if (this.host.isCircular(cell)) t.setAttribute("title", "Circular reference: this formula depends on its own result.");
+      let color = fmt.color ?? (fill ? "#000000" : pal.ink);
+      if (this.dark && !fill && luminance(color) < 0.25) color = pal.ink;
+      if (shown.color) color = shown.color;
+      const px = (fmt.fontSize * 4) / 3;
+      const indent = parseFloat(this.css(cell.style, false)["padding-left"] ?? this.css(cell.style, false)["padding-right"] ?? "0") || 0;
+      texts.push({
+        kind: "text",
+        x,
+        y,
+        w: tw,
+        h,
+        text: shown.text,
+        font: `${fmt.italic ? "italic " : ""}${fmt.bold ? "bold " : ""}${px}px ${fontStack(fmt.fontName)}`,
+        size: px,
+        color,
+        align: align === "center" || align === "centerContinuous" ? "center" : align === "right" ? "right" : "left",
+        valign: fmt.vAlign === "top" ? "top" : fmt.vAlign === "center" ? "center" : "bottom",
+        wrap: fmt.wrap,
+        underline: fmt.underline,
+        strike: fmt.strike,
+        pad: indent ? indent - 3 : 0,
+      });
     };
     for (const m of merges) drawCell(m.r1, m.c1, m);
     for (const row of q.rows) for (const col of q.cols) if (!covered(row, col)) drawCell(row, col, { r1: row, c1: col, r2: row, c2: col });
+    ops.push(...fills, ...borders, ...texts);
+    paint(q.canvas, q.w, q.h, ops, scale);
 
     // Pictures float over the cells.
-    const qx0 = x0, qx1 = x1, qy0 = y0, qy1 = y1;
     for (const p of this.host.pictures?.() ?? []) {
       const px = p.x + q.ox, py = p.y + q.oy;
-      if (px > qx1 || px + p.w < qx0 || py > qy1 || py + p.h < qy0) continue;
+      if (px > x1 || px + p.w < x0 || py > y1 || py + p.h < y0) continue;
       const url = this.host.imageUrl?.(p.image);
       const el = make("xlsx-picture", px, py, p.w, p.h);
       if (url) el.createEl("img", { attr: { src: url, alt: p.alt || p.name, draggable: "false" } });
     }
     if (!chrome) {
-      q.el.replaceChildren(frag);
+      q.overlay.replaceChildren(frag);
       return;
     }
     // Filter buttons on the header row.
@@ -543,7 +619,7 @@ export class Grid {
       make("xlsx-active", s.colX(a.c1) + q.ox - 1, s.rowY(a.r1) + q.oy - 1, s.colX(a.c2 + 1) - s.colX(a.c1) + 1, s.rowY(a.r2 + 1) - s.rowY(a.r1) + 1);
       if (!this.edit) make("xlsx-handle", x + w - 4, y + h - 4, 7, 7);
     }
-    q.el.replaceChildren(frag);
+    q.overlay.replaceChildren(frag);
   }
 
   private refRect(a: { row?: number; col?: number }, b?: { row?: number; col?: number }): Rect {

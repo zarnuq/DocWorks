@@ -174,8 +174,52 @@ class Recorder {
       props.insertBefore(this.revision(out.ownerDocument, kind), w(props, "trPrChange"));
     } else if (out.localName === "tbl") {
       for (const row of Array.from(out.children).filter(c => c.localName === "tr")) row.replaceWith(this.block(row, kind));
+    } else if (out.localName === "tc") {
+      // An inserted / deleted cell (a table column): w:cellIns / w:cellDel, with its text marked as well.
+      for (const p of Array.from(out.children).filter(c => c.localName === "p")) p.replaceWith(this.block(p, kind));
+      const props = w(out, "tcPr") ?? out.insertBefore(element(out.ownerDocument, "tcPr"), out.firstChild);
+      props.insertBefore(this.revision(out.ownerDocument, kind === "ins" ? "cellIns" : "cellDel"), w(props, "tcPrChange"));
     }
     return out;
+  }
+  /** Whether `whole` holds the tokens of `parts` back to back (a paragraph split in two, or two joined). */
+  private static joined(whole: Element, parts: Element[]): boolean {
+    const a = tokens(whole), b = parts.flatMap(p => tokens(p));
+    return a.length === b.length && a.every((t, i) => tokenSame(t, b[i]));
+  }
+  /** Mark a paragraph's mark as inserted or deleted, leaving its text alone (Enter / joining paragraphs). */
+  private mark(p: Element, kind: "ins" | "del"): Element {
+    const out = copy(p);
+    const pPr = w(out, "pPr") ?? out.insertBefore(element(out.ownerDocument, "pPr"), out.firstChild);
+    const rPr = w(pPr, "rPr") ?? pPr.insertBefore(element(out.ownerDocument, "rPr"), w(pPr, "sectPr") ?? w(pPr, "pPrChange"));
+    rPr.appendChild(this.revision(out.ownerDocument, kind));
+    return out;
+  }
+  /**
+   * Paragraph splits and joins among aligned block pairs: one old paragraph against itself plus inserted ones
+   * (Enter), or old paragraphs against one new paragraph plus deleted ones (Backspace / Delete at a boundary).
+   * Returns the recorded blocks, or null when `pairs[i]` doesn't start one.
+   */
+  private splitOrJoin(pairs: [Element | null, Element | null][], i: number): { out: Element[]; used: number } | null {
+    const [a, b] = pairs[i];
+    if (!a || !b || a.localName !== "p" || b.localName !== "p") return null;
+    let n = 1;
+    while (i + n < pairs.length && !pairs[i + n][0] && pairs[i + n][1]?.localName === "p") n++;
+    if (n > 1) {
+      const parts = pairs.slice(i, i + n).map(([, x]) => x!);
+      if (!Recorder.joined(a, parts)) return null;
+      // The new paragraphs end in inserted marks; the last one keeps the original mark.
+      const last = copy(parts[n - 1]);
+      w(last, "pPr")?.replaceWith(...(w(a, "pPr") ? [copy(w(a, "pPr")!)] : []));
+      return { out: [...parts.slice(0, -1).map(x => this.mark(x, "ins")), last], used: n };
+    }
+    while (i + n < pairs.length && pairs[i + n][0]?.localName === "p" && !pairs[i + n][1]) n++;
+    if (n > 1) {
+      const olds = pairs.slice(i, i + n).map(([x]) => x!);
+      if (!Recorder.joined(b, olds)) return null;
+      return { out: [...olds.slice(0, -1).map(x => this.mark(x, "del")), copy(olds[n - 1])], used: n };
+    }
+    return null;
   }
   patch(old: Element, next: Element): Element {
     const out = copy(next);
@@ -198,10 +242,34 @@ class Recorder {
       this.properties(old, holder, out.localName);
       return out;
     }
+    if (out.localName === "tblGrid") {
+      // Column widths before the change, so a rejected column insertion / deletion gets its grid back.
+      const change = this.revision(out.ownerDocument, "tblGridChange");
+      const grid = copy(old);
+      w(grid, "tblGridChange")?.remove();
+      change.appendChild(grid);
+      w(out, "tblGridChange")?.remove();
+      out.appendChild(change);
+      return out;
+    }
     if (["body", "tbl", "tr", "tc", "sdt", "sdtContent"].includes(out.localName)) {
       const pairs = align(Array.from(old.children), Array.from(next.children), (a, b) => a.isEqualNode(b),
-        (a, b) => a.namespaceURI === b.namespaceURI && a.localName === b.localName && ["p", "tbl", "tr", "tc", "sectPr", "tblPr", "trPr", "tcPr", "sdt", "sdtContent"].includes(a.localName));
-      out.replaceChildren(...pairs.map(([a, b]) => a && b ? this.patch(a, b) : this.block((b ?? a)!, b ? "ins" : "del")));
+        (a, b) => a.namespaceURI === b.namespaceURI && a.localName === b.localName && ["p", "tbl", "tr", "tc", "sectPr", "tblPr", "tblGrid", "trPr", "tcPr", "sdt", "sdtContent"].includes(a.localName));
+      const children: Element[] = [];
+      for (let i = 0; i < pairs.length; i++) {
+        const joined = this.splitOrJoin(pairs, i);
+        if (joined) {
+          children.push(...joined.out);
+          i += joined.used - 1;
+          continue;
+        }
+        const [a, b] = pairs[i];
+        const lone = (a ?? b)!;
+        // Properties added or removed whole (a cell's first gridSpan) are a change from / to empty properties.
+        if ((!a || !b) && ["tblPr", "trPr", "tcPr"].includes(lone.localName)) children.push(this.patch(a ?? element(lone.ownerDocument, lone.localName), b ?? element(lone.ownerDocument, lone.localName)));
+        else children.push(a && b ? this.patch(a, b) : this.block(lone, b ? "ins" : "del"));
+      }
+      out.replaceChildren(...children);
     }
     return out;
   }
@@ -247,35 +315,44 @@ function retainOrigins(doc: PMNode, readOrigins: Origins, origins: Origins): PMN
 /** Map the proposed cursor past the deleted atoms which suggestions retain in the editor. */
 function cursorAt(source: PMNode, target: PMNode, pos: number, origins: Origins): number {
   const deleted = (node: PMNode) => node.type.name === "opaque" && /<(?:\w+:)?(?:del|moveFrom)\b/.test(attrsOf<XmlAttrs>(node).xml);
+  /** Paragraphs as the reader sees them: one whose mark is deleted runs on into the next. */
   const paragraphs = (doc: PMNode) => {
-    const out: { node: PMNode; pos: number }[] = [];
+    const out: { node: PMNode; pos: number }[][] = [];
+    let joining = false;
     doc.descendants((node, at) => {
       if (node.type.name !== "paragraph") return true;
       const key = attrsOf<{ key: string | null }>(node).key;
       const original = key ? origins.get(key)?.el : null;
-      if (!w(w(w(original, "pPr"), "rPr"), "del")) out.push({ node, pos: at });
+      if (joining) out[out.length - 1].push({ node, pos: at });
+      else out.push([{ node, pos: at }]);
+      joining = !!w(w(w(original, "pPr"), "rPr"), "del");
       return false;
     });
     return out;
   };
   const from = paragraphs(source), to = paragraphs(target);
-  const index = from.findIndex(p => pos > p.pos && pos < p.pos + p.node.nodeSize);
+  const index = from.findIndex(group => group.some(p => pos > p.pos && pos < p.pos + p.node.nodeSize));
   const old = from[index], next = to[index];
   if (!old || !next) return Math.min(pos, target.content.size);
   let remaining = 0;
-  old.node.forEach((child, offset) => {
-    const distance = pos - old.pos - 1 - offset;
+  for (const p of old) p.node.forEach((child, offset) => {
+    const distance = pos - p.pos - 1 - offset;
     if (distance > 0 && !deleted(child)) remaining += Math.min(child.nodeSize, distance);
   });
-  let result = next.pos + 1, done = false;
-  next.node.forEach((child, offset) => {
-    if (done) return;
-    result = next.pos + 1 + offset;
-    if (deleted(child)) { result += child.nodeSize; return; }
-    if (remaining <= child.nodeSize) { result += remaining; done = true; }
-    else { remaining -= child.nodeSize; result += child.nodeSize; }
-  });
-  return Math.min(result, target.content.size);
+  // Walk the target group's text; a position at a paragraph's end belongs to the next paragraph of the group.
+  for (const [k, p] of next.entries()) {
+    let result = p.pos + 1;
+    let done = false;
+    p.node.forEach((child, offset) => {
+      if (done) return;
+      result = p.pos + 1 + offset;
+      if (deleted(child)) { result += child.nodeSize; return; }
+      if (remaining < child.nodeSize || (remaining === child.nodeSize && k === next.length - 1)) { result += remaining; done = true; }
+      else { remaining -= child.nodeSize; result += child.nodeSize; }
+    });
+    if (done || k === next.length - 1) return Math.min(done ? result : p.pos + p.node.nodeSize - 1, target.content.size);
+  }
+  return Math.min(pos, target.content.size);
 }
 
 /** Turn the user's transaction into one undoable Word-compatible suggestion. Does not mutate the package. */

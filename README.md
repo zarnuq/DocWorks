@@ -37,7 +37,7 @@ Click **Motion** to add a slide transition or animate a selected object with app
 
 **Chart** inserts column, line, pie, doughnut or area charts with an editable data grid. Select a chart and click **Edit chart data** to change categories, series names and values; embedded workbook cells are updated too. Imported chart formatting is preserved. Externally linked workbooks and named/multi-level ranges need conversion to embedded cell ranges in Office first. Charts and SmartArt can be copied between presentations with their linked resources.
 
-**Audio/video** embeds MP4, WebM, MP3, WAV, Ogg or M4A files. Select media to choose automatic playback or looping; present mode provides playback controls. Playback depends on the codecs supported by the device.
+**Audio/video** embeds MP4, WebM, MP3, WAV, Ogg or M4A files. Media a deck links to instead of embedding plays in present mode when the file is in your vault (next to the deck, or at its relative path); web videos and files outside the vault are never loaded. Select media to choose automatic playback or looping; present mode provides playback controls. Playback depends on the codecs supported by the device.
 
 **Not yet:** editing SmartArt data, advanced chart formatting, and complete Office layout fidelity for complex floating objects and mixed section layouts.
 

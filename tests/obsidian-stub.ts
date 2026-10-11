@@ -80,12 +80,27 @@ export class Modal {
   contentEl = createDiv();
   onClose() {}
   constructor(public app: App) {}
-  open() { this.modalEl.addClass("test-modal"); this.modalEl.append(this.titleEl,this.contentEl); document.body.append(this.modalEl); }
+  open() { this.modalEl.addClass("test-modal"); this.modalEl.append(this.titleEl,this.contentEl); document.body.append(this.modalEl); (this as any).onOpen?.(); }
   close() { this.modalEl.remove(); this.onClose(); }
 }
 
 export class Setting {
-  constructor(public containerEl: HTMLElement) {}
+  settingEl: HTMLElement;
+  constructor(public containerEl: HTMLElement) {
+    this.settingEl = containerEl.createDiv({ cls: "setting-item" });
+  }
+  setName(name: string) { this.settingEl.createDiv({ cls: "setting-item-name", text: name }); return this; }
+  setDesc() { return this; }
+  setHeading() { return this; }
+  private control(cb: Fn) {
+    const c: any = { setValue: () => c, onChange: () => c, addOptions: () => c, setPlaceholder: () => c, setLimits: () => c };
+    cb(c);
+    return this;
+  }
+  addToggle(cb: Fn) { return this.control(cb); }
+  addDropdown(cb: Fn) { return this.control(cb); }
+  addText(cb: Fn) { return this.control(cb); }
+  addButton(cb: Fn) { const b: any = { setButtonText: () => b, setCta: () => b, onClick: () => b }; cb(b); return this; }
 }
 
 export class Plugin {}

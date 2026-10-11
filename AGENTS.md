@@ -41,7 +41,7 @@ Not done yet: charts (preserved), comments/notes (preserved), conditional format
 
 - Extend animation effect authoring beyond the basic presets; compound timing and motion paths are editable.
 - Improve wrapping on both sides of floating pictures and fidelity of complex mixed section layouts.
-- Expand tracked-change recording for advanced structural edits and header/footer editing.
+- Suggestions: paragraph split/join, table column insert/delete, cell merge and header/footer edits are now recorded (2026-10-10). Still open: charts formatting (next: chart-format module for type/stacking/title/legend/labels/axes/colors + renderer), mixed page sizes, both-sides picture wrap.
 - Chart data is editable; SmartArt data editing and advanced chart formatting remain open. For spreadsheets see "Not done yet" above.
 
 ## Handy dev facts

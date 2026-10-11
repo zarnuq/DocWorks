@@ -1812,11 +1812,7 @@ textarea.pptx-notes {
 .xlsx-quad,
 .xlsx-heads,
 .xlsx-corner,
-.xlsx-head,
-.xlsx-cell,
-.xlsx-box,
-.xlsx-vline,
-.xlsx-hline,
+.xlsx-paint,
 .xlsx-sel,
 .xlsx-active,
 .xlsx-handle,
@@ -1836,65 +1832,28 @@ textarea.pptx-notes {
   overflow: hidden;
 }
 
-.xlsx-vline,
-.xlsx-hline {
-  background: var(--xlsx-line, #e1e3e1);
-}
-
-.xlsx-box {
-  pointer-events: none;
-}
-
-.xlsx-cell {
-  display: flex;
-  align-items: flex-end;
-  padding: 0 3px 1px;
-  overflow: hidden;
-  white-space: pre;
-  line-height: 1.25;
-  color: var(--xlsx-ink, #000000);
-  font-family: Arial, "Liberation Sans", sans-serif;
-  font-size: 10pt;
-  pointer-events: none;
-}
-
-.xlsx-cell > span {
-  min-width: 0;
-}
-
-.xlsx-cell.is-wrapped {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.xlsx-cell.is-stale::after {
-  content: "";
-  position: absolute;
+.xlsx-paint {
+  left: 0;
   top: 0;
-  right: 0;
-  border: 4px solid transparent;
-  border-top-color: #e37400;
-  border-right-color: #e37400;
 }
 
-.xlsx-head,
+.xlsx-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+
+
+
+
+
+
 .xlsx-corner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   border-right: 1px solid var(--xlsx-line, #c4c7c5);
   border-bottom: 1px solid var(--xlsx-line, #c4c7c5);
   background: var(--xlsx-head, #f8f9fa);
-  color: var(--xlsx-head-ink, #444746);
-  font-size: 11px;
-  font-family: var(--font-interface);
 }
 
-.xlsx-head.is-selected {
-  background: var(--xlsx-head-on, #d3e3fd);
-  color: var(--xlsx-head-on-ink, #0b57d0);
-  font-weight: var(--bold-weight);
-}
 
 .xlsx-canvas.is-col-resize {
   cursor: col-resize;

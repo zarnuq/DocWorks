@@ -219,9 +219,11 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     if (shape.rot) el.style.transform = `rotate(${shape.rot}deg)`;
     const shadow = shadowCss(shape, scale);
     if (shape.media) {
-      if (opts.playMedia && !shape.media.external) {
+      // Linked (not embedded) media plays when the view resolved it to a vault file.
+      const mediaUrl = opts.playMedia ? opts.imageUrl(shape.media.path) : null;
+      if (opts.playMedia && (!shape.media.external || mediaUrl)) {
         const media = shape.media.kind === "video" ? el.createEl("video") : el.createEl("audio");
-        media.src = opts.imageUrl(shape.media.path) ?? "";
+        media.src = mediaUrl ?? "";
         media.controls = true; media.autoplay = shape.media.autoPlay; media.loop = shape.media.loop; media.preload = "metadata";
         media.addClass("pptx-media-player");
         for (const event of ["click", "pointerdown", "keydown"]) media.addEventListener(event, e => e.stopPropagation());

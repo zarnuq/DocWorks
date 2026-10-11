@@ -41,7 +41,8 @@ describe("XlsxView", () => {
     const el = view.contentEl;
     expect(Array.from(el.querySelectorAll(".xlsx-tab")).map((t) => t.textContent)).toEqual(["Data", "Totals"]);
     expect(el.querySelector(".xlsx-tab.is-active")!.textContent).toBe("Data");
-    expect(Array.from(el.querySelectorAll(".xlsx-cell")).map((c) => c.textContent)).toContain("Name");
+    const grid = (view as unknown as { grid: { ops: Map<string, { kind: string; text?: string }[]> } }).grid;
+    expect([...grid.ops.values()].flat().map((o) => o.text)).toContain("Name");
     expect(el.querySelector<HTMLInputElement>(".xlsx-name-box")!.value).toBe("A2");
     expect(el.querySelector<HTMLTextAreaElement>(".xlsx-formula-input")!.value).toBe("10");
   });

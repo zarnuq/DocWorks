@@ -1,4 +1,4 @@
-import { addMedia, MEDIA_MIME, setMediaPlayback } from "../../domain/pptx/media";
+import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from "../../domain/pptx/media";
 import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
 import { Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot } from "../../infrastructure/pptx/pptx-document";
@@ -342,7 +342,17 @@ export class PptxView extends FileView {
     }
   }
 
-  private imageUrl = (path: string) => this.imageUrls.get(path) ?? null;
+  private imageUrl = (path: string) => this.imageUrls.get(path) ?? this.linkedMediaUrl(path);
+
+  /** Vault resource URL (app://, never the network) for media the deck links to rather than embeds. */
+  private linkedMediaUrl(target: string): string | null {
+    if (!this.file || this.doc?.mediaPaths().includes(target)) return null;
+    for (const path of linkedMediaCandidates(target, this.file.path)) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) return this.app.vault.getResourcePath(file);
+    }
+    return null;
+  }
 
   // ---------------------------------------------------------------------------
   // Rendering

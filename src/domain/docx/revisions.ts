@@ -14,8 +14,8 @@ export interface Revision {
 }
 
 const W = NS.w;
-const INS = new Set(["ins", "moveTo"]);
-const DEL = new Set(["del", "moveFrom"]);
+const INS = new Set(["ins", "moveTo", "cellIns"]);
+const DEL = new Set(["del", "moveFrom", "cellDel"]);
 const PROP_CHANGES = new Set(["rPrChange", "pPrChange", "sectPrChange", "tblPrChange", "trPrChange", "tcPrChange", "tblGridChange", "tblPrExChange", "numberingChange"]);
 const RANGE_MARKS = new Set(["moveFromRangeStart", "moveFromRangeEnd", "moveToRangeStart", "moveToRangeEnd"]);
 
@@ -27,11 +27,11 @@ const textOf = (el: Element) =>
     .map((t) => t.textContent)
     .join("");
 
-/** Paragraph or row mark revisions live inside w:rPr of w:pPr, or w:trPr. */
+/** Paragraph, row or cell mark revisions live inside w:rPr of w:pPr, w:trPr or w:tcPr (w:cellIns / w:cellDel). */
 const markOwner = (el: Element) => {
   const parent = el.parentElement;
   if (parent?.localName === "rPr" && parent.parentElement?.localName === "pPr") return parent.parentElement.parentElement;
-  if (parent?.localName === "trPr") return parent.parentElement;
+  if (parent?.localName === "trPr" || (parent?.localName === "tcPr" && el.localName.startsWith("cell"))) return parent.parentElement;
   return null;
 };
 
@@ -41,7 +41,7 @@ export function revisions(root: Element): Revision[] {
     const kind = INS.has(el.localName) ? "insert" : DEL.has(el.localName) ? "delete" : PROP_CHANGES.has(el.localName) ? "format" : null;
     if (!kind) continue;
     const owner = markOwner(el);
-    const text = owner ? (owner.localName === "tr" ? "row" : "¶") : kind === "format" ? textOf(el.parentElement!.parentElement!) : textOf(el);
+    const text = owner ? (owner.localName === "tr" ? "row" : owner.localName === "tc" ? "cell" : "¶") : kind === "format" ? textOf(el.parentElement!.parentElement!) : textOf(el);
     out.push({ id: attr(el, "id"), kind, author: attr(el, "author"), date: attr(el, "date"), text });
   }
   return out;
@@ -114,6 +114,7 @@ function apply(root: Element, ids: Set<string> | undefined, accept: boolean): nu
       const removeOwner = accept ? isDel : isIns;
       if (removeOwner) {
         if (owner.localName === "p") joinNext(owner);
+        else if (owner.localName === "tc") owner.remove();
         else {
           const table = owner.parentElement;
           owner.remove();
