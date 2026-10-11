@@ -553,6 +553,17 @@ img.docx-behind,
 
 .pptx-thumb.is-active .pptx-thumb-slide {
   border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.pptx-thumb.is-active {
+  background: var(--background-modifier-active-hover);
+  border-radius: var(--radius-s);
+}
+
+.pptx-thumb.is-active .pptx-thumb-num {
+  color: var(--interactive-accent);
+  font-weight: var(--font-bold);
 }
 
 .pptx-thumb:hover:not(.is-active) .pptx-thumb-slide {
