@@ -1,3 +1,4 @@
+import { LINE_HEIGHTS } from "./line-heights";
 import { Node as PMNode } from "prosemirror-model";
 import { NS } from "../../core/utils/xml";
 import { fontStack } from "../../core/utils/fonts";
@@ -47,18 +48,12 @@ export function numberingLevel(numbering: Document | null, numId: string, ilvl: 
 
 /**
  * Word's "single" line height as a multiple of the font size. It comes from each font's own metrics, so CSS's
- * line-height: 1 draws Word text too tight (Garamond by a quarter).
+ * line-height: 1 draws Word text too tight (Garamond by a quarter). Table: scripts/make_line_heights.py.
  */
-// ponytail: hand-measured table for common fonts; generate from font files (like font-metrics.ts) if more fonts matter.
-const SINGLE_LINE: Record<string, number> = {
-  calibri: 1.22, "calibri light": 1.22, cambria: 1.17, garamond: 1.33, "times new roman": 1.15, arial: 1.15, aptos: 1.2,
-  georgia: 1.14, verdana: 1.22, "segoe ui": 1.33, tahoma: 1.21, "century gothic": 1.23, "book antiqua": 1.17,
-  "palatino linotype": 1.14, "trebuchet ms": 1.16, "courier new": 1.13,
-};
-export const singleLine = (font: string | null): number => SINGLE_LINE[font?.toLowerCase() ?? ""] ?? 1.17;
+export const singleLine = (font: string | null): number => LINE_HEIGHTS[font?.toLowerCase() ?? ""] ?? 1.17;
 
 /** CSS line-height for `lines` of Word line spacing in `font`. */
-export const lineHeight = (lines: number, font: string | null): number => Math.round(lines * singleLine(font) * 100) / 100;
+export const lineHeight = (lines: number, font: string | null): number => Math.round(lines * singleLine(font) * 10000) / 10000;
 
 export class DocxStyles {
   private styles = new Map<string, Element>();
@@ -194,12 +189,12 @@ export class DocxStyles {
       .join("; ");
   }
 
-  /** Whether a paragraph style keeps with the next paragraph / keeps its lines together. */
-  keep(styleId: string | null): { next: boolean; lines: boolean } {
+  /** Whether a paragraph style keeps with the next paragraph / keeps its lines together / has contextual spacing. */
+  keep(styleId: string | null): { next: boolean; lines: boolean; contextual: boolean } {
     const pPrs = this.chain(styleId).map((s) => w(s, "pPr"));
     const first = (local: string) => pPrs.map((p) => w(p, local)).find(Boolean) ?? null;
     const on = (el: Element | null) => !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
-    return { next: on(first("keepNext")), lines: on(first("keepLines")) };
+    return { next: on(first("keepNext")), lines: on(first("keepLines")), contextual: on(first("contextualSpacing")) };
   }
 
   /** Line spacing of a style in lines, or null for an exact height in points. */

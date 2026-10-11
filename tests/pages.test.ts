@@ -526,3 +526,60 @@ describe("printPages", () => {
     expect(pages[0].querySelector<HTMLElement>(".ProseMirror")!.style.zoom).toBe("1");
   });
 });
+
+describe("layoutPages: keeping to Word's pages", () => {
+  it("lets a page run a little long instead of starting another (squeeze), with a negative fill", () => {
+    const blocks = [block(300), para(12, 20)]; // 540 px on a 500 px page
+    expect(lay(blocks).pages).toBe(2);
+    const squeezed = layoutPages(blocks, AVAIL, GAP, { squeeze: 40 });
+    expect(squeezed.pages).toBe(1);
+    expect(squeezed.fills).toEqual([-40]);
+    // Not more than allowed.
+    expect(layoutPages(blocks, AVAIL, GAP, { squeeze: 30 }).pages).toBe(2);
+  });
+
+  it("starts a page where Word did when this page is nearly full", () => {
+    const flagged = { ...para(1, 20, 50), wordBreak: true };
+    // 420 of 500 px used: Word's break is followed though the paragraph would fit.
+    const full = layoutPages([block(420), flagged, block(20)], AVAIL, GAP);
+    expect(full.starts).toEqual([1]);
+    expect(full.fills[0]).toBe(80);
+  });
+
+  it("ignores Word's break when the page is far from full (text was deleted since)", () => {
+    const flagged = { ...para(1, 20, 50), wordBreak: true };
+    expect(layoutPages([block(150), flagged], AVAIL, GAP).starts).toEqual([]);
+  });
+
+  it("lets a paragraph broken across pages run long by the squeeze too, the gap drawn below its last line", () => {
+    const squeezed = layoutPages([block(300), para(20, 12)], AVAIL, GAP, { squeeze: 24 });
+    // 300 + 240 = 540: 16 lines fit in 500 + 24, so the break comes after line 18 (300 + 18 * 12 = 516).
+    expect(squeezed.spacers).toHaveLength(1);
+    expect(squeezed.spacers[0].pos).toBe(100 * 19);
+    expect(squeezed.spacers[0].gapAt).toBe(-16);
+    expect(squeezed.spacers[0].height).toBe(GAP - 16);
+  });
+});
+
+describe("layoutPages: no squeeze", () => {
+  it("never draws a gap above the end of a page's text when pages may not run long", () => {
+    // Only the spacing after a paragraph overflows: the break comes after it, the gap at the page's end.
+    const r = lay([block(300), para(20, 12)]);
+    expect(r.spacers.every((s) => s.gapAt === null || s.gapAt >= 0)).toBe(true);
+    expect(r.fills.every((f) => f >= 0)).toBe(true);
+  });
+});
+
+describe("layoutPages: spacing at the bottom of a page", () => {
+  it("doesn't make the page taller when only a paragraph's space after runs past it (Word drops it there)", () => {
+    // 400 + 4 lines (80) = 480 of text, then 30 px of space after: 10 px past the page.
+    const r = lay([block(400), para(4, 20, 0, 30), block(50)]);
+    expect(r.starts).toEqual([2]);
+    // The gap moves up over that spacing, so the page keeps its height.
+    expect(r.fills[0]).toBe(-10);
+  });
+
+  it("still pads a page normally when nothing runs past it", () => {
+    expect(lay([block(400), para(4, 20, 0, 10), block(50)]).fills[0]).toBe(10);
+  });
+});

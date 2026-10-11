@@ -9,6 +9,9 @@ class FakeCanvas {
     return {
       font: "",
       measureText(this: { font: string }, text: string) {
+        // A missing family resolves differently against the two availability probes.
+        if (this.font.endsWith(', monospace')) return { width: text.length * 10 };
+        if (this.font.endsWith(', serif')) return { width: text.length * 8 };
         return { width: [...text].length * 0.6 * parseFloat(/([\d.]+)px/.exec(this.font)![1]) };
       },
     };
@@ -40,6 +43,16 @@ describe("textWidthEm", () => {
 });
 
 describe("letterSpacing", () => {
+  it("preserves native glyph spacing when the requested font resolves in the browser", () => {
+    class NativeCanvas {
+      getContext() {
+        return { font: "", measureText: (text: string) => ({ width: text.length * 7 }) };
+      }
+    }
+    vi.stubGlobal("OffscreenCanvas", NativeCanvas);
+    expect(letterSpacing("AVATAR", { font: "Arial", b: true, i: true, kern: true }, 20)).toBe(0);
+  });
+
   it("spreads the width difference over every character", () => {
     vi.stubGlobal("OffscreenCanvas", FakeCanvas);
     const em = textWidthEm("Assumptions", "Calibri", true, false)!;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DocxStyles, singleLine } from "../src/domain/docx/docx-styles";
+import { DocxStyles, lineHeight, singleLine } from "../src/domain/docx/docx-styles";
 import { docxSchema as schema } from "../src/domain/docx/schema";
 import { DOMSerializer } from "prosemirror-model";
 import { readDocx } from "../src/domain/docx/docx-reader";
@@ -23,10 +23,15 @@ describe("DocxStyles.paragraphCss", () => {
 
   it("knows Word's single line height for common fonts (it depends on the font, unlike CSS line-height: 1)", () => {
     expect(singleLine("Garamond")).toBe(1.33);
-    expect(singleLine("Calibri")).toBe(1.22);
-    expect(singleLine("Times New Roman")).toBe(1.15);
+    // From the fonts' own metrics (scripts/make_line_heights.py), not rounded to two places.
+    expect(singleLine("Calibri")).toBe(1.2207);
+    expect(singleLine("Times New Roman")).toBe(1.1499);
+    expect(singleLine("Verdana")).toBe(1.2153);
+    expect(singleLine("Comic Sans MS")).toBe(1.3936);
     expect(singleLine("Some Unknown Font")).toBe(1.17);
     expect(singleLine(null)).toBe(1.17);
+    // Multiple line spacing keeps that precision: a page of lines adds up.
+    expect(lineHeight(1.15, "Calibri")).toBe(1.4038);
   });
 
   it("uses the default paragraph style when none is set", async () => {
@@ -35,7 +40,7 @@ describe("DocxStyles.paragraphCss", () => {
     expect(css).toContain("font-size: 11pt");
     expect(css).toContain("margin-bottom: 10pt");
     // 1.15 lines (276/240) of the font's single line.
-    expect(css).toContain("line-height: 1.35");
+    expect(css).toContain("line-height: 1.3455");
   });
 
   it("indents paragraphs from their style (table of contents levels)", () => {
@@ -124,8 +129,8 @@ describe("line height follows the text, not the style", () => {
 
   it("sizes the line by the paragraph mark's font (10pt Arial text in a 12pt style)", () => {
     const [css] = render(`<w:p><w:pPr>${arial10}</w:pPr><w:r>${arial10}<w:t>Text</w:t></w:r></w:p>`);
-    // 279/240 lines of Arial's single line (1.15) at 10pt, not of 12pt.
-    expect(css).toMatch(/font-size: 10pt; font-family: "Arial", "Liberation Sans", Arimo, sans-serif; line-height: 1\.34\b/);
+    // 279/240 lines of Arial's single line (1.1499) at 10pt, not of 12pt.
+    expect(css).toMatch(/font-size: 10pt; font-family: "Arial", "Liberation Sans", Arimo, sans-serif; line-height: 1\.3368\b/);
   });
 
   it("uses the text's size when every run sets it and the mark doesn't", () => {

@@ -117,6 +117,8 @@ export interface TopBlock {
   columnBreak?: boolean;
   /** Text height of a page this block's section starts (its own page size); default: the layout's. */
   avail?: number;
+  /** Word started a page at this block when it last laid the document out (w:lastRenderedPageBreak). */
+  wordBreak?: boolean;
 }
 
 /** Blank space inserted at `pos` that ends a page inside a paragraph or table cell; `gapAt` is where the drawn gap starts (once per page break). */
@@ -143,6 +145,13 @@ export interface PageLayout {
 
 /** Word keeps at least this many lines of a paragraph on each side of a page break (widow / orphan control). */
 const MIN_LINES = 2;
+/** Word's own page break is followed when the page is at least this full; emptier, the text before it was cut since. */
+const WORD_BREAK_FILL = 0.8;
+
+export interface LayoutOptions {
+  /** Px a page may run past its text height (into the bottom margin) instead of starting another page. */
+  squeeze?: number;
+}
 
 type Flow = { used: number; page: number };
 
@@ -150,16 +159,19 @@ type Flow = { used: number; page: number };
  * Lay blocks out on pages of `avail` px of text, breaking between blocks, between the lines of a paragraph, and
  * inside table rows (each cell continues at the top of the next page). `gap` is the height of a drawn page gap.
  */
-export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number): PageLayout {
+export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number, options: LayoutOptions = {}): PageLayout {
+  const squeeze = options.squeeze ?? 0;
   const out: PageLayout = { starts: [], pageNumbers: [1], fills: [], spacers: [], pages: 1 };
   // Sections with another page size start on a new page; the block starting a page sets its text height.
   let avail = blocks[0]?.avail ?? baseAvail;
   const shown = new Set<number>();
   let columnFlow: { count: number; base: number; firstPage: number } | null = null;
-  const capacity = (page: number) => columnFlow ? columnFlow.count * (avail - (page === columnFlow.firstPage ? columnFlow.base : 0)) : avail;
+  // Column pages aren't squeezed: the browser balances their columns.
+  const capacity = (page: number) => columnFlow ? columnFlow.count * (avail - (page === columnFlow.firstPage ? columnFlow.base : 0)) : avail + squeeze;
   const addSpacer = (pos: number, used: number, left: number, page: number) => {
     const drawnUsed = columnFlow ? used / columnFlow.count + (page === columnFlow.firstPage ? columnFlow.base : 0) : used;
-    const blank = Math.max(0, avail - drawnUsed);
+    // Negative on a squeezed page: the gap starts below the text that ran into the margin.
+    const blank = columnFlow || !squeeze ? Math.max(0, avail - drawnUsed) : avail - drawnUsed;
     out.spacers.push({ pos, height: blank + gap, gapAt: shown.has(page) ? null : blank, left, page });
     shown.add(page);
   };
@@ -240,8 +252,13 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number):
 
   let used = 0;
   let page = 1;
+  /** Space after the last paragraph on the page: Word drops it at a page's end, so it may run past the page. */
+  let trailing = 0;
+  /** Blank space at the end of the page: negative when it ran long (squeezed, or only by trailing spacing). */
+  const pageFill = () => (squeeze || used - avail <= trailing ? avail - used : Math.max(0, avail - used));
   const newPage = (i: number) => {
-    out.fills.push(Math.max(0, avail - used));
+    out.fills.push(pageFill());
+    trailing = 0;
     avail = blocks[i]?.avail ?? baseAvail;
     out.starts.push(i);
     out.pageNumbers.push(++page);
@@ -251,7 +268,7 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number):
     const u = b.unit;
     if (u.kind === "text") return flowText(u, used, page, b.keepLines);
     if (u.kind === "table") return flowTable(u, used, page);
-    return used > 0 && used + u.height > avail ? null : { used: used + u.height, page };
+    return used > 0 && used + u.height > avail + squeeze ? null : { used: used + u.height, page };
   };
   /**
    * A run of blocks in columns: a page holds `count` column-heights of them, drawn balanced (CSS columns), so the
@@ -306,8 +323,10 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number):
     if (i > 0 && blocks[i - 1].breakAfter) newPage(i);
     if (b.columns) {
       i = flowColumns(i) - 1;
+      trailing = 0;
       continue;
     }
+    if (b.wordBreak && used >= WORD_BREAK_FILL * avail && !(i > 0 && blocks[i - 1].breakAfter)) newPage(i);
     starts[i] = { used, page, spacers: out.spacers.length };
     let r = flow(b);
     if (!r) {
@@ -324,8 +343,10 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number):
       r = flow(b)!;
     }
     ({ used, page } = r);
+    const u = b.unit;
+    trailing = u.kind === "text" && u.lines.length ? Math.max(0, u.height - u.lines[u.lines.length - 1].bottom) : 0;
   }
-  out.fills.push(Math.max(0, avail - used));
+  out.fills.push(pageFill());
   out.pages = page;
   return out;
 }

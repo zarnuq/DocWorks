@@ -234,11 +234,11 @@ class Writer {
         this.set(tab, "pos", String(this.ctx.textWidth?.() ?? 9360));
       }
     }
-    for (const key of ["keepNext", "keepLines"] as const) {
+    for (const [key, local] of [["keepNext", "keepNext"], ["keepLines", "keepLines"], ["contextual", "contextualSpacing"]] as const) {
       if (a[key] === was[key]) continue;
-      this.drop(pPr, key);
+      this.drop(pPr, local);
       if (a[key] !== null) {
-        const el = this.upsert(pPr, key);
+        const el = this.upsert(pPr, local);
         if (!a[key]) this.set(el, "val", "0");
       }
     }

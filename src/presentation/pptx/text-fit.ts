@@ -1,5 +1,5 @@
 /*
- * Make text as wide as PowerPoint would draw it, whatever font is installed:
+ * Approximate Office text widths when the requested font is unavailable:
  * font-metrics.ts holds each Office font's advance widths, and the gap to the
  * fallback font actually used is spread over the run as letter-spacing.
  */
@@ -34,6 +34,13 @@ export function textWidthEm(text: string, font: string, b: boolean, i: boolean):
 }
 
 let canvas: { ctor: unknown; ctx: OffscreenCanvasRenderingContext2D | null } | null = null;
+let metricsRevision = 0;
+/** Font registration changes invalidate both canvas font resolution and document fit caches. */
+export function invalidateTextMetrics(): void {
+  canvas = null;
+  metricsRevision++;
+}
+export function textMetricsRevision(): number { return metricsRevision; }
 function context(): OffscreenCanvasRenderingContext2D | null {
   if (typeof OffscreenCanvas === "undefined") return null;
   if (canvas?.ctor !== OffscreenCanvas) canvas = { ctor: OffscreenCanvas, ctx: new OffscreenCanvas(1, 1).getContext("2d") };
@@ -82,6 +89,15 @@ export function letterSpacing(text: string, run: { font: string; b: boolean; i: 
   const table = widthTable(run.font, run.b, run.i);
   const ctx = table && context();
   if (!table || !ctx || !text) return null;
+  // Probe with two different generic fallbacks: equal widths mean the requested family resolved.
+  // Preserve that font's native shaping instead of overriding it with rounded reference widths.
+  const style = `${run.i ? "italic " : ""}${run.b ? "bold " : ""}72px`;
+  const family = JSON.stringify(run.font);
+  const probe = "mmmmmmmmiiiiiiiiWWWWAVATAR0123456789";
+  ctx.font = `${style} ${family}, monospace`;
+  const mono = ctx.measureText(probe).width;
+  ctx.font = `${style} ${family}, serif`;
+  if (mono === ctx.measureText(probe).width) return 0;
   ctx.font = `${run.i ? "italic " : ""}${run.b ? "bold " : ""}${sizePx}px ${fontStack(run.font)}`;
   let units = 0;
   let missing = "";

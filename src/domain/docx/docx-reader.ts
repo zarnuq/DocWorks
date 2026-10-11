@@ -72,6 +72,7 @@ export interface ParagraphProps {
   markFont: string | null;
   keepNext: boolean | null;
   keepLines: boolean | null;
+  contextual: boolean | null;
   /** Borders and shading as CSS (display only; the XML keeps the details). */
   frame: string | null;
 }
@@ -127,6 +128,7 @@ export function paragraphProps(pPr: Element | null): ParagraphProps {
     markFont: wVal(w(w(pPr, "rPr"), "rFonts"), "ascii") ?? wVal(w(w(pPr, "rPr"), "rFonts"), "hAnsi"),
     keepNext: w(pPr, "keepNext") ? isOn(w(pPr, "keepNext")) : null,
     keepLines: w(pPr, "keepLines") ? isOn(w(pPr, "keepLines")) : null,
+    contextual: w(pPr, "contextualSpacing") ? isOn(w(pPr, "contextualSpacing")) : null,
     frame: frameCss(pPr),
   };
 }
@@ -406,4 +408,16 @@ export function readDocx(body: Element, ctx: ReadContext): { doc: PMNode; origin
   const blocks = regroup(reader.blocks(body), sectPr);
   const doc = schema.nodes.doc.create({ sectPr }, blocks.length ? blocks : schema.nodes.paragraph.create());
   return { doc, origins: reader.origins };
+}
+
+/**
+ * Whether Word started a page at this paragraph or table when it last laid the document out: its
+ * w:lastRenderedPageBreak comes before any of its text.
+ */
+export function startsWordPage(el: Element): boolean {
+  for (const node of Array.from(el.getElementsByTagNameNS(NS.w, "*"))) {
+    if (node.localName === "lastRenderedPageBreak") return true;
+    if (["t", "tab", "drawing", "pict", "object", "sym", "br"].includes(node.localName)) return false;
+  }
+  return false;
 }

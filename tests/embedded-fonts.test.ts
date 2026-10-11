@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { loadEmbeddedFonts } from "../src/presentation/pptx/embedded-fonts";
+import { textMetricsRevision } from "../src/presentation/pptx/text-fit";
 
 class FakeFace {
   constructor(public family: string, public data: ArrayBuffer | Uint8Array, public desc: { weight: string; style: string }) {}
@@ -19,6 +20,7 @@ describe("loadEmbeddedFonts", () => {
   it("decodes each font, registers it under the deck's font name and style, and removes it again", async () => {
     vi.stubGlobal("FontFace", FakeFace);
     Object.defineProperty(document, "fonts", { value: fonts, configurable: true });
+    const revision = textMetricsRevision();
     const { loaded, unload } = await loadEmbeddedFonts(
       [
         { family: "Oswald", bold: false, italic: false, data: new Uint8Array([1]) },
@@ -31,8 +33,11 @@ describe("loadEmbeddedFonts", () => {
       ["Oswald", "700", "normal", [20]],
     ]);
     expect(loaded).toBe(2);
+    expect(textMetricsRevision()).toBeGreaterThan(revision);
+    const loadedRevision = textMetricsRevision();
     unload();
     expect(added).toEqual([]);
+    expect(textMetricsRevision()).toBeGreaterThan(loadedRevision);
   });
 
   it("skips a font that fails to decode and keeps the others", async () => {

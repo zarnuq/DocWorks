@@ -4,6 +4,7 @@ import { IMAGE_MIME } from "../../core/utils/images";
 import { OoxmlPackage, parseXml } from "../ooxml/ooxml-package";
 import { wVal } from "../../domain/docx/docx-reader";
 import { numberingLevel } from "../../domain/docx/docx-styles";
+import { deobfuscateFont } from "../fonts/odttf";
 
 export type ListKind = "bullet" | "ordered";
 
@@ -173,6 +174,35 @@ export class DocxDocument extends OoxmlPackage {
       const mime = IMAGE_MIME[rel.target.split(".").pop()?.toLowerCase() ?? ""];
       if (rel.type !== "image" || rel.external || !mime || !this.zip.file(rel.target)) continue;
       out.set(rel.id, `data:${mime};base64,${bytesToBase64(await this.media(rel.target))}`);
+    }
+    return out;
+  }
+
+  /** The page count Word saved (docProps/app.xml), or null; it describes the file as Word last laid it out. */
+  wordPages(): number | null {
+    const app = this.relOfType("", "extended-properties");
+    const text = (app && this.xml(app)?.getElementsByTagNameNS("*", "Pages")[0]?.textContent) ?? "";
+    const pages = Number.parseInt(text, 10);
+    return pages > 0 ? pages : null;
+  }
+
+  /** Fonts embedded in the document (word/fontTable.xml), as plain TrueType, by family and style. */
+  async embeddedFonts(): Promise<{ family: string; bold: boolean; italic: boolean; data: Uint8Array }[]> {
+    const out: { family: string; bold: boolean; italic: boolean; data: Uint8Array }[] = [];
+    const table = this.relOfType(this.mainPath, "fontTable");
+    const fonts = table ? this.xml(table)?.getElementsByTagNameNS(NS.w, "font") ?? [] : [];
+    for (const font of Array.from(fonts)) {
+      const family = font.getAttributeNS(NS.w, "name");
+      if (!family) continue;
+      for (const [tag, bold, italic] of [["embedRegular", false, false], ["embedBold", true, false], ["embedItalic", false, true], ["embedBoldItalic", true, true]] as const) {
+        const embed = font.getElementsByTagNameNS(NS.w, tag)[0];
+        const rId = embed?.getAttributeNS(NS.r, "id");
+        const path = rId && this.relTarget(table!, rId);
+        if (!path || !this.zip.file(path)) continue;
+        const key = embed.getAttributeNS(NS.w, "fontKey");
+        const data = await this.media(path);
+        out.push({ family, bold, italic, data: key ? deobfuscateFont(data, key) : data });
+      }
     }
     return out;
   }

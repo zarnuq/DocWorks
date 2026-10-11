@@ -291,6 +291,8 @@ describe("text as wide as in the document's font (when that font isn't installed
       return {
         font: "",
         measureText(this: { font: string }, text: string) {
+          if (this.font.endsWith(', monospace')) return { width: text.length * 10 };
+          if (this.font.endsWith(', serif')) return { width: text.length * 8 };
           return { width: [...text].length * 0.6 * parseFloat(/([\d.]+)px/.exec(this.font)![1]) };
         },
       };
@@ -316,6 +318,13 @@ describe("text as wide as in the document's font (when that font isn't installed
     expect([plain.from, plain.to, bold.from, bold.to]).toEqual([1, 7, 7, 12]);
     expect(parseFloat(plain.style.slice(15))).toBeCloseTo(want("Hello ", false), 3);
     expect(parseFloat(bold.style.slice(15))).toBeCloseTo(want("world", true), 3);
+  });
+
+  it("fits the text on each side of a tab on its own, leaving the tab alone (right-aligned dates)", () => {
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    const marks = [m.font.create({ font: "Calibri" }), m.size.create({ pt: 12 })];
+    const doc = s.doc.create(null, [s.paragraph.create(null, [schema.text("Lead\tMay 2025", marks)])]);
+    expect(spacing(doc).map((d) => [d.from, d.to])).toEqual([[1, 5], [6, 14]]);
   });
 
   it("uses the paragraph style's font and size for runs without their own", () => {
@@ -372,8 +381,8 @@ describe("keeping paragraphs and rows together", () => {
       ),
       null
     );
-    expect(styles.keep("Heading2")).toEqual({ next: true, lines: false });
-    expect(styles.keep(null)).toEqual({ next: false, lines: false });
+    expect(styles.keep("Heading2")).toEqual({ next: true, lines: false, contextual: false });
+    expect(styles.keep(null)).toEqual({ next: false, lines: false, contextual: false });
   });
 
   it("lets rows break across pages or not, for the whole table (Google Docs' table option)", () => {
@@ -975,5 +984,33 @@ describe("content controls and fields", () => {
     const gap = host.querySelector(".docx-page-gap")!;
     expect(gap.nextElementSibling!.textContent).toBe("two");
     view.destroy();
+  });
+});
+
+
+describe("contextual spacing", () => {
+  it("drops the space between paragraphs of the same style when they ask for it (Word's list paragraphs)", () => {
+    const p = (style: string, text: string) => schema.nodes.paragraph.create({ style, spaceAfter: 5, spaceBefore: 5, contextual: true }, schema.text(text));
+    const doc = schema.nodes.doc.create(null, [p("List", "one"), p("List", "two"), p("Body", "three")]);
+    const st = EditorState.create({ doc, plugins: docxPlugins(ctx) });
+    const style = (pos: number) => ((st.plugins.flatMap((pl) => (pl.props.decorations?.call(pl, st) as DecorationSet | undefined)?.find(pos, pos) ?? [])
+      .filter((d) => d.from === pos).map((d) => (d as unknown as { type: { attrs: { style?: string } } }).type.attrs?.style ?? "").find((s) => s.includes("margin")) ?? ""));
+    const [a, b, c] = [0, doc.child(0).nodeSize, doc.child(0).nodeSize + doc.child(1).nodeSize];
+    expect(style(a)).toContain("margin-bottom: 0");
+    expect(style(a)).toContain("margin-top: 5pt");
+    expect(style(b)).toContain("margin-top: 0");
+    expect(style(b)).toContain("margin-bottom: 5pt"); // the next paragraph has another style
+    expect(style(c)).toContain("margin-top: 5pt");
+  });
+});
+
+describe("superscript size", () => {
+  it("draws raised text inside its run's size, so it shrinks relative to it (Word: two-thirds of the run)", () => {
+    const m = schema.marks;
+    const p = schema.nodes.paragraph.create(null, schema.text("rd", [m.superscript.create(), m.size.create({ pt: 12 })]));
+    const dom = DOMSerializer.fromSchema(schema).serializeNode(p) as HTMLElement;
+    const sup = dom.querySelector("sup")!;
+    expect(sup.querySelector("[style*='font-size']")).toBeNull();
+    expect(sup.closest("[style*='font-size']")).not.toBeNull();
   });
 });

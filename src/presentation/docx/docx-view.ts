@@ -5,13 +5,14 @@ import { EditorView } from "prosemirror-view";
 import { toggleMark } from "prosemirror-commands";
 import { redo, undo } from "prosemirror-history";
 import { DocxDocument, HFType } from "../../infrastructure/docx/docx-document";
-import { Origins, readDocx } from "../../domain/docx/docx-reader";
+import { Origins, readDocx, startsWordPage } from "../../domain/docx/docx-reader";
 import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
 import { FONTS, PaperTheme, promptText, showValue, Toolbar } from "../common/toolbar";
 import { pickImage } from "../common/images";
-import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, styleRenderedParagraphs } from "./docx-editor";
+import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
+import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
 import { latexToOmml, mathSpec } from "../../domain/docx/math";
@@ -301,9 +302,28 @@ export class DocxView extends FileView {
     this.ruler.update();
     this.fitDocument();
     this.renderOutline();
+    void this.loadFonts();
+  }
+
+  /** Removes the document's embedded fonts from the page. */
+  private unloadFonts: (() => void) | null = null;
+
+  /** Load the fonts the document carries, then lay it out again with them (after opening, so that isn't held up). */
+  private async loadFonts(): Promise<void> {
+    const docx = this.docx;
+    if (!docx) return;
+    const { loaded, unload } = await loadEmbeddedFonts(await docx.embeddedFonts(), (data) => data);
+    if (this.docx !== docx) return unload(); // another file was opened meanwhile
+    this.unloadFonts = unload;
+    if (loaded && this.editor) {
+      refreshText(this.editor);
+      repaginate(this.editor);
+    }
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
+    this.unloadFonts?.();
+    this.unloadFonts = null;
     window.removeEventListener("blur", this.onWindowBlur);
     this.resizeObserver?.disconnect();
     this.closeFind();
@@ -439,15 +459,6 @@ export class DocxView extends FileView {
       this.editor?.focus();
     })());
     mode.value = this.suggesting ? "suggesting" : "editing";
-    const outline = tb.icon("list-tree", "Document outline", () => {
-      this.outlineOpen = !this.outlineOpen;
-      this.app.saveLocalStorage("doc-works-outline", this.outlineOpen ? "on" : "off");
-      this.outlineEl?.toggle(this.outlineOpen);
-      outline.toggleClass("is-active", this.outlineOpen);
-      this.renderOutline();
-      this.fitDocument();
-    });
-    outline.toggleClass("is-active", this.outlineOpen);
     const ruler = tb.icon("ruler", "Show ruler", () => {
       if (!this.ruler) return;
       const shown = this.rulerViewport?.style.display !== "none";
@@ -524,6 +535,16 @@ export class DocxView extends FileView {
     });
     action("Comment", "Comment on the selected text", () => void this.addComment());
     action("Footnote", "Insert a footnote at the cursor", () => void this.addFootnote());
+    // The side panels' toggles sit together: outline (left panel), then review (right panel).
+    const outline = tb.icon("list-tree", "Document outline", () => {
+      this.outlineOpen = !this.outlineOpen;
+      this.app.saveLocalStorage("doc-works-outline", this.outlineOpen ? "on" : "off");
+      this.outlineEl?.toggle(this.outlineOpen);
+      outline.toggleClass("is-active", this.outlineOpen);
+      this.renderOutline();
+      this.fitDocument();
+    });
+    outline.toggleClass("is-active", this.outlineOpen);
     const reviewBtn = tb.icon("message-square", "Review panel: comments, footnotes and tracked changes", () => {
       this.setReview(!this.reviewOpen);
       reviewBtn.toggleClass("is-active", this.reviewOpen);
@@ -986,6 +1007,13 @@ export class DocxView extends FileView {
       header: (page, total) => this.renderHF("header", page, total),
       footer: (page, total) => this.renderHF("footer", page, total),
       keep: (node) => this.ctx?.styles.keep(attrsOf<ParagraphAttrs>(node).style) ?? { next: false, lines: false },
+      // Word's own layout only describes the document at its own page size.
+      wordPages: () => (this.settings.pageSize === "document" ? this.docx?.wordPages() ?? null : null),
+      wordBreak: (node) => {
+        const key = (node.attrs as { key?: string | null }).key;
+        const el = key ? this.origins.get(key)?.el : null;
+        return !!el && startsWordPage(el);
+      },
     });
   }
 

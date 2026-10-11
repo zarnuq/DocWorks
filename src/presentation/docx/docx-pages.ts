@@ -21,6 +21,10 @@ export interface PagesOptions {
   footer(page: number, total: number): Node | null;
   /** The page size setting, for sections with their own page size (default: the document's). */
   pageSize?(): PageSize;
+  /** Pages Word laid the document out on (docProps/app.xml), when known and the page size is the document's. */
+  wordPages?(): number | null;
+  /** Word started a page at this block when it last laid the document out. */
+  wordBreak?(node: PMNode): boolean;
 }
 
 interface PagesState {
@@ -191,12 +195,14 @@ function measure(view: EditorView, opts: PagesOptions): TopBlock[] {
     }
     const unit = it.el ? measureUnit(view, it.node, it.pos, it.el, height, origin) : { kind: "block" as const, height, pos: it.pos };
     const breakAfter = hasPageBreak(it.node, sectionEnds);
+    // ponytail: Word treats a page break inside columns as a column break; that needs columns laid out per page, not one CSS multicol block.
     if (it.columns) return { unit, breakAfter, columns: it.columns, columnBreak: hasColumnBreak(it.node) };
-    if (it.node.type !== schema.nodes.paragraph) return { unit, breakAfter };
+    const wordBreak = opts.wordBreak?.(it.node) || undefined;
+    if (it.node.type !== schema.nodes.paragraph) return { unit, breakAfter, wordBreak };
     // The paragraph's own setting wins over its style's.
     const style = opts.keep?.(it.node) ?? { next: false, lines: false };
     const a = it.node.attrs as { keepNext: boolean | null; keepLines: boolean | null };
-    return { unit, breakAfter, keepNext: a.keepNext ?? style.next, keepLines: a.keepLines ?? style.lines };
+    return { unit, breakAfter, wordBreak, keepNext: a.keepNext ?? style.next, keepLines: a.keepLines ?? style.lines };
   });
 }
 
@@ -228,7 +234,22 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
         blocks[k].avail = st.height - Math.max(st.top, bands[0]) - Math.max(st.bottom, bands[1]);
       });
     }
-    layout = layoutPages(blocks, setup.height - bands[0] - bands[1], bands[1] + PAGE_SPACE + bands[0]);
+    const avail = setup.height - bands[0] - bands[1];
+    const gap = bands[1] + PAGE_SPACE + bands[0];
+    layout = layoutPages(blocks, avail, gap);
+    // More pages than Word made: text measured a little taller here. Let pages run into the bottom margin, as
+    // little as keeps Word's page count (at most half the bottom margin), rather than spill a line or two over.
+    const word = opts.wordPages?.();
+    if (word && layout.pages > word) {
+      const most = Math.min(bands[1] / 2, avail / 10);
+      for (const share of [0.25, 0.5, 0.75, 1]) {
+        const squeezed = layoutPages(blocks, avail, gap, { squeeze: most * share });
+        if (squeezed.pages <= word) {
+          layout = squeezed;
+          break;
+        }
+      }
+    }
   } finally {
     view.dom.classList.remove("docx-measuring");
     view.dom.style.zoom = zoom;
@@ -247,18 +268,22 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
     gap.createDiv({ cls: "docx-page-space" });
     gap.appendChild(part("docx-page-head", opts.header(page + 1, pages)));
   };
-  // Blank space that pads a page to its full height.
-  const fill = (k: number) => {
+  // Blank space that pads a page to its full height; a squeezed page (negative fill) pulls its gap up instead.
+  const fill = (k: number, gap: HTMLElement) => {
     const el = createDiv({ cls: "docx-page-fill" });
-    el.setCssProps({ "--docx-fill": `${fills[k]}px` });
+    el.setCssProps({ "--docx-fill": `${Math.max(0, fills[k])}px` });
+    if (fills[k] < 0) {
+      gap.addClass("is-squeezed");
+      gap.setCssProps({ "--docx-squeeze": `${fills[k]}px` });
+    }
     return el;
   };
   const spacer = (s: Spacer) => {
-    const el = createDiv({ cls: "docx-page-spacer", attr: { contenteditable: "false" } });
+    const el = createDiv({ cls: "docx-page-spacer", attr: { contenteditable: "false", "data-page": String(s.page) } });
     el.setCssProps(SPAN_ALL);
     el.setCssProps({ "--docx-spacer": `${s.height}px` });
     if (s.gapAt !== null) {
-      const gap = el.createDiv({ cls: "docx-page-gap docx-page-gap-float" });
+      const gap = el.createDiv({ cls: s.gapAt < 0 ? "docx-page-gap docx-page-gap-float is-squeezed" : "docx-page-gap docx-page-gap-float" });
       gap.setCssProps({ "--docx-gap-top": `${s.gapAt}px`, "--docx-gap-left": `${-s.left}px` });
       gapParts(gap, s.page);
     }
@@ -273,7 +298,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
         () => {
           const gap = createDiv({ cls: "docx-page-gap", attr: { contenteditable: "false" } });
           gap.setCssProps(SPAN_ALL);
-          gap.appendChild(fill(k));
+          gap.appendChild(fill(k, gap));
           gapParts(gap, pageNumbers[k + 1] - 1);
           return gap;
         },
@@ -285,7 +310,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
       doc.content.size,
       () => {
         const last = createDiv({ cls: "docx-page-last", attr: { contenteditable: "false" } });
-        last.appendChild(fill(fills.length - 1));
+        last.appendChild(fill(fills.length - 1, last));
         last.appendChild(part("docx-page-foot", opts.footer(pages, pages)));
         return last;
       },
@@ -372,6 +397,59 @@ function shadeNarrowPages(view: EditorView, opts: PagesOptions): void {
   });
 }
 
+/**
+ * Make every drawn page exactly its paper height. The layout works from the text flow measured without page gaps,
+ * and paragraph spacing next to a gap can come out a few px different once the gaps are in; each page's end is
+ * moved by the difference (pages are independent: a change only moves what follows it).
+ */
+function fixPageHeights(view: EditorView, opts: PagesOptions): void {
+  const setup = opts.setup();
+  if (!setup) return;
+  const doc = view.state.doc;
+  const setups = opts.pageSize ? sectionSetups(doc, setup, opts.pageSize()) : [];
+  const starts = pagesKey.getState(view.state)?.pageStarts ?? [];
+  const heightOf = (page: number) => {
+    const pos = page === 1 ? 0 : starts.find((s) => s.page === page)?.pos;
+    return pos === undefined ? setup.height : (setups[doc.resolve(Math.min(pos, doc.content.size)).index(0)] ?? setup).height;
+  };
+  const zoom = Number.parseFloat(view.dom.style.zoom) || 1;
+  const box = view.dom.getBoundingClientRect();
+  if (!box.height) return; // not laid out (hidden, or no layout engine)
+  const top = box.top;
+  const ends = Array.from(view.dom.querySelectorAll<HTMLElement>(".docx-page-space"))
+    .map((space) => ({ space, box: space.getBoundingClientRect() }))
+    .sort((a, b) => a.box.top - b.box.top);
+  let start = 0;
+  // Measure every page first: adjusting one moves the ones after it.
+  const fixes = ends.map(({ space, box }, k) => {
+    const drawn = (box.top - top) / zoom - start;
+    start = (box.bottom - top) / zoom;
+    return { gap: space.parentElement!, delta: heightOf(k + 1) - drawn };
+  });
+  for (const { gap, delta } of fixes) {
+    if (Math.abs(delta) < 0.5) continue;
+    const spacer = gap.classList.contains("docx-page-gap-float") ? gap.parentElement : null;
+    if (spacer) {
+      // A break inside a paragraph or table row: the gap floats in one spacer; every cell's spacer for that
+      // page moves, or the row keeps its height.
+      const at = Number.parseFloat(gap.style.getPropertyValue("--docx-gap-top")) || 0;
+      gap.setCssProps({ "--docx-gap-top": `${at + delta}px` });
+      gap.toggleClass("is-squeezed", at + delta < 0);
+      for (const el of Array.from(view.dom.querySelectorAll<HTMLElement>(`.docx-page-spacer[data-page="${spacer.dataset.page ?? ""}"]`))) {
+        el.setCssProps({ "--docx-spacer": `${(Number.parseFloat(el.style.getPropertyValue("--docx-spacer")) || 0) + delta}px` });
+      }
+      continue;
+    }
+    const fill = gap.querySelector<HTMLElement>(":scope > .docx-page-fill");
+    if (!fill) continue;
+    const squeeze = Number.parseFloat(gap.style.getPropertyValue("--docx-squeeze")) || 0;
+    const blank = (Number.parseFloat(fill.style.getPropertyValue("--docx-fill")) || 0) + squeeze + delta;
+    fill.setCssProps({ "--docx-fill": `${Math.max(0, blank)}px` });
+    gap.setCssProps({ "--docx-squeeze": `${Math.min(0, blank)}px` });
+    gap.toggleClass("is-squeezed", blank < 0);
+  }
+}
+
 /** Lays the document out on pages of the document's size, with headers, footers and page gaps. */
 export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
   return new Plugin<PagesState>({
@@ -396,6 +474,7 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
         const scrollTop = scroller?.scrollTop ?? 0;
         const next = pageDecorations(view, opts);
         view.dispatch(view.state.tr.setMeta(pagesKey, next).setMeta("addToHistory", false));
+        fixPageHeights(view, opts);
         shadeNarrowPages(view, opts);
         if (scroller) scroller.scrollTop = scrollTop;
         // The header / footer just drawn may be taller than the margins assumed: lay out again once with their real size.

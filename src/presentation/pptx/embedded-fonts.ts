@@ -1,4 +1,5 @@
 /** Fonts carried inside a deck, made available to the page while the deck is open. */
+import { invalidateTextMetrics } from "./text-fit";
 
 export interface EmbeddedFont {
   family: string;
@@ -28,5 +29,9 @@ export async function loadEmbeddedFonts(fonts: EmbeddedFont[], decode: (data: Ui
       console.warn(`[doc-works] could not load the embedded font ${f.family}`, err);
     }
   }
-  return { loaded: faces.length, unload: () => faces.forEach((face) => set.delete(face)) };
+  if (faces.length) invalidateTextMetrics();
+  return { loaded: faces.length, unload: () => {
+    faces.forEach((face) => set.delete(face));
+    if (faces.length) invalidateTextMetrics();
+  } };
 }

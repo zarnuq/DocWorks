@@ -200,6 +200,20 @@
   color: inherit;
 }
 
+/* Raised and lowered text: two-thirds size, a third of the line up / down, without making the line taller (as in Word). */
+.docx-editor-host .ProseMirror :is(sub, sup) {
+  line-height: 0;
+  font-size: 0.66em;
+}
+
+.docx-editor-host .ProseMirror sup {
+  vertical-align: 0.5em;
+}
+
+.docx-editor-host .ProseMirror sub {
+  vertical-align: -0.25em;
+}
+
 /* Highlights and shaded cells are light colors: keep their text dark on dark paper too. */
 .docx-editor-host .ProseMirror mark,
 .docx-editor-host .ProseMirror td[style*="background"] {
@@ -337,6 +351,7 @@
 .is-paged .docx-page-break-label {
   display: none;
 }
+
 
 /* Read-only content kept verbatim (content controls, fields, symbols). */
 .docx-raw-block {
@@ -1281,6 +1296,20 @@ textarea.pptx-notes {
 
 .docx-page-fill {
   height: var(--docx-fill, 0);
+}
+
+/* A page that runs a little long to keep Word's page count: its footer band moves up over the bottom margin. */
+.is-paged :is(.docx-page-gap, .docx-page-last).is-squeezed {
+  margin-top: var(--docx-squeeze, 0);
+}
+
+.is-paged :is(.docx-page-gap, .docx-page-last).is-squeezed .docx-page-foot {
+  background: none;
+  pointer-events: none;
+}
+
+.is-paged :is(.docx-page-gap, .docx-page-last).is-squeezed .docx-page-foot > * {
+  pointer-events: auto;
 }
 
 /* A page break inside a paragraph or table cell: blank space, with the page gap drawn across the whole page. */

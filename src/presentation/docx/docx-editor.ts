@@ -12,7 +12,7 @@ import { InputRule, inputRules } from "prosemirror-inputrules";
 import { attrsOf, docxSchema as schema, HEADING_LEVEL, Align, CellAttrs, ParagraphAttrs, TableAttrs, TableBorders, TabStop } from "../../domain/docx/schema";
 import { DocxStyles, lineHeight } from "../../domain/docx/docx-styles";
 import { fontStack } from "../../core/utils/fonts";
-import { letterSpacing, textWidthEm } from "../pptx/text-fit";
+import { letterSpacing, textWidthEm, textMetricsRevision } from "../pptx/text-fit";
 import { pageAt } from "./docx-pages";
 import { Columns, DEFAULT_SECTPR, ONE_COLUMN, regroup, sections, sectionType, withColumns, withType } from "../../domain/docx/sections";
 import { latexToOmml, ommlToLatex } from "../../domain/docx/math";
@@ -767,6 +767,12 @@ function paragraphCss(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number
   if (lines) css.push(`line-height: ${lineHeight(lines, text.font ?? styles.fontFor(a.style, tableStyle))}`);
   if (a.spaceBefore !== null) css.push(`margin-top: ${a.spaceBefore}pt`);
   if (a.spaceAfter !== null) css.push(`margin-bottom: ${a.spaceAfter}pt`);
+  // Contextual spacing: no space before / after this paragraph next to one of the same style.
+  if (a.contextual ?? styles.keep(a.style).contextual) {
+    const same = (n: PMNode | null) => n?.type === schema.nodes.paragraph && attrsOf<ParagraphAttrs>(n).style === a.style;
+    if (same($p.index() > 0 ? $p.parent.child($p.index() - 1) : null)) css.push("margin-top: 0");
+    if (same($p.parent.maybeChild($p.index() + 1))) css.push("margin-bottom: 0");
+  }
   if (a.firstLine) css.push(`text-indent: ${a.firstLine}pt`);
   if (a.rightIndent !== null) css.push(`margin-right: ${a.rightIndent}pt`);
   return css.filter(Boolean).join("; ");
@@ -798,8 +804,7 @@ function textFont(node: PMNode, a: ParagraphAttrs): { size: number | null; font:
 const fitCache = new Map<string, number | null>();
 
 /**
- * Letter-spacing that makes each run as wide as in its Word font (from font-metrics), so lines wrap where Word and
- * Google Docs wrap them even when the font isn't installed. With the real font installed it comes out ~0.
+ * Approximate each run's Word width when its font is missing. Available fonts keep their native spacing.
  */
 function fitText(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number, decos: Decoration[]): void {
   const a = attrsOf<ParagraphAttrs>(node);
@@ -808,24 +813,30 @@ function fitText(styles: DocxStyles, doc: PMNode, node: PMNode, pos: number, dec
   for (let d = $p.depth; d > 0 && !table; d--) if ($p.node(d).type === schema.nodes.table) table = attrsOf<TableAttrs>($p.node(d)).style;
   const base = { font: styles.fontFor(a.style, table), size: styles.sizeFor(a.style, table) ?? 10, ...styles.runFlags(a.style, table) };
   node.forEach((child, offset) => {
-    // ponytail: runs with tabs are left alone (a tab's width isn't a character's); they're short in practice.
-    if (!child.isText || child.text!.includes("\t")) return;
+    if (!child.isText) return;
     const mark = (type: MarkType) => child.marks.find((m) => m.type === type);
     const font = (mark(schema.marks.font)?.attrs.font as string | undefined) ?? base.font;
     if (!font) return;
     const pt = (mark(schema.marks.size)?.attrs.pt as number | undefined) ?? base.size;
     const b = !!mark(schema.marks.bold) || base.b;
     const i = !!mark(schema.marks.italic) || base.i;
-    const text = base.caps ? child.text!.toUpperCase() : child.text!;
-    const key = `${font}|${b}|${i}|${pt}|${text}`;
-    if (!fitCache.has(key)) {
-      if (fitCache.size > 20000) fitCache.clear();
-      // Kerned: Google Docs always kerns, and so does Word for new documents (w:kern in the default style).
-      fitCache.set(key, letterSpacing(text, { font, b, i, kern: true }, (pt * 96) / 72));
-    }
-    const ls = fitCache.get(key);
-    if (ls !== null && ls !== undefined && Math.abs(ls) > 0.01) {
-      decos.push(Decoration.inline(pos + 1 + offset, pos + 1 + offset + child.nodeSize, { style: `letter-spacing: ${Math.round(ls * 1000) / 1000}px` }));
+    const all = base.caps ? child.text!.toUpperCase() : child.text!;
+    // Text on each side of a tab is fitted on its own; a tab's width isn't a character's.
+    let from = 0;
+    for (const text of all.split("\t")) {
+      const at = pos + 1 + offset + from;
+      from += text.length + 1;
+      if (!text) continue;
+      const key = `${textMetricsRevision()}|${font}|${b}|${i}|${pt}|${text}`;
+      if (!fitCache.has(key)) {
+        if (fitCache.size > 20000) fitCache.clear();
+        // Kerned: Google Docs always kerns, and so does Word for new documents (w:kern in the default style).
+        fitCache.set(key, letterSpacing(text, { font, b, i, kern: true }, (pt * 96) / 72));
+      }
+      const ls = fitCache.get(key);
+      if (ls !== null && ls !== undefined && Math.abs(ls) > 0.01) {
+        decos.push(Decoration.inline(at, at + text.length, { style: `letter-spacing: ${Math.round(ls * 1000) / 1000}px` }));
+      }
     }
   });
 }
@@ -862,6 +873,12 @@ export function tabAdvance(tabs: TabStop[], current: number, followingWidth: num
 }
 
 const tabsKey = new PluginKey("docx-tab-stops");
+const refreshKey = new PluginKey("docx-refresh");
+
+/** Redraw text spacing and paragraph styles after fonts changed (embedded fonts finished loading). */
+export function refreshText(view: EditorView): void {
+  view.dispatch(view.state.tr.setMeta(refreshKey, true).setMeta("addToHistory", false));
+}
 const tabStyle = (width: number) => `display: inline-block; white-space: pre; font-size: 0; width: ${width}px`;
 function renderTabStops(view: EditorView, styles: DocxStyles): void {
   const widths: { pos: number; width: number }[] = [];
@@ -887,7 +904,23 @@ function renderTabStops(view: EditorView, styles: DocxStyles): void {
         const size = Number.parseFloat(cs.fontSize) || 16;
         const font = styles.fontFor(a.style, null) ?? "Calibri";
         const width = (text: string) => (textWidthEm(text, font, cs.fontWeight === "bold" || Number(cs.fontWeight) >= 600, cs.fontStyle === "italic") ?? text.length * 0.5) * size;
-        const advance = tabAdvance(stops, current, width(text), width(text.split(/[.,]/)[0]));
+        // The text up to the next tab as drawn (its runs' own fonts, sizes and spacing), even when it wrapped.
+        // Text nodes only: a range's rects also include each element it covers, which would count text twice.
+        const range = document.createRange();
+        range.setStartAfter(span);
+        if (elements[i]) range.setEndBefore(elements[i]);
+        else range.setEnd(paragraph, paragraph.childNodes.length);
+        let drawn = 0;
+        const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+        for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+          if (!range.intersectsNode(t)) continue;
+          const piece = document.createRange();
+          piece.selectNodeContents(t);
+          drawn += Array.from(piece.getClientRects()).reduce((sum, r) => sum + r.width, 0) / zoom;
+        }
+        const following = text && drawn > 0 ? drawn : width(text);
+        // Text that ends exactly at a stop on the margin fills the line: a pixel of slack keeps rounding from wrapping it.
+        const advance = Math.max(0, tabAdvance(stops, current, following, width(text.split(/[.,]/)[0])) - (text ? 1 : 0));
         widths.push({ pos: pos + 1 + offset + at, width: advance });
         if (Math.abs((Number.parseFloat(span.style.width) || 0) - advance) > 0.5) changed = true;
       }
@@ -1012,7 +1045,7 @@ export function docxPlugins(ctx: EditorContext, extraKeys: Record<string, Comman
       state: {
         init: (_, state) => decorations(ctx.styles, state.doc),
         apply: (tr: Transaction, old: DecorationSet) => {
-          if (tr.docChanged) return decorations(ctx.styles, tr.doc);
+          if (tr.docChanged || tr.getMeta(refreshKey)) return decorations(ctx.styles, tr.doc);
           const widths = tr.getMeta(tabsKey) as { pos: number; width: number }[] | undefined;
           if (!widths) return old;
           return old.remove(old.find().filter(d => (d.spec as { tabStop?: boolean }).tabStop)).add(tr.doc,

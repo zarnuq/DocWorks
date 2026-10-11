@@ -50,6 +50,8 @@ export interface ParagraphAttrs {
   /** Keep with next / keep lines together; null = from the style. */
   keepNext: boolean | null;
   keepLines: boolean | null;
+  /** Contextual spacing: no space before / after next to a paragraph of the same style; null = from the style. */
+  contextual: boolean | null;
   /** Borders and shading as CSS (display only). */
   frame: string | null;
 }
@@ -148,6 +150,7 @@ export const docxSchema = new Schema({
         sectPr: { default: null },
         keepNext: { default: null },
         keepLines: { default: null },
+        contextual: { default: null },
         frame: { default: null },
       },
       parseDOM: [
@@ -349,6 +352,14 @@ export const docxSchema = new Schema({
       parseDOM: [{ tag: "s" }, { tag: "strike" }, { tag: "del" }],
       toDOM: () => ["s", 0],
     },
+    font: {
+      attrs: { font: {} },
+      toDOM: (mark) => ["span", { style: `font-family: ${fontStack(mark.attrs.font as string)}` }, 0],
+    },
+    size: {
+      attrs: { pt: {} },
+      toDOM: (mark) => ["span", { style: `font-size: ${mark.attrs.pt}pt` }, 0],
+    },
     subscript: {
       excludes: "superscript",
       parseDOM: [{ tag: "sub" }],
@@ -358,14 +369,6 @@ export const docxSchema = new Schema({
       excludes: "subscript",
       parseDOM: [{ tag: "sup" }],
       toDOM: () => ["sup", 0],
-    },
-    font: {
-      attrs: { font: {} },
-      toDOM: (mark) => ["span", { style: `font-family: ${fontStack(mark.attrs.font as string)}` }, 0],
-    },
-    size: {
-      attrs: { pt: {} },
-      toDOM: (mark) => ["span", { style: `font-size: ${mark.attrs.pt}pt` }, 0],
     },
     color: {
       attrs: { color: {} },
