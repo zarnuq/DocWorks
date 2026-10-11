@@ -75,6 +75,8 @@ export interface FixtureOptions {
   drawing?: string;
   drawingRels?: [string, string][];
   media?: Record<string, Uint8Array>;
+  /** Extra XML parts (chart parts...), by zip path. */
+  parts?: Record<string, string>;
 }
 
 export async function xlsx(o: FixtureOptions = {}): Promise<Uint8Array> {
@@ -103,7 +105,8 @@ export async function xlsx(o: FixtureOptions = {}): Promise<Uint8Array> {
   sheets.forEach((xml, i) => put(`xl/worksheets/sheet${i + 1}.xml`, xml));
   put("xl/worksheets/_rels/sheet1.xml.rels", rels([["drawing", "../drawings/drawing1.xml"]]));
   put("xl/drawings/drawing1.xml", o.drawing ?? DRAWING);
-  if (o.drawingRels) put("xl/drawings/_rels/drawing1.xml.rels", rels(o.drawingRels.map(([, target]) => ["image", target])));
+  if (o.drawingRels) put("xl/drawings/_rels/drawing1.xml.rels", rels(o.drawingRels.map(([, target]) => [target.includes("charts/") ? "chart" : "image", target])));
+  for (const [path, xml] of Object.entries(o.parts ?? {})) put(path, xml);
   for (const [path, bytes] of Object.entries(o.media ?? {})) z.file(path, bytes);
   put("xl/sharedStrings.xml", o.strings ?? STRINGS);
   put("xl/styles.xml", o.styles ?? STYLES);

@@ -5,6 +5,10 @@ export const NS_S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const SHEET_CT = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 const STRINGS_CT = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml";
+const DRAWING_CT = "application/vnd.openxmlformats-officedocument.drawing+xml";
+const CHART_CT = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+const XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 
 export interface SheetRef {
   name: string;
@@ -86,6 +90,29 @@ export class XlsxWorkbook extends OoxmlPackage {
     this.removeRel(this.workbookPath, sheet.rId);
     this.removePart(sheet.path);
     this.touch(this.workbookPath);
+  }
+
+  /** The sheet's drawing part and the sheet's relationship to it, created if missing. */
+  ensureDrawing(sheetPath: string): { path: string; rId: string } {
+    const rel = this.rels(sheetPath).find((r) => r.type === "drawing" && !r.external);
+    if (rel) return { path: rel.target, rId: rel.id };
+    const path = this.uniquePath("xl/drawings/drawing", ".xml");
+    this.putXml(path, parseXml(`<xdr:wsDr xmlns:xdr="${XDR}" xmlns:a="${A}"/>`)!, DRAWING_CT);
+    return { path, rId: this.addRel(sheetPath, "drawing", path) };
+  }
+
+  /** Add a chart part linked from `drawingPath`; returns its path and the drawing's relationship id. */
+  addChartPart(drawingPath: string, xml: Document): { path: string; rId: string } {
+    const path = this.uniquePath("xl/charts/chart", ".xml");
+    this.putXml(path, xml, CHART_CT);
+    return { path, rId: this.addRel(drawingPath, "chart", path) };
+  }
+
+  /** Remove a chart part and the drawing's relationship to it. */
+  removeChartPart(drawingPath: string, rId: string): void {
+    const target = this.relTarget(drawingPath, rId);
+    this.removeRel(drawingPath, rId);
+    if (target) this.removePart(target);
   }
 
   xmlPaths(): string[] {

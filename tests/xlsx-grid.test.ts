@@ -229,3 +229,17 @@ describe("grid pictures", () => {
     expect(imgs[0].alt).toBe("logo");
   });
 });
+
+describe("charts in the grid", () => {
+  it("opens a chart's menu once the click is over (opening it on press lets the release close it)", async () => {
+    const { grid, host } = await mount();
+    const chartMenu = vi.fn();
+    Object.assign(host, { charts: () => [{ key: "xl/charts/chart1.xml", x: 10, y: 10, w: 100, h: 80, draw: (el: HTMLElement) => el.createDiv({ cls: "svg-stub" }) }], chartMenu });
+    grid.render();
+    const el = grid.el.querySelector<HTMLElement>(".xlsx-chart .svg-stub")!;
+    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    expect(chartMenu).not.toHaveBeenCalled();
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    expect(chartMenu).toHaveBeenCalledWith("xl/charts/chart1.xml", expect.anything());
+  });
+});

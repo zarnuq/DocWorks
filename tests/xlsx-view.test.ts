@@ -136,3 +136,68 @@ describe("XlsxView lifecycle", () => {
     expect(on.mock.calls.filter(([name]) => name === "modify")).toHaveLength(1);
   });
 });
+
+describe("XlsxView conditional formatting and dropdowns", () => {
+  const S_ = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  async function mountWith(after: string) {
+    const { sheetXml } = await import("./xlsx-fixtures");
+    const app = new App();
+    const bytes = await xlsx({ sheets: [sheetXml(`<row r="1"><c r="A1"><v>5</v></c><c r="B1" t="inlineStr"><is><t>Yes</t></is></c></row><row r="2"><c r="A2"><v>1</v></c></row>`, { before: "", after })], names: ["Data"] });
+    app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const saved: ArrayBuffer[] = [];
+    app.vault.modifyBinary = async (_f, data) => void saved.push(data);
+    const view = new XlsxView(new WorkspaceLeaf(app) as unknown as RealLeaf);
+    document.body.appendChild(view.containerEl);
+    const file = new TFile("rules.xlsx") as unknown as RealTFile;
+    view.file = file;
+    await view.onLoadFile(file);
+    const grid = (view as any).grid;
+    const ops = () => [...grid.ops.values()].flat() as { kind: string; color?: string; text?: string }[];
+    return { view, file, saved, grid, ops };
+  }
+
+  it("paints conditional fills, shows dropdown buttons and refuses items not on the list", async () => {
+    const { view, grid, ops } = await mountWith(
+      `<conditionalFormatting sqref="A1:A2"><cfRule type="colorScale" priority="1"><colorScale><cfvo type="min"/><cfvo type="max"/><color rgb="FFFFFFFF"/><color rgb="FF57BB8A"/></colorScale></cfRule></conditionalFormatting>` +
+        `<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="B1:B5"><formula1>"Yes,No"</formula1></dataValidation></dataValidations>`
+    );
+    expect(ops().some((o) => o.kind === "rect" && o.color === "#57BB8A")).toBe(true);
+    grid.render();
+    expect(view.contentEl.querySelectorAll(".xlsx-dropdown-btn").length).toBeGreaterThanOrEqual(5);
+    const v = view as any;
+    expect(v.commit(1, 1, "Maybe")).toBe(false);
+    expect(v.sheet.at(1, 1)).toBeUndefined();
+    expect(v.commit(1, 1, "no")).toBe(true);
+    expect(v.sheet.at(1, 1).value).toBe("no");
+  });
+
+  it("adds a conditional format rule and a dropdown from the dialogs, and saves them", async () => {
+    const { view, file, saved, ops } = await mountWith("");
+    const v = view as any;
+    v.grid.select({ row: 0, col: 0 }, { row: 1, col: 0 });
+    v.conditionalDialog();
+    let modal = document.querySelector(".xlsx-rules-modal") as HTMLElement;
+    const set = (label: string, value: string) => {
+      const el = modal.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`)!;
+      el.value = value;
+      el.dispatchEvent(new Event("change"));
+    };
+    set("Condition", "cellIs:greaterThan");
+    set("Value or formula", "3");
+    Array.from(modal.querySelectorAll("button")).find((b) => b.textContent === "Add rule")!.click();
+    expect(modal.textContent).toContain("Greater than 3");
+    v.grid.render();
+    expect(ops().some((o) => o.kind === "rect" && o.color === "#B7E1CD")).toBe(true);
+    modal.remove();
+    v.grid.select({ row: 0, col: 2 }, { row: 3, col: 2 });
+    v.validationDialog();
+    modal = document.querySelector(".xlsx-rules-modal") as HTMLElement;
+    set("Items", "Low, High");
+    Array.from(modal.querySelectorAll("button")).find((b) => b.textContent === "Done")!.click();
+    expect(v.sheet.doc.getElementsByTagNameNS(S_, "dataValidation")[0].getAttribute("sqref")).toBe("C1:C4");
+    await view.onUnloadFile(file);
+    const back = await reopen(saved.at(-1)!);
+    expect(back.sheets[0].doc.getElementsByTagNameNS(S_, "cfRule")).toHaveLength(1);
+    expect(back.sheets[0].doc.getElementsByTagNameNS(S_, "formula1")[1]?.textContent ?? back.sheets[0].doc.getElementsByTagNameNS(S_, "formula1")[0].textContent).toContain("Low,High");
+  });
+});

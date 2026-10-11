@@ -35,7 +35,8 @@ manifest.json, package.json, package-lock.json and versions.json.
 ## Spreadsheets (.xlsx), from plan.md
 
 Built 2026-10-10: plan phases 0–4 plus pictures and PDF export from phase 5 (see CLAUDE.md layout). Checked against the owner's real Google Sheets exports in `~/notes/doc-works-test/*.xlsx` (byte-identical no-op saves, cached formula results reproduced) and a LibreOffice-made fixture; driven live with ydotool.
-Not done yet: charts (preserved), comments/notes (preserved), conditional formatting and data validation display/editing (preserved), print settings, sheet protection enforcement, structured table references and dynamic arrays (shown from cache, marked stale after input changes), zoom.
+Done 2026-10-11: conditional formatting (`domain/xlsx/conditional.ts`, drawn per cell, rules dialog), data validation (`validation.ts`: dropdown arrows + menu, refuse / flag bad input, dialog), charts (`charts.ts`: drawn from live cell values with the slide chart renderer, insert from selection, chart editor shared with slides in `presentation/common/chart-form.ts`, delete). Dialog contents are plain DOM in `presentation/xlsx/rule-forms.ts`.
+Not done yet: comments/notes (preserved), icon sets and time-period rules (preserved, not drawn), dragging / resizing charts, print settings, sheet protection enforcement, structured table references and dynamic arrays (shown from cache, marked stale after input changes), zoom.
 
 ## Open ideas (not started)
 

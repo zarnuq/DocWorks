@@ -120,6 +120,13 @@ describe("chart format", () => {
     expect(points).toEqual(["0", "1", "2"]);
   });
 
+  it("reads slice colours of a pie whose file has no cached values (Google's export)", () => {
+    const xml = new DOMParser().parseFromString(
+      `<c:chartSpace xmlns:c="${C}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:pieChart><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:dPt><c:idx val="0"/><c:spPr><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></c:spPr></c:dPt><c:dPt><c:idx val="1"/><c:spPr><a:solidFill><a:schemeClr val="accent4"/></a:solidFill></c:spPr></c:dPt><c:val><c:numRef><c:f>A!$A$1:$A$3</c:f><c:numCache/></c:numRef></c:val></c:ser></c:pieChart></c:plotArea></c:chart></c:chartSpace>`,
+      "application/xml");
+    expect(readChartFormat(xml, { scheme: { accent1: "#4285F4", accent4: "#34A853" }, map: {} }).colors).toEqual(["#4285F4", "#34A853"]);
+  });
+
   it("reads Office-style formatting: rich title, right legend, series labels and theme colours", () => {
     const xml = new DOMParser().parseFromString(
       `<c:chartSpace xmlns:c="${C}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Q1 </a:t></a:r><a:r><a:t>results</a:t></a:r></a:p></c:rich></c:tx></c:title><c:plotArea><c:barChart><c:barDir val="bar"/><c:grouping val="percentStacked"/><c:ser><c:idx val="0"/><c:order val="0"/><c:spPr><a:solidFill><a:schemeClr val="accent2"/></a:solidFill></c:spPr><c:dLbls><c:showVal val="1"/></c:dLbls><c:val><c:numRef><c:numCache><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="5"/><c:axId val="6"/></c:barChart><c:catAx><c:axId val="5"/><c:scaling><c:orientation val="maxMin"/></c:scaling><c:delete/></c:catAx><c:valAx><c:axId val="6"/><c:scaling/></c:valAx></c:plotArea><c:legend><c:legendPos val="r"/></c:legend></c:chart></c:chartSpace>`,
@@ -179,6 +186,20 @@ describe("chart rendering", () => {
     expect(host.querySelector("rect.chart-mark")!.getAttribute("fill")).toBe("#FF0000");
     const pie = draw({ kind: "pie", labels: true }, { categories: ["A", "B"], series: [{ name: "S", values: [1, 3] }] }, "pieChart");
     expect(texts(pie, ".chart-label")).toEqual(["25%", "75%"]);
+  });
+
+  it("shortens category labels that would run into each other, and thins them out when crowded", () => {
+    const long = { categories: ["Password Cracking", "Network Traffic Analysis", "Enumeration & Exploitation"], series: [{ name: "S", values: [1, 2, 3] }] };
+    const host = draw({ legend: "none" }, long);
+    const labels = Array.from(host.querySelectorAll("text")).map((t) => t.textContent!).filter((t) => /Pass|Netw|Enum/.test(t));
+    expect(labels).toHaveLength(3);
+    // About 120 points per category at 9 pt: room for 24 characters or so.
+    for (const l of labels) expect(l.length).toBeLessThanOrEqual(26);
+    expect(labels.some((l) => l.endsWith("…"))).toBe(true);
+    const many = { categories: Array.from({ length: 60 }, (_, i) => `Item ${i + 1}`), series: [{ name: "S", values: Array.from({ length: 60 }, (_, i) => i) }] };
+    const crowded = Array.from(draw({ legend: "none" }, many).querySelectorAll("text")).map((t) => t.textContent!).filter((t) => t.startsWith("Item"));
+    expect(crowded.length).toBeLessThan(60);
+    expect(crowded[0]).toBe("Item 1");
   });
 
   it("picks round axis steps", () => {

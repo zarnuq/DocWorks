@@ -12,9 +12,10 @@ const element = (doc: Document, name: string) => doc.createElementNS(NS.w, `w:${
 
 /** Align only the changed span. Unchanged prefixes/suffixes also bound work on long documents. */
 function align<T>(a: T[], b: T[], same: (a: T, b: T) => boolean, compatible: (a: T, b: T) => boolean): [T | null, T | null][] {
+  // The common end first: a letter typed (or deleted) before the same letter then counts as the edit, where the cursor is.
   let start = 0, end = 0;
-  while (start < Math.min(a.length, b.length) && same(a[start], b[start])) start++;
-  while (end < Math.min(a.length, b.length) - start && same(a[a.length - end - 1], b[b.length - end - 1])) end++;
+  while (end < Math.min(a.length, b.length) && same(a[a.length - end - 1], b[b.length - end - 1])) end++;
+  while (start < Math.min(a.length, b.length) - end && same(a[start], b[start])) start++;
   const left = a.slice(start, a.length - end), right = b.slice(start, b.length - end);
   const out: [T | null, T | null][] = a.slice(0, start).map((v, i) => [v, b[i]]);
   // Avoid quadratic allocations on unusually large pasted ranges; preserve their exact before/after versions.
@@ -33,7 +34,12 @@ function align<T>(a: T[], b: T[], same: (a: T, b: T) => boolean, compatible: (a:
     let i = 0, j = 0;
     while (i < left.length || j < right.length) {
       const at = i * width + j;
-      if (i < left.length && j < right.length && costs[at] === (same(left[i], right[j]) ? 0 : compatible(left[i], right[j]) ? 1 : 3) + costs[at + width + 1]) out.push([left[i++], right[j++]]);
+      // An equal pair that could as well come after an insertion or deletion (a letter typed or deleted before the
+      // same letter) goes after it: the edit sits where the cursor was, next to what was typed before.
+      const equal = i < left.length && j < right.length && same(left[i], right[j]);
+      if (equal && j < right.length && costs[at] === 1 + costs[at + 1]) out.push([null, right[j++]]);
+      else if (equal && costs[at] === 1 + costs[at + width]) out.push([left[i++], null]);
+      else if (i < left.length && j < right.length && costs[at] === (same(left[i], right[j]) ? 0 : compatible(left[i], right[j]) ? 1 : 3) + costs[at + width + 1]) out.push([left[i++], right[j++]]);
       else if (i < left.length && costs[at] === 1 + costs[at + width]) out.push([left[i++], null]);
       else out.push([null, right[j++]]);
     }
@@ -92,8 +98,32 @@ class Recorder {
     props.appendChild(change);
     this.formatChanges.set(signature, change);
   }
+  /** Whether this author's insertion / deletion sits at pair `p` (for keeping one edit together). */
+  private mine(p: [Token | null, Token | null] | undefined, kind: "ins" | "del"): boolean {
+    if (!p) return false;
+    const token = p[1] ?? p[0]!;
+    if (kind === "del") return token.el.localName === "del" && wVal(token.el, "author") === this.author;
+    return !!p[1] && token.wrappers.some((w) => w.localName === "ins" && wVal(w, "author") === this.author);
+  }
   private inline(old: Element, next: Element): void {
     let pairs = align(tokens(old), tokens(next), tokenSame, (a, b) => tokenKey(a) === tokenKey(b));
+    // A letter added or removed beside the same letter ("ll") could be either one: take the one next to this
+    // author's edit there, so typing or deleting a key at a time stays one suggestion.
+    const equal = (p: [Token | null, Token | null] | undefined) => !!p && !!p[0] && !!p[1] && tokenSame(p[0], p[1]);
+    for (let k = 0; k < pairs.length; k++) {
+      const [a, b] = pairs[k];
+      const edit = a && !b ? a : b && !a ? b : null;
+      if (!edit || edit.text === null) continue;
+      const kind = a ? "del" : "ins";
+      let lo = k, hi = k;
+      while (equal(pairs[lo - 1]) && pairs[lo - 1][0]!.text === edit.text) lo--;
+      while (equal(pairs[hi + 1]) && pairs[hi + 1][0]!.text === edit.text) hi++;
+      if (lo === hi || this.mine(pairs[k - 1], kind) || this.mine(pairs[k + 1], kind)) continue;
+      const to = this.mine(pairs[hi + 1], kind) ? hi : this.mine(pairs[lo - 1], kind) ? lo : k;
+      if (to === k) continue;
+      const [moved] = pairs.splice(k, 1);
+      pairs.splice(to, 0, moved);
+    }
     // A replaced word is one deletion plus one insertion; shared letters within it are not separate edits.
     const first = pairs.findIndex(([a, b]) => !a || !b);
     let last = pairs.length - 1;
@@ -110,7 +140,18 @@ class Recorder {
     const children: Element[] = [];
     let lastSignature = "", target: Element | null = null;
     let active: { kind: string; el: Element } | null = null;
-    for (const [a, b] of pairs) {
+    /** This author's insertion / deletion right beside pair `i`, to extend instead of starting another (typing goes a key at a time). */
+    const neighbour = (i: number, kind: string): Element | null => {
+      for (const j of [i - 1, i + 1]) {
+        const p = pairs[j];
+        if (!p) continue;
+        const token = p[1] ?? p[0]!;
+        const el = kind === "del" ? (token.el.localName === "del" ? token.el : null) : p[1] ? token.wrappers.find((w) => w.localName === "ins") ?? null : null;
+        if (el && wVal(el, "author") === this.author) return el;
+      }
+      return null;
+    };
+    for (const [index, [a, b]] of pairs.entries()) {
       const token = b ?? a!;
       let run = copy(token.el);
       const wrappers = token.wrappers.map(copy);
@@ -127,7 +168,10 @@ class Recorder {
           if (run.localName === "del") children.push(run);
           continue;
         }
-        if (!active || active.kind !== kind) active = { kind, el: this.revision(next.ownerDocument, kind) };
+        if (!active || active.kind !== kind) {
+          const near = neighbour(index, kind);
+          active = { kind, el: near ? (near.cloneNode(false) as Element) : this.revision(next.ownerDocument, kind) };
+        }
         for (let i = wrappers.length - 1; i >= 0; i--) if (wrappers[i].localName === "ins") wrappers.splice(i, 1);
         wrappers.unshift(active.el.cloneNode(false) as Element);
         if (!b) for (const t of Array.from(run.getElementsByTagNameNS(NS.w, "t"))) {
@@ -155,6 +199,14 @@ class Recorder {
     }
     for (const el of Array.from(next.children)) if (el.localName !== "pPr") el.remove();
     next.append(...children);
+    // One insertion / deletion that grew a key at a time is one element.
+    for (const el of Array.from(next.children)) {
+      const prev = el.previousElementSibling;
+      if (prev && (el.localName === "ins" || el.localName === "del") && prev.localName === el.localName && wVal(prev, "id") === wVal(el, "id")) {
+        prev.append(...Array.from(el.childNodes));
+        el.remove();
+      }
+    }
   }
   private block(el: Element, kind: "ins" | "del"): Element {
     const out = copy(el);
@@ -313,7 +365,16 @@ function retainOrigins(doc: PMNode, readOrigins: Origins, origins: Origins): PMN
 }
 
 /** Map the proposed cursor past the deleted atoms which suggestions retain in the editor. */
-function cursorAt(source: PMNode, target: PMNode, pos: number, origins: Origins): number {
+function cursorAt(source: PMNode, target: PMNode, pos: number, origins: Origins, forward = false): number {
+  const at = cursorBefore(source, target, pos, origins);
+  if (!forward) return at;
+  // After the Delete key the cursor moves past what it just struck through, so the next Delete reaches new text.
+  let out = at;
+  for (let node = target.resolve(out).nodeAfter; node && node.type.name === "opaque" && /<(?:\w+:)?del\b/.test(attrsOf<XmlAttrs>(node).xml); node = target.resolve(out).nodeAfter) out += node.nodeSize;
+  return out;
+}
+
+function cursorBefore(source: PMNode, target: PMNode, pos: number, origins: Origins): number {
   const deleted = (node: PMNode) => node.type.name === "opaque" && /<(?:\w+:)?(?:del|moveFrom)\b/.test(attrsOf<XmlAttrs>(node).xml);
   /** Paragraphs as the reader sees them: one whose mark is deleted runs on into the next. */
   const paragraphs = (doc: PMNode) => {
@@ -356,7 +417,7 @@ function cursorAt(source: PMNode, target: PMNode, pos: number, origins: Origins)
 }
 
 /** Turn the user's transaction into one undoable Word-compatible suggestion. Does not mutate the package. */
-export function suggestTransaction(tr: Transaction, origins: Origins, ctx: WriteContext, readContext: ReadContext, author: string): Transaction {
+export function suggestTransaction(tr: Transaction, origins: Origins, ctx: WriteContext, readContext: ReadContext, author: string, opts: { forward?: boolean } = {}): Transaction {
   if (!tr.docChanged || isHistoryTransaction(tr) || tr.getMeta("addToHistory") === false || tr.getMeta("suggestionsRecorded")) return tr;
   const owner = document.implementation.createDocument(NS.w, "w:body");
   const before = owner.documentElement;
@@ -367,7 +428,7 @@ export function suggestTransaction(tr: Transaction, origins: Origins, ctx: Write
   const read = readDocx(recorded, readContext);
   const suggested = retainOrigins(read.doc, read.origins, origins);
   const selection = tr.selection;
-  const from = cursorAt(tr.doc, suggested, selection.from, origins), to = cursorAt(tr.doc, suggested, selection.to, origins);
+  const from = cursorAt(tr.doc, suggested, selection.from, origins, opts.forward && selection.empty), to = selection.empty ? from : cursorAt(tr.doc, suggested, selection.to, origins);
   tr.replaceWith(0, tr.doc.content.size, suggested.content);
   tr.setDocAttribute("sectPr", suggested.attrs.sectPr);
   tr.setSelection(TextSelection.near(tr.doc.resolve(from)));

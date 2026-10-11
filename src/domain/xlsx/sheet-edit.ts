@@ -17,7 +17,7 @@ const XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing
 const C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
 /** CT_Worksheet child order, for inserting new elements where Excel expects them. */
-const ORDER = [
+export const WORKSHEET_ORDER = [
   "sheetPr", "dimension", "sheetViews", "sheetFormatPr", "cols", "sheetData", "sheetCalcPr", "sheetProtection", "protectedRanges",
   "scenarios", "autoFilter", "sortState", "dataConsolidate", "customSheetViews", "mergeCells", "phoneticPr", "conditionalFormatting",
   "dataValidations", "hyperlinks", "printOptions", "pageMargins", "pageSetup", "headerFooter", "rowBreaks", "colBreaks",
@@ -25,13 +25,13 @@ const ORDER = [
   "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst",
 ];
 
-function child(sheet: Sheet, tag: string, create = false): Element | null {
+export function child(sheet: Sheet, tag: string, create = false): Element | null {
   const root = sheet.doc.documentElement;
   let el = sheet.first(root, tag);
   if (el || !create) return el;
   el = sheet.doc.createElementNS(NS_S, tag);
-  const rank = ORDER.indexOf(tag);
-  const next = Array.from(root.children).find((c) => ORDER.indexOf(c.localName) > rank) ?? null;
+  const rank = WORKSHEET_ORDER.indexOf(tag);
+  const next = Array.from(root.children).find((c) => WORKSHEET_ORDER.indexOf(c.localName) > rank) ?? null;
   root.insertBefore(el, next);
   return el;
 }

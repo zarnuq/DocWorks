@@ -68,6 +68,19 @@ export interface Format {
   numFmt: string;
 }
 
+/** What a conditional format changes about a cell. */
+export interface DxfStyle {
+  fill?: string;
+  color?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+}
+
+/** CT_Stylesheet child order. */
+const SHEET_ORDER = ["numFmts", "fonts", "fills", "borders", "cellStyleXfs", "cellXfs", "cellStyles", "dxfs", "tableStyles", "colors", "extLst"];
+
 export interface Xf {
   el: Element;
   numFmtId: number;
@@ -87,7 +100,7 @@ export class Styles {
 
   constructor(
     readonly doc: Document,
-    private theme: Record<string, string>
+    readonly theme: Record<string, string>
   ) {}
 
   // Records are only ever appended, never changed in place, so lookups can be cached; appending clears `lists`.
@@ -215,11 +228,52 @@ export class Styles {
   private container(tag: string): Element {
     let el = this.doc.getElementsByTagNameNS(NS_S, tag)[0];
     if (!el) {
-      // Only numFmts can be missing in a valid file; it comes first.
+      // numFmts comes first; dxfs (often missing) after cellStyles.
       el = this.doc.createElementNS(NS_S, tag);
-      this.doc.documentElement.insertBefore(el, this.doc.documentElement.firstElementChild);
+      const root = this.doc.documentElement;
+      const rank = SHEET_ORDER.indexOf(tag);
+      root.insertBefore(el, Array.from(root.children).find((c) => SHEET_ORDER.indexOf(c.localName) > rank) ?? null);
     }
     return el;
+  }
+
+  /** A differential format (a conditional format's style), as far as the grid draws one. */
+  dxf(index: number): DxfStyle {
+    const el = this.list("dxfs")[index];
+    const out: DxfStyle = {};
+    if (!el) return out;
+    const font = this.child(el, "font");
+    const flag = (tag: string) => {
+      const f = this.child(font ?? undefined, tag);
+      return f ? f.getAttribute("val") !== "0" && f.getAttribute("val") !== "false" && f.getAttribute("val") !== "none" : undefined;
+    };
+    for (const [key, tag] of [["bold", "b"], ["italic", "i"], ["underline", "u"], ["strike", "strike"]] as const) {
+      const v = flag(tag);
+      if (v !== undefined) out[key] = v;
+    }
+    const color = this.color(this.child(font ?? undefined, "color"));
+    if (color) out.color = color;
+    // A dxf's solid fill is its bgColor (fgColor in some writers).
+    const pattern = this.child(this.child(el, "fill") ?? undefined, "patternFill");
+    const fill = pattern && pattern.getAttribute("patternType") !== "none" ? this.color(this.child(pattern, "bgColor")) ?? this.color(this.child(pattern, "fgColor")) : null;
+    if (fill) out.fill = fill;
+    return out;
+  }
+
+  /** Append a differential format; returns its index. */
+  addDxf(style: DxfStyle): number {
+    const dxf = this.el("dxf");
+    const font = this.el("font");
+    for (const [key, tag] of [["bold", "b"], ["italic", "i"], ["strike", "strike"], ["underline", "u"]] as const) if (style[key]) this.setFontChild(font, tag, this.el(tag));
+    if (style.color) this.setFontChild(font, "color", this.el("color", { rgb: `FF${style.color.slice(1).toUpperCase()}` }));
+    if (font.children.length) dxf.appendChild(font);
+    if (style.fill) dxf.appendChild(this.el("fill")).appendChild(this.el("patternFill", { patternType: "solid" })).appendChild(this.el("bgColor", { rgb: `FF${style.fill.slice(1).toUpperCase()}` }));
+    const parent = this.container("dxfs");
+    const index = this.list("dxfs").length;
+    parent.appendChild(dxf);
+    this.lists.delete("dxfs");
+    parent.setAttribute("count", String(index + 1));
+    return index;
   }
 
   /** Index of an equal record in `tag`, or of `el` appended to it. */

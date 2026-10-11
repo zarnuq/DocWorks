@@ -10,6 +10,7 @@ import { formatValue, isDateFormat } from "../../domain/xlsx/number-format";
 import { numText } from "../../domain/xlsx/formula-evaluator";
 import { Cell, Sheet } from "../../domain/xlsx/workbook-model";
 import { Picture } from "../../domain/xlsx/drawing";
+import type { CfStyle } from "../../domain/xlsx/conditional";
 import { fontStack } from "../../core/utils/fonts";
 import { Op, paint } from "./paint";
 
@@ -46,6 +47,17 @@ export interface GridHost {
   /** Pictures on the current sheet, and a URL for an image (null while it loads). */
   pictures?(): Picture[];
   imageUrl?(path: string): string | null;
+  /** Conditional formatting of a cell, if any rule applies. */
+  conditional?(row: number, col: number): CfStyle | null;
+  /** Whether a cell has a dropdown (list validation). */
+  dropdown?(row: number, col: number): boolean;
+  /** Whether a cell's value breaks its validation rule (marked, as Sheets does). */
+  invalid?(row: number, col: number): boolean;
+  /** Show a cell's choices below the point `at` (the arrow's bottom left, in client pixels). */
+  openDropdown?(row: number, col: number, at: { x: number; y: number }): void;
+  /** Charts on the current sheet: where each sits, and how to draw it into its box. */
+  charts?(): { key: string; x: number; y: number; w: number; h: number; draw(el: HTMLElement): void }[];
+  chartMenu?(key: string, e: MouseEvent): void;
 }
 
 /** Text to edit for a cell: "=formula", or the value written so that typing it back gives the same value. */
@@ -153,6 +165,10 @@ export class Grid {
 
     this.scroll.addEventListener("scroll", () => this.schedule());
     this.canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
+    this.canvas.addEventListener("click", (e) => {
+      const chart = (e.target as HTMLElement).closest<HTMLElement>(".xlsx-chart")?.dataset.chart;
+      if (chart) this.host.chartMenu?.(chart, e);
+    });
     this.canvas.addEventListener("dblclick", (e) => this.onDoubleClick(e));
     this.canvas.addEventListener("pointermove", (e) => {
       if (e.buttons) return;
@@ -517,9 +533,11 @@ export class Grid {
       if (!cell) return;
       const x = s.colX(r.c1) + q.ox, y = s.rowY(r.r1) + q.oy;
       const w = s.colX(r.c2 + 1) - s.colX(r.c1), h = s.rowY(r.r2 + 1) - s.rowY(r.r1);
-      const fmt = s.wb.styles.format(cell.style);
-      const fill = this.dark && fmt.fill === "#FFFFFF" ? null : fmt.fill;
+      const cf = this.host.conditional?.(row, col) ?? null;
+      const fmt = cf ? { ...s.wb.styles.format(cell.style), ...cf, fill: cf.fill ?? s.wb.styles.format(cell.style).fill } : s.wb.styles.format(cell.style);
+      const fill = this.dark && fmt.fill === "#FFFFFF" && !cf?.fill ? null : fmt.fill;
       if (fill) fills.push({ kind: "rect", x: x - 1, y: y - 1, w: w + 1, h: h + 1, color: fill });
+      if (cf?.bar) fills.push({ kind: "rect", x: x + 1, y: y + 2, w: Math.max(0, (w - 3) * cf.bar.fraction), h: Math.max(0, h - 5), color: `${cf.bar.color}B3` });
       const box = this.css(cell.style, true);
       for (const side of ["left", "right", "top", "bottom"] as const) {
         const m = /^(\d+)px (\w+) (#[0-9A-Fa-f]{6})/.exec(box[`border-${side}`] ?? "");
@@ -533,6 +551,7 @@ export class Grid {
       const shown = s.display(row, col);
       const stale = this.host.isStale(cell);
       if (stale) texts.push({ kind: "corner", x: x + w - 1, y, color: "#e37400" });
+      else if (this.host.invalid?.(row, col)) texts.push({ kind: "corner", x: x + w - 1, y, color: "#d93025" });
       if (!shown.text) return;
       const isNum = typeof cell.value === "number";
       const align = fmt.hAlign !== "general" ? fmt.hAlign : isNum ? "right" : typeof cell.value === "boolean" || typeof cell.value === "object" ? "center" : "left";
@@ -578,10 +597,35 @@ export class Grid {
       const el = make("xlsx-picture", px, py, p.w, p.h);
       if (url) el.createEl("img", { attr: { src: url, alt: p.alt || p.name, draggable: "false" } });
     }
+    for (const ch of this.host.charts?.() ?? []) {
+      const px = ch.x + q.ox, py = ch.y + q.oy;
+      if (px > x1 || px + ch.w < x0 || py > y1 || py + ch.h < y0) continue;
+      const el = make("xlsx-chart", px, py, ch.w, ch.h);
+      el.dataset.chart = ch.key;
+      ch.draw(el);
+    }
     if (!chrome) {
       q.overlay.replaceChildren(frag);
       return;
     }
+    // Dropdown arrows on cells with a list of choices.
+    if (this.host.dropdown) {
+      for (const row of q.rows) {
+        if (!s.rowHeight(row)) continue;
+        for (const col of q.cols) {
+          if (!s.colWidth(col) || covered(row, col) && !merges.some((m) => m.r1 === row && m.c1 === col) || !this.host.dropdown(row, col)) continue;
+          const m = merges.find((x) => x.r1 === row && x.c1 === col);
+          const right = s.colX((m?.c2 ?? col) + 1) + q.ox, top = s.rowY(row) + q.oy, h = s.rowY((m?.r2 ?? row) + 1) - s.rowY(row);
+          const size = Math.min(16, h - 2);
+          const b = make("xlsx-dropdown-btn", right - size - 2, top + (h - size) / 2, size, size);
+          b.setText("▾");
+          b.dataset.row = String(row);
+          b.dataset.col = String(col);
+          b.setAttribute("aria-label", `Choose a value for ${cellName(row, col)}`);
+        }
+      }
+    }
+
     // Filter buttons on the header row.
     const f = s.filter;
     if (f && q.rows.includes(f.r1)) {
@@ -691,6 +735,22 @@ export class Grid {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target === this.input && this.edit) return;
+    // A chart's menu opens on click (see the constructor): opened on press, the release would close it.
+    if (target.closest<HTMLElement>(".xlsx-chart")?.dataset.chart) {
+      e.preventDefault();
+      return;
+    }
+    const dropBtn = target.closest<HTMLElement>(".xlsx-dropdown-btn");
+    if (dropBtn) {
+      e.preventDefault();
+      const row = Number(dropBtn.dataset.row), col = Number(dropBtn.dataset.col);
+      // Measured first: selecting redraws the overlay, replacing the button.
+      const box = dropBtn.getBoundingClientRect();
+      this.select({ row, col });
+      this.render();
+      this.host.openDropdown?.(row, col, { x: box.left, y: box.bottom });
+      return;
+    }
     const filterBtn = target.closest<HTMLElement>(".xlsx-filter-btn");
     if (filterBtn) {
       e.preventDefault();

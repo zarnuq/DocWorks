@@ -519,6 +519,24 @@ describe("slide authoring additions",()=>{
   await vi.waitFor(()=>expect(v.model.shapes.find((s:any)=>s.chart).chart.format.kind).toBe("pie"));
   await view.onUnloadFile(file);
  });
+ it("undoes with Ctrl+Z after a dialog closes, when focus is on the page rather than the slide",async()=>{
+  const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
+  Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Chart")!.click();
+  const modal=document.querySelector<HTMLElement>(".test-modal")!;
+  Array.from(modal.querySelectorAll("button")).find(b=>b.textContent==="Insert chart")!.click();
+  await vi.waitFor(()=>expect(v.model.shapes.some((s:any)=>s.chart)).toBe(true));
+  (document.activeElement as HTMLElement|null)?.blur();
+  const scope=view.scope as unknown as {keys:{mods:string[];key:string;fn:()=>boolean}[]};
+  const undo=scope.keys.find(k=>k.key==="z"&&k.mods.length===1)!;
+  expect(undo.fn()).toBe(false);
+  expect(v.model.shapes.some((s:any)=>s.chart)).toBe(false);
+  scope.keys.find(k=>k.key==="y")!.fn();
+  expect(v.model.shapes.some((s:any)=>s.chart)).toBe(true);
+  // Typing in a field keeps the field's own undo.
+  const input=view.contentEl.appendChild(createEl("input"));input.focus();
+  expect(undo.fn()).toBe(true);
+  await view.onUnloadFile(file);
+ });
  it("inserts an editable chart from its data grid and supports undo",async()=>{
   const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
   Array.from(view.contentEl.querySelectorAll("button")).find(b=>b.textContent==="Chart")!.click();

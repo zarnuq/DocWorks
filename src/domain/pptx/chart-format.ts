@@ -204,7 +204,8 @@ export function readChartFormat(xml: Document, ctx: ColorContext = { scheme: {},
     const ser = p?.series[0];
     const count = Number(val(kid(ser, "val")?.getElementsByTagNameNS(C, "ptCount")[0] ?? null) ?? 0);
     const points = new Map(kids(ser, "dPt").map((d) => [Number(val(kid(d, "idx"))), fillOf(kid(d, "spPr"), ctx, false)]));
-    colors = Array.from({ length: count }, (_, i) => points.get(i) ?? null);
+    // Without cached values (Google's export) the slices are as many as the coloured points say.
+    colors = Array.from({ length: Math.max(count, ...[...points.keys()].map((i) => i + 1)) }, (_, i) => points.get(i) ?? null);
   } else colors = (p?.series ?? []).map((s) => fillOf(kid(s, "spPr"), ctx, kind === "line" || kind === "scatter"));
   return {
     kind,

@@ -1856,6 +1856,7 @@ textarea.pptx-notes {
 .xlsx-handle,
 .xlsx-ref,
 .xlsx-filter-btn,
+.xlsx-dropdown-btn,
 .xlsx-editor {
   position: absolute;
   left: var(--x);
@@ -1932,6 +1933,20 @@ textarea.pptx-notes {
   color: var(--xlsx-head-ink, #444746);
   font-size: 10px;
   cursor: var(--cursor);
+}
+
+.xlsx-dropdown-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: #5f6368;
+  font-size: 12px;
+  cursor: var(--cursor);
+}
+
+.xlsx-dropdown-btn:hover {
+  background: var(--xlsx-head, #f1f3f4);
 }
 
 .xlsx-guide {
@@ -2065,8 +2080,86 @@ textarea.pptx-notes {
   pointer-events: none;
 }
 
+.xlsx-chart {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--w);
+  height: var(--h);
+  background: #ffffff;
+  border: 1px solid #dadce0;
+  box-sizing: border-box;
+  cursor: var(--cursor);
+}
+
 .xlsx-picture img {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* Conditional formatting and data validation dialogs (rule-forms.ts). */
+.xlsx-rule-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.xlsx-rule-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.xlsx-rule-swatch {
+  padding: 2px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--xlsx-swatch-fill, transparent);
+  color: var(--xlsx-swatch-color, inherit);
+  font-size: var(--font-ui-small);
+}
+
+.xlsx-rule-text {
+  flex: 1;
+}
+
+.xlsx-rule-range,
+.xlsx-rule-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.xlsx-rule-heading {
+  margin: 8px 0 4px;
+  font-weight: var(--font-semibold);
+}
+
+.xlsx-rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 6px 0;
+}
+
+.xlsx-rule-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.xlsx-rule-error {
+  min-height: 1.2em;
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
+.xlsx-rule-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

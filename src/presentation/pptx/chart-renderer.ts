@@ -211,10 +211,19 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
     }
   const zero = scale(0);
   node(svg, "line", horizontal ? { x1: zero, x2: zero, y1: box.top, y2: box.bottom, stroke: LINE } : { x1: box.left, x2: box.right, y1: zero, y2: zero, stroke: LINE });
-  if (f.category.visible)
-    categories.forEach((name, i) =>
-      node(svg, "text", horizontal ? { x: box.left - 4, y: centre(i) + FONT / 3, "text-anchor": "end", "font-size": FONT, fill: INK } : { x: centre(i), y: box.bottom + FONT * 1.3, "text-anchor": "middle", "font-size": FONT, fill: INK }, name)
-    );
+  if (f.category.visible) {
+    // Labels fit their slot: shortened with "…", and only every k-th one when even short ones would collide.
+    const charW = FONT * 0.55;
+    // Room for the longest label, or 8 characters, whichever is less, decides how many slots a label may use.
+    const need = Math.min(Math.max(...categories.map((c) => c.length)), 8) * charW;
+    const step = horizontal ? Math.max(1, Math.ceil((FONT * 1.2) / band)) : Math.max(1, Math.ceil(need / band));
+    const chars = Math.max(3, Math.floor((horizontal ? box.left - PAD - 4 : band * step) / charW));
+    const fit = (t: string) => (t.length > chars ? `${t.slice(0, chars - 1)}…` : t);
+    categories.forEach((name, i) => {
+      if (i % step) return;
+      node(svg, "text", horizontal ? { x: box.left - 4, y: centre(i) + FONT / 3, "text-anchor": "end", "font-size": FONT, fill: INK } : { x: centre(i), y: box.bottom + FONT * 1.3, "text-anchor": "middle", "font-size": FONT, fill: INK }, fit(name));
+    });
+  }
 
   const label = (text: string, along: number, across: number, anchorEnd: boolean, inside: boolean) => {
     const attrs = horizontal

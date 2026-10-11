@@ -1,10 +1,10 @@
 import { FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
-import { Workbook } from "../../domain/xlsx/workbook-model";
+import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { Edits } from "../../domain/xlsx/commands";
 import { FormulaSyntaxError } from "../../domain/xlsx/formula";
 import { Rect, cellName, colName, parseRange, rangeName } from "../../domain/xlsx/references";
-import { adjustDecimals, formatGeneral } from "../../domain/xlsx/number-format";
+import { adjustDecimals, formatGeneral, parseInput } from "../../domain/xlsx/number-format";
 import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
 import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboard";
 import { CellMatch, findCells, replaceCells } from "../../domain/xlsx/find";
@@ -14,6 +14,13 @@ import { FONTS, PaperTheme, Toolbar, promptText, showValue } from "../common/too
 import { exportPdf } from "../common/pdf";
 import { Grid, Hit } from "./grid";
 import { Picture, sheetPictures } from "../../domain/xlsx/drawing";
+import { addRule, CfStyle, ConditionalFormats, deleteRule, readRules } from "../../domain/xlsx/conditional";
+import { checkValue, invalidateValidations, listItems, removeValidation, setValidation, Validation, validationAt } from "../../domain/xlsx/validation";
+import { conditionalForm, validationForm } from "./rule-forms";
+import { chartModel, chartSource, deleteChart, formatChart, insertChart, setChartSource, SheetChart, sheetCharts } from "../../domain/xlsx/charts";
+import type { ChartModel } from "../../domain/pptx/chart";
+import { renderChart } from "../pptx/chart-renderer";
+import { chartFormatForm, defaultChartFormat } from "../common/chart-form";
 import { IMAGE_MIME } from "../../core/utils/images";
 
 export const VIEW_TYPE_XLSX = "doc-works-xlsx-view";
@@ -60,6 +67,12 @@ export class XlsxView extends FileView {
   private findEl: HTMLElement | null = null;
   /** Object URLs of images by zip path ("" while loading). */
   private imageUrls = new Map<string, string>();
+  private cfCache = new Map<string, ConditionalFormats>();
+  private invalidCache = new Map<string, boolean>();
+  /** Charts per sheet path, with their models, until the next edit. */
+  private chartCache = new Map<string, { chart: SheetChart; model: ChartModel }[]>();
+  /** Drawn charts by chart path: redrawn only when their data, format or size change. */
+  private chartSvgs = new Map<string, { sig: string; el: HTMLElement }>();
   private pictureCache = new Map<string, Picture[]>();
 
   constructor(leaf: WorkspaceLeaf) {
@@ -168,6 +181,12 @@ export class XlsxView extends FileView {
       filterMenu: (col, anchor) => this.filterMenu(col, anchor),
       pictures: () => this.pictures(),
       imageUrl: (path) => this.imageUrl(path),
+      conditional: (row, col) => this.conditional(this.sheet, row, col),
+      dropdown: (row, col) => validationAt(this.sheet, row, col)?.type === "list",
+      invalid: (row, col) => this.invalid(row, col),
+      openDropdown: (row, col, at) => this.openDropdown(row, col, at),
+      charts: () => this.charts(),
+      chartMenu: (key, e) => this.chartMenu(key, e),
     });
     const bottom = this.contentEl.createDiv({ cls: "xlsx-bottom" });
     this.tabsEl = bottom.createDiv({ cls: "xlsx-tabs" });
@@ -237,14 +256,212 @@ export class XlsxView extends FileView {
       new Notice(err instanceof FormulaSyntaxError ? `There's a problem with this formula: ${err.message}` : (err as Error).message);
       return false;
     }
+    this.cfCache.clear();
+    this.invalidCache.clear();
+    this.chartCache.clear();
+    for (const sheet of this.wb.sheets) invalidateValidations(sheet);
     this.grid?.invalidate();
     this.syncSelection();
     this.markDirty();
     return true;
   }
 
+  /** Conditional formatting of a cell, from rules worked out per sheet until the next edit. */
+  private conditional(sheet: Sheet, row: number, col: number): CfStyle | null {
+    let cf = this.cfCache.get(sheet.ref.path);
+    if (!cf) {
+      cf = new ConditionalFormats(sheet, (r, c, f) => this.edits!.calc.evaluate(sheet, r, c, f));
+      this.cfCache.set(sheet.ref.path, cf);
+    }
+    return cf.empty ? null : cf.at(row, col);
+  }
+
   private commit(row: number, col: number, raw: string): boolean {
-    return this.change(() => this.edits!.input(this.sheet, row, col, raw));
+    const sheet = this.sheet;
+    const rule = validationAt(sheet, row, col);
+    if (rule?.reject && !raw.startsWith("=") && rule.type !== "custom") {
+      // Refused before it's written: the editor stays open, as in Sheets.
+      if (!checkValue(rule, parseInput(raw, this.wb.date1904).value, sheet, row, col, this.evaluator(sheet))) {
+        new Notice(this.invalidMessage(rule));
+        return false;
+      }
+    }
+    if (!this.change(() => this.edits!.input(sheet, row, col, raw))) return false;
+    // A custom formula (or a formula's result) can only be checked once the value is in place.
+    if (rule?.reject && (raw.startsWith("=") || rule.type === "custom") && !checkValue(rule, sheet.at(row, col)?.value ?? null, sheet, row, col, this.evaluator(sheet))) {
+      this.undo();
+      new Notice(this.invalidMessage(rule));
+      return false;
+    }
+    return true;
+  }
+
+  private evaluator(sheet: Sheet) {
+    return (r: number, c: number, f: string) => this.edits!.calc.evaluate(sheet, r, c, f);
+  }
+
+  private invalidMessage(rule: Validation): string {
+    const custom = rule.el.getAttribute("error");
+    if (custom) return custom;
+    if (rule.type === "list") return "Input must be an item on the specified list.";
+    if (rule.type === "decimal" || rule.type === "whole") return `Input must be a number ${rule.operator === "between" ? `between ${rule.formulas[0]} and ${rule.formulas[1]}` : `that meets the rule (${rule.operator} ${rule.formulas[0] ?? ""})`}.`;
+    return "The data you entered violates the data validation rules set on this cell.";
+  }
+
+  /** Cells whose value breaks a warning-only rule (or was there before a rule). */
+  private invalid(row: number, col: number): boolean {
+    const sheet = this.sheet;
+    const key = `${sheet.ref.path}:${row}:${col}`;
+    let bad = this.invalidCache.get(key);
+    if (bad === undefined) {
+      const rule = validationAt(sheet, row, col);
+      const value = sheet.at(row, col)?.value ?? null;
+      bad = !!rule && value !== null && !checkValue(rule, value, sheet, row, col, this.evaluator(sheet));
+      this.invalidCache.set(key, bad);
+    }
+    return bad;
+  }
+
+  private openDropdown(row: number, col: number, at: { x: number; y: number }): void {
+    const sheet = this.sheet;
+    const rule = validationAt(sheet, row, col);
+    if (!rule) return;
+    const current = sheet.display(row, col).text;
+    const menu = new Menu();
+    for (const item of listItems(rule, sheet))
+      menu.addItem((i) => i.setTitle(item).setChecked(item === current).onClick(() => {
+        this.commit(row, col, item);
+        this.grid?.focusGrid();
+      }));
+    if (current) menu.addSeparator().addItem((i) => i.setTitle("Clear").onClick(() => this.commit(row, col, "")));
+    menu.showAtPosition(at);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Charts
+  // ---------------------------------------------------------------------------
+
+  private sheetChartModels(): { chart: SheetChart; model: ChartModel }[] {
+    const s = this.sheet;
+    let list = this.chartCache.get(s.ref.path);
+    if (!list) {
+      list = sheetCharts(this.wb, s).map((chart) => ({ chart, model: chartModel(this.wb, chart.path) }));
+      this.chartCache.set(s.ref.path, list);
+    }
+    return list;
+  }
+
+  private charts() {
+    return this.sheetChartModels().map(({ chart, model }) => ({
+      key: chart.path,
+      ...chart.box,
+      draw: (el: HTMLElement) => {
+        const sig = JSON.stringify([model.data, model.format, Math.round(chart.box.w), Math.round(chart.box.h)]);
+        let cached = this.chartSvgs.get(chart.path);
+        if (!cached || cached.sig !== sig) {
+          const host = createDiv();
+          // Points, as on slides: the chart's pixel size at 96 dpi.
+          renderChart(host, model, { w: chart.box.w * 0.75, h: chart.box.h * 0.75 });
+          this.chartSvgs.set(chart.path, (cached = { sig, el: host }));
+        }
+        for (const child of Array.from(cached.el.children)) el.appendChild(child.cloneNode(true));
+      },
+    }));
+  }
+
+  private chartMenu(path: string, e: MouseEvent): void {
+    const found = this.sheetChartModels().find((c) => c.chart.path === path);
+    if (!found) return;
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle("Edit chart").setIcon("pencil").onClick(() => this.chartDialog(path)));
+    menu.addItem((i) => i.setTitle("Delete chart").setIcon("trash").onClick(() => this.change(() => deleteChart(this.edits!, this.sheet, found.chart))));
+    menu.showAtMouseEvent(e);
+  }
+
+  private insertChart(): void {
+    if (!this.edits || !this.grid) return;
+    let sel = this.grid.selection();
+    // A single cell: the block of data around it, as Sheets guesses.
+    if (sel.r1 === sel.r2 && sel.c1 === sel.c2) sel = this.sheet.used() ?? sel;
+    let path = "";
+    if (this.change(() => (path = insertChart(this.edits!, this.sheet, sel)))) this.chartDialog(path);
+  }
+
+  private chartDialog(path: string): void {
+    const found = this.sheetChartModels().find((c) => c.chart.path === path);
+    if (!found || !this.edits) return;
+    const format = structuredClone(found.model.format ?? defaultChartFormat());
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Chart editor");
+    const host = modal.contentEl;
+    const sourceRow = host.createDiv({ cls: "dw-chart-option" });
+    sourceRow.createSpan({ text: "Data range" });
+    const original = chartSource(this.wb, path);
+    const source = sourceRow.createEl("input", { type: "text", value: original, attr: { "aria-label": "Data range" } });
+    chartFormatForm(host, format, found.model.data, found.model.palette ?? []);
+    const error = host.createDiv({ cls: "pptx-props-hint" });
+    new Setting(host).addButton((b) =>
+      b.setButtonText("Apply").setCta().onClick(() => {
+        const ok = this.change(() => {
+          if (source.value.trim() && source.value.trim() !== original) setChartSource(this.edits!, path, source.value.trim());
+          formatChart(this.edits!, path, format);
+        });
+        if (ok) modal.close();
+        else error.setText("Check the data range.");
+      })
+    );
+    modal.open();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Conditional formatting and data validation dialogs
+  // ---------------------------------------------------------------------------
+
+  private selectedRange(): string {
+    return rangeName(this.grid!.selection());
+  }
+
+  private conditionalDialog(): void {
+    if (!this.edits) return;
+    const sheet = this.sheet;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Conditional format rules");
+    modal.modalEl.addClass("xlsx-rules-modal");
+    const draw = () => {
+      modal.contentEl.empty();
+      conditionalForm(modal.contentEl, {
+        rules: readRules(this.sheet),
+        range: this.selectedRange(),
+        swatch: (r) => (r.type === "colorScale" ? { fill: r.colors[r.colors.length - 1] } : r.dxf === null ? {} : sheet.wb.styles.dxf(r.dxf)),
+        add: (ranges, rule) => {
+          if (this.change(() => addRule(this.edits!, this.sheet, ranges, rule))) draw();
+        },
+        remove: (rule) => {
+          if (this.change(() => deleteRule(this.edits!, this.sheet, rule))) draw();
+        },
+      });
+    };
+    draw();
+    modal.open();
+  }
+
+  private validationDialog(): void {
+    if (!this.edits) return;
+    const sel = this.grid!.selection();
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Data validation");
+    modal.modalEl.addClass("xlsx-rules-modal");
+    validationForm(modal.contentEl, {
+      current: validationAt(this.sheet, sel.r1, sel.c1),
+      range: rangeName(sel),
+      add: (ranges, rule) => {
+        if (this.change(() => setValidation(this.edits!, this.sheet, ranges, rule))) modal.close();
+      },
+      remove: (rule) => {
+        if (this.change(() => removeValidation(this.edits!, this.sheet, rule.ranges))) modal.close();
+      },
+    });
+    modal.open();
   }
 
   private pictures(): Picture[] {
@@ -274,6 +491,9 @@ export class XlsxView extends FileView {
 
   private afterReload(): void {
     this.pictureCache.clear();
+    this.cfCache.clear();
+    this.invalidCache.clear();
+    this.chartCache.clear();
     this.sheetIndex = Math.min(this.sheetIndex, this.wb.sheets.length - 1);
     this.renderTabs();
   }
@@ -453,6 +673,9 @@ export class XlsxView extends FileView {
     tb.iconSelect("snowflake", "Freeze", [["No rows", "r0"], ["1 row", "r1"], ["2 rows", "r2"], ["Up to current row", "rc"], ["No columns", "c0"], ["1 column", "c1"], ["2 columns", "c2"], ["Up to current column", "cc"]], (v) =>
       this.freeze(v)
     );
+    tb.icon("chart-column", "Insert chart", () => this.insertChart());
+    tb.icon("palette", "Conditional formatting", () => this.conditionalDialog());
+    tb.icon("list-checks", "Data validation (dropdowns and rules)", () => this.validationDialog());
     tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
     const { syncTheme, status } = tb.end(this.theme, (t) => this.setTheme(t), "grid");
     this.syncTheme = syncTheme;
@@ -896,6 +1119,7 @@ export class XlsxView extends FileView {
     const pages: HTMLElement[] = [];
     const painter = new Grid(createDiv(), {
       sheet: () => s,
+      conditional: (row, col) => this.conditional(s, row, col),
       isStale: () => false,
       isCircular: () => false,
       commit: () => false,

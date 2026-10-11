@@ -20,7 +20,7 @@ async function setup(text = "Original text") {
   const { doc, origins } = readDocx(pkg.body, context);
   let state = EditorState.create({ doc, plugins: [history()] });
   return { pkg, origins, get state() { return state; },
-    edit: (tr: typeof state.tr) => { state = state.apply(suggestTransaction(tr, origins, pkg, context, "Ada")); },
+    edit: (tr: typeof state.tr, opts?: { forward?: boolean }) => { state = state.apply(suggestTransaction(tr, origins, pkg, context, "Ada", opts)); },
     command: (fn: typeof undo) => fn(state, tr => { state = state.apply(suggestTransaction(tr, origins, pkg, context, "Ada")); }),
     xml: () => { writeBody(pkg.body, state.doc, origins, pkg); return pkg.body; }
   };
@@ -152,6 +152,36 @@ describe("suggestion recording", () => {
     const accepted = t.xml();
     acceptRevisions(accepted);
     expect(readDocx(accepted, context).doc.lastChild!.textContent).toBe("La!");
+  });
+});
+
+describe("typing as it happens: one key at a time", () => {
+  it("joins letters typed one by one into one insertion", async () => {
+    const t = await setup("Hello world");
+    t.edit(t.state.tr.setSelection(TextSelection.create(t.state.doc, 7)));
+    for (const ch of "new ") t.edit(t.state.tr.insertText(ch));
+    expect(t.state.doc.textContent).toBe("Hello new world");
+    const ins = revisions(t.xml()).filter(r => r.kind === "insert");
+    expect(ins.map(r => r.text)).toEqual(["new "]);
+  });
+  it("joins characters deleted one by one with Backspace, and with Delete, into one deletion each", async () => {
+    const t = await setup("Hello world");
+    // Backspace three times from the end of "Hello".
+    t.edit(t.state.tr.setSelection(TextSelection.create(t.state.doc, 6)));
+    for (let i = 0; i < 3; i++) {
+      const pos = t.state.selection.from;
+      t.edit(t.state.tr.delete(pos - 1, pos));
+    }
+    let dels = revisions(t.xml()).filter(r => r.kind === "delete");
+    expect(dels.map(r => r.text)).toEqual(["llo"]);
+    // Delete twice forward from before "world".
+    t.edit(t.state.tr.setSelection(TextSelection.create(t.state.doc, t.state.doc.firstChild!.content.size - 4)));
+    for (let i = 0; i < 2; i++) {
+      const pos = t.state.selection.from;
+      t.edit(t.state.tr.delete(pos, pos + 1), { forward: true });
+    }
+    dels = revisions(t.xml()).filter(r => r.kind === "delete");
+    expect(dels.map(r => r.text)).toEqual(["llo", "wo"]);
   });
 });
 

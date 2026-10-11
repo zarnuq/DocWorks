@@ -118,6 +118,8 @@ export class DocxView extends FileView {
   private reviewOpen = this.app.loadLocalStorage(REVIEW_KEY) === "on";
   private reviewTimer: number | null = null;
   private suggesting = false;
+  /** The key behind the transaction being dispatched (Delete moves the cursor past what it strikes through). */
+  private lastKey: string | null = null;
   private ruler: DocxRuler | null = null;
   private rulerViewport: HTMLElement | null = null;
   private outlineEl: HTMLElement | null = null;
@@ -246,7 +248,8 @@ export class DocxView extends FileView {
       dispatchTransaction: (tr) => {
         if (!this.editor) return;
         if (this.suggesting) tr = suggestTransaction(tr, this.origins, docx,
-          { imageSrc: id => this.imageSrc(id) ?? urls.get(id) ?? null, hyperlinkHref: id => docx.hyperlinkHref(id) }, this.settings.author);
+          { imageSrc: id => this.imageSrc(id) ?? urls.get(id) ?? null, hyperlinkHref: id => docx.hyperlinkHref(id) }, this.settings.author, { forward: this.lastKey === "Delete" });
+        this.lastKey = null;
         const applied = this.editor.state.applyTransaction(tr);
         this.editor.updateState(applied.state);
         const changed = applied.transactions.some(t => t.docChanged);
@@ -258,6 +261,10 @@ export class DocxView extends FileView {
           this.renderOutline();
         }
         if (changed) this.scheduleReview();
+      },
+      handleKeyDown: (_view, event) => {
+        this.lastKey = event.key;
+        return false;
       },
       handleDOMEvents: {
         click: (_view, event) => {
@@ -1267,11 +1274,17 @@ class HeaderFooterModal extends Modal {
     else {
       const root = this.docx.headerFooter(...splitPart(part));
       const { doc, origins } = root ? readDocx(root, this.readContext(part)) : { doc: schema.nodes.doc.create(null, schema.nodes.paragraph.create()), origins: new Map() as Origins };
+      let lastKey: string | null = null;
       const view: EditorView = new EditorView(host, {
         state: EditorState.create({ doc, plugins: docxPlugins(this.ctx) }),
+        handleKeyDown: (_v, event) => {
+          lastKey = event.key;
+          return false;
+        },
         dispatchTransaction: (tr) => {
           const author = this.suggestAuthor();
-          if (author) tr = suggestTransaction(tr, origins, this.docx, this.readContext(part), author);
+          if (author) tr = suggestTransaction(tr, origins, this.docx, this.readContext(part), author, { forward: lastKey === "Delete" });
+          lastKey = null;
           view.updateState(view.state.apply(tr));
           if (tr.docChanged) this.editors.get(part)!.changed = this.changed = true;
         },
