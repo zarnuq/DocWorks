@@ -1,3 +1,4 @@
+import { addSlideComment, editSlideComment, removeSlideThread, resolveSlideThread, slideComments } from "../../domain/pptx/comments";
 import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from "../../domain/pptx/media";
 import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
 import { chartPalette, ChartFormat, setChartFormat } from "../../domain/pptx/chart-format";
@@ -43,7 +44,7 @@ import { nextVisible, Slideshow } from "./slideshow";
 import { readAnimations, readTransition, writeTransition } from "../../domain/pptx/animation";
 import { updateAnimationPart, addAnimation, animationEntries, moveAnimation, removeAnimation, updateAnimation } from "../../domain/pptx/animation-edit";
 import { buildMotionPanel } from "./motion-panel";
-import { exportPdf } from "../common/pdf";
+import { canExportPdf, exportPdf } from "../common/pdf";
 import { RenderedShape, renderSlide } from "./slide-renderer";
 import { rangeInParagraph } from "./text-html";
 import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
@@ -222,7 +223,7 @@ export class PptxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
+    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
   }
 
   getViewType(): string {
@@ -1892,6 +1893,65 @@ export class PptxView extends FileView {
     await this.loadMedia();
     this.renderCurrent();
   }
+  private author(): string {
+    return this.settings.author.trim() || "Doc Works";
+  }
+
+  /** The current slide's comment threads (Google Slides' comments): post, reply, edit, resolve, delete. */
+  private commentsDialog(): void {
+    const doc = this.doc;
+    if (!doc) return;
+    const slide = doc.slides()[this.index]?.path;
+    if (!slide) return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText(`Comments on slide ${this.index + 1}`);
+    modal.contentEl.addClass("xlsx-comments-modal");
+    const change = (fn: (d: PptxDocument) => void) => {
+      this.mutate(fn);
+      draw();
+    };
+    const button = (parent: HTMLElement, text: string, fn: () => void) => {
+      const b = parent.createEl("button", { text });
+      b.addEventListener("click", fn);
+      return b;
+    };
+    const compose = (parent: HTMLElement, label: string, post: (text: string) => void, value = "") => {
+      const input = parent.createEl("textarea", { value, attr: { "aria-label": label, rows: "3", placeholder: label } });
+      button(parent, value ? "Save" : "Post", () => {
+        if (input.value.trim()) post(input.value);
+      });
+    };
+    const draw = () => {
+      modal.contentEl.empty();
+      const threads = slideComments(doc, slide);
+      if (!threads.length) modal.contentEl.createEl("p", { text: "No comments on this slide." });
+      for (const thread of threads) {
+        const box = modal.contentEl.createDiv({ cls: "xlsx-comment-thread" });
+        if (thread.resolved) box.createDiv({ text: "Resolved", cls: "dw-muted" });
+        for (const message of thread.messages) {
+          const item = box.createDiv({ cls: "xlsx-comment-message" });
+          item.createEl("strong", { text: message.author || "Unknown author" });
+          if (message.date) item.createEl("time", { text: new Date(message.date).toLocaleString(), attr: { datetime: message.date } });
+          item.createDiv({ cls: "xlsx-comment-text", text: message.text });
+          if (thread.legacy) continue;
+          button(item, "Edit", () => {
+            item.empty();
+            compose(item, "Edit comment", (text) => change((d) => editSlideComment(d, slide, message.id, text)), message.text);
+            button(item, "Cancel", draw);
+          });
+        }
+        const actions = box.createDiv({ cls: "xlsx-comment-actions" });
+        if (!thread.legacy) button(actions, thread.resolved ? "Reopen" : "Resolve", () => change((d) => resolveSlideThread(d, slide, thread.id, !thread.resolved)));
+        button(actions, "Delete thread", () => change((d) => removeSlideThread(d, slide, thread.id)));
+        if (!thread.resolved && !thread.legacy) compose(box, "Reply", (text) => change((d) => void addSlideComment(d, slide, text, this.author(), thread.id)));
+      }
+      compose(modal.contentEl, "New comment", (text) => change((d) => void addSlideComment(d, slide, text, this.author())));
+      button(modal.contentEl, "Close", () => modal.close());
+    };
+    draw();
+    modal.open();
+  }
+
   /** Edit the text of a SmartArt's items (in its data and the drawing shown). */
   private editSmartArt(frame: Element): void {
     const doc = this.doc;
@@ -2289,6 +2349,7 @@ export class PptxView extends FileView {
     });
     panelBtn.toggleClass("is-active", this.showProps);
     tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
+    tb.icon("message-square", "Comments on this slide", () => this.commentsDialog());
     this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [z === 1 ? "Fit" : `${z * 100}%`, String(z)]), (v) => this.setZoom(Number(v)));
     this.zoomSelect.value = "1";
     btn("▶ Present", "Present from this slide (Shift+F5). F5 presents from the beginning.", () => this.startPresentation(false), "mod-cta");

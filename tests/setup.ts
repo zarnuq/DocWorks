@@ -90,3 +90,8 @@ if (!Range.prototype.getClientRects) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
 }
+
+// Obsidian's Node.instanceOf (instanceof that works across popout windows).
+(Node.prototype as unknown as { instanceOf: (type: unknown) => boolean }).instanceOf = function (this: Node, type: unknown) {
+  return this instanceof (type as new () => unknown);
+};

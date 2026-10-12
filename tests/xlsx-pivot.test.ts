@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
 import { Edits } from "../src/domain/xlsx/commands";
-import { pivotAt, readPivots, refreshPivot } from "../src/domain/xlsx/pivot";
-import { sheetXml, xlsx } from "./xlsx-fixtures";
+import { insertPivot, pivotAt, readPivots, refreshPivot } from "../src/domain/xlsx/pivot";
+import { sheetXml, STYLES, xlsx } from "./xlsx-fixtures";
 
 const S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -124,5 +124,45 @@ describe("pivot table editor form", () => {
     // A field is on one axis: Region moved from the rows to the columns.
     expect(boxes[0].checked).toBe(false);
     expect(got).toEqual({ rows: [1], cols: [0], values: [{ field: 2, fn: "sum" }, { field: 0, fn: "count" }] });
+  });
+});
+
+describe("insert pivot table", () => {
+  it("makes a pivot table on a new sheet from a range (rows from the first text column, sum of the first number column), as one undo step", async () => {
+    const bytes = await xlsx({ sheets: [sheetXml(DATA)], names: ["Data"] });
+    const e = new Edits(Workbook.open(await XlsxWorkbook.load(bytes)));
+    const name = insertPivot(e, e.wb.sheets[0], { r1: 0, c1: 0, r2: 6, c2: 2 });
+    expect(name).toBe("Pivot Table 1");
+    const s = e.wb.sheets.find((x) => x.name === name)!;
+    const [p] = readPivots(s);
+    expect(p).toMatchObject({ rows: [0], cols: [], values: [{ field: 2, fn: "sum" }], source: { sheet: "Data" } });
+    expect(s.at(0, 0)?.value).toBe("Row Labels");
+    expect(s.at(4, 1)?.value).toBe(54);
+    // The workbook lists the cache, and the saved file opens with the pivot table.
+    const caches = e.wb.pkg.workbook.getElementsByTagNameNS(S, "pivotCache");
+    expect(caches).toHaveLength(1);
+    const again = Workbook.open(await XlsxWorkbook.load(await e.wb.pkg.save()));
+    expect(readPivots(again.sheets.find((x) => x.name === name)!)).toHaveLength(1);
+    e.undo();
+    expect(e.wb.sheets.map((x) => x.name)).toEqual(["Data"]);
+    expect(e.wb.pkg.workbook.getElementsByTagNameNS(S, "pivotCache")).toHaveLength(0);
+  });
+
+  it("refuses a range without a header row and data", async () => {
+    const bytes = await xlsx({ sheets: [sheetXml(DATA)], names: ["Data"] });
+    const e = new Edits(Workbook.open(await XlsxWorkbook.load(bytes)));
+    expect(() => insertPivot(e, e.wb.sheets[0], { r1: 0, c1: 0, r2: 0, c2: 2 })).toThrow(/header row/i);
+  });
+
+  it("shows summed values in the source column's number format (counts stay plain)", async () => {
+    const styled = DATA.replace(/<c r="(C\d+)"><v>/g, '<c r="$1" s="2"><v>');
+    const bytes = await xlsx({ sheets: [sheetXml(styled)], names: ["Data"], styles: STYLES });
+    const e = new Edits(Workbook.open(await XlsxWorkbook.load(bytes)));
+    const name = insertPivot(e, e.wb.sheets[0], { r1: 0, c1: 0, r2: 6, c2: 2 });
+    const s = e.wb.sheets.find((x) => x.name === name)!;
+    expect(e.wb.styles.numFmt(s.at(1, 1)!.style)).toBe("yyyy-mm-dd");
+    refreshPivot(e, e.wb.sheets.find((x) => x.name === name)!, readPivots(e.wb.sheets.find((x) => x.name === name)!)[0], { rows: [0], cols: [], values: [{ field: 2, fn: "count" }] });
+    const t = e.wb.sheets.find((x) => x.name === name)!;
+    expect(e.wb.styles.numFmt(t.at(1, 1)!.style)).toBe("General");
   });
 });

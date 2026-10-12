@@ -1,8 +1,8 @@
-import { Pivot, pivotAt, refreshPivot } from "../../domain/xlsx/pivot";
-import { readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
+import { insertPivot, Pivot, pivotAt, readPivots, refreshPivot } from "../../domain/xlsx/pivot";
+import { formulaSparklines, readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
 import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
-import { App, FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, Menu, Modal, Notice, Platform, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { Edits } from "../../domain/xlsx/commands";
@@ -18,7 +18,7 @@ import { FONTS, PaperTheme, Toolbar, promptText, showValue } from "../common/too
 import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
 import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
-import { exportPdf } from "../common/pdf";
+import { canExportPdf, exportPdf } from "../common/pdf";
 import { Grid, Hit } from "./grid";
 import { Picture, sheetPictures } from "../../domain/xlsx/drawing";
 import { addRule, CfStyle, ConditionalFormats, deleteRule, readRules } from "../../domain/xlsx/conditional";
@@ -151,7 +151,7 @@ export class XlsxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
+    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
   }
 
   private get wb(): Workbook {
@@ -302,7 +302,11 @@ export class XlsxView extends FileView {
   /** A sheet's sparklines, read once per sheet until the next edit. */
   private sparklines(sheet: Sheet): Sparkline[] {
     let out = this.sparkCache.get(sheet.ref.path);
-    if (!out) this.sparkCache.set(sheet.ref.path, (out = readSparklines(sheet)));
+    if (!out) {
+      const calc = this.edits!.calc;
+      out = [...readSparklines(sheet), ...formulaSparklines(sheet, (s, r, c, f) => calc.evaluateArray(s, r, c, f))];
+      this.sparkCache.set(sheet.ref.path, out);
+    }
     return out;
   }
 
@@ -415,6 +419,19 @@ export class XlsxView extends FileView {
     menu.addItem((i) => i.setTitle("Edit chart").setIcon("pencil").onClick(() => this.chartDialog(path)));
     menu.addItem((i) => i.setTitle("Delete chart").setIcon("trash").onClick(() => this.change(() => deleteChart(this.edits!, this.sheet, found.chart))));
     menu.showAtMouseEvent(e);
+  }
+
+  /** Google's Insert › Pivot table: a new sheet with a pivot table over the selection, then its editor. */
+  private insertPivotTable(): void {
+    if (!this.edits || !this.grid) return;
+    let sel = this.grid.selection();
+    if (sel.r1 === sel.r2 && sel.c1 === sel.c2) sel = this.sheet.used() ?? sel;
+    let name = "";
+    if (!this.change(() => (name = insertPivot(this.edits!, this.sheet, sel)))) return;
+    const index = this.wb.sheets.findIndex((s) => s.name === name);
+    this.showSheet(index);
+    const pivot = readPivots(this.wb.sheets[index])[0];
+    if (pivot) this.pivotDialog(pivot);
   }
 
   private insertChart(): void {
@@ -752,8 +769,12 @@ export class XlsxView extends FileView {
     if (!this.grid) return;
     this.valuesOnly = valuesOnly;
     this.grid.input.focus();
-    const contents = (window.require("electron") as { remote: { getCurrentWebContents(): Record<typeof command, () => void> } }).remote.getCurrentWebContents();
-    contents[command]();
+    if (Platform.isDesktopApp) {
+      const contents = (window.require("electron") as { remote: { getCurrentWebContents(): Record<typeof command, () => void> } }).remote.getCurrentWebContents();
+      contents[command]();
+    } else if (command === "paste") new Notice("Paste with your keyboard or the system menu in the cell editor.");
+    // ponytail: no Electron on mobile; the browser's own copy / cut command raises the same clipboard events.
+    else activeDocument.execCommand(command);
     // The event arrives shortly after; a later Ctrl+V must not paste values only.
     window.setTimeout(() => (this.valuesOnly = false), 1000);
   }
@@ -805,6 +826,7 @@ export class XlsxView extends FileView {
       this.freeze(v)
     );
     tb.icon("chart-column", "Insert chart", () => this.insertChart());
+    tb.icon("table-2", "Insert pivot table", () => this.insertPivotTable());
     tb.icon("palette", "Conditional formatting", () => this.conditionalDialog());
     tb.icon("list-checks", "Data validation (dropdowns and rules)", () => this.validationDialog());
     tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());

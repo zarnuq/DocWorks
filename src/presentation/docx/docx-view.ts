@@ -19,7 +19,7 @@ import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
 import { latexToOmml, mathSpec } from "../../domain/docx/math";
-import { exportPdf } from "../common/pdf";
+import { canExportPdf, exportPdf } from "../common/pdf";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
 import { pageSetup, PageSetup, sectionSetups } from "../../domain/docx/pages";
@@ -143,7 +143,7 @@ export class DocxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
+    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
   }
 
   getViewType(): string {

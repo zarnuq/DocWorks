@@ -105,7 +105,8 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, width: number): 
   const out: string[] = [];
   for (const para of text.split("\n")) {
     let line = "";
-    for (const word of para.split(/(?<= )/)) {
+    // Words with the space after them (no lookbehind: iOS before 16.4 lacks it).
+    for (const word of para.match(/[^ ]+ ?| /g) ?? []) {
       if (ctx.measureText(line + word).width <= width || !line) {
         line += word;
         // A single word wider than the cell: break it by characters.

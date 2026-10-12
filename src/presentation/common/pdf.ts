@@ -4,7 +4,7 @@
  * Files are written through the vault API, never Node's fs: a place inside the vault is written directly, and a
  * place outside it is handed to the app's download (its own save dialog, with the chosen name).
  */
-import { App, FileSystemAdapter, normalizePath, Notice, TFile } from "obsidian";
+import { App, FileSystemAdapter, normalizePath, Notice, Platform, TFile } from "obsidian";
 
 interface Electron {
   remote: {
@@ -41,8 +41,15 @@ async function save(app: App, filePath: string, data: Uint8Array): Promise<strin
   return "Choose where to save the PDF";
 }
 
+/** PDF export prints through Electron, which only the desktop app has. */
+export const canExportPdf = (): boolean => Platform.isDesktopApp;
+
 /** Print `pages` (each one `size` px) to a PDF the user saves; resolves with the saved path, or null if cancelled. */
 export async function exportPdf(app: App, file: TFile, pages: HTMLElement[], size: { width: number; height: number }, cls = ""): Promise<string | null> {
+  if (!canExportPdf()) {
+    new Notice("Export to PDF needs the desktop app.");
+    return null;
+  }
   const electron = window.require("electron") as Electron;
   const adapter = app.vault.adapter;
   const defaultPath = adapter instanceof FileSystemAdapter ? adapter.getFullPath(file.path.replace(/\.[^.]+$/, ".pdf")) : `${file.basename}.pdf`;

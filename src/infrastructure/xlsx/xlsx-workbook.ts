@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { OoxmlPackage, parseXml } from "../ooxml/ooxml-package";
+import { escapeXml } from "../../core/utils/xml";
 
 export const NS_S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -106,6 +107,39 @@ export class XlsxWorkbook extends OoxmlPackage {
     sheetsEl.insertBefore(el, this.sheets()[after + 1]?.el ?? null);
     this.touch(this.workbookPath);
     return this.sheets().find((s) => s.path === path)!;
+  }
+
+  /**
+   * A new pivot table on `sheetPath` over `ref` on sheet `source`: an empty definition, cache and records (refreshing
+   * the pivot table fills them in), linked from the sheet and listed in the workbook's pivotCaches.
+   */
+  addPivotTable(sheetPath: string, source: string, ref: string): string {
+    const S = `xmlns="${NS_S}" xmlns:r="${NS_R}"`;
+    const CT = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
+    const caches = this.workbook.getElementsByTagNameNS(NS_S, "pivotCache");
+    const cacheId = Math.max(0, ...Array.from(caches).map((c) => Number(c.getAttribute("cacheId")) || 0)) + 1;
+    const records = this.uniquePath("xl/pivotCache/pivotCacheRecords", ".xml");
+    this.putXml(records, parseXml(`<pivotCacheRecords ${S} count="0"/>`)!, `${CT}pivotCacheRecords+xml`);
+    const cache = this.uniquePath("xl/pivotCache/pivotCacheDefinition", ".xml");
+    this.putXml(cache, parseXml(`<pivotCacheDefinition ${S} r:id="rId1" refreshOnLoad="1" createdVersion="6" refreshedVersion="6" minRefreshableVersion="3" recordCount="0"><cacheSource type="worksheet"><worksheetSource ref="${ref}" sheet="${escapeXml(source)}"/></cacheSource><cacheFields count="0"/></pivotCacheDefinition>`)!, `${CT}pivotCacheDefinition+xml`);
+    this.addRel(cache, "pivotCacheRecords", records);
+    const table = this.uniquePath("xl/pivotTables/pivotTable", ".xml");
+    this.putXml(table, parseXml(`<pivotTableDefinition ${S} name="PivotTable${cacheId}" cacheId="${cacheId}" dataCaption="Values" updatedVersion="6" minRefreshableVersion="3" createdVersion="6" useAutoFormatting="1" itemPrintTitles="1" indent="0" outline="1" outlineData="1" multipleFieldFilters="0"><location ref="A1" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/><pivotFields count="0"/><pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0" showLastColumn="1"/></pivotTableDefinition>`)!, `${CT}pivotTable+xml`);
+    this.addRel(table, "pivotCacheDefinition", cache);
+    this.addRel(sheetPath, "pivotTable", table);
+    // CT_Workbook: pivotCaches after calcPr / oleSize / customWorkbookViews, before smartTagPr and the rest.
+    const root = this.workbook.documentElement;
+    let list = Array.from(root.children).find((c) => c.localName === "pivotCaches");
+    if (!list) {
+      const after = ["smartTagPr", "smartTagTypes", "webPublishing", "fileRecoveryPr", "webPublishObjects", "extLst"];
+      list = root.insertBefore(this.workbook.createElementNS(NS_S, "pivotCaches"), Array.from(root.children).find((c) => after.includes(c.localName)) ?? null);
+    }
+    const entry = list.appendChild(this.workbook.createElementNS(NS_S, "pivotCache"));
+    entry.setAttribute("cacheId", String(cacheId));
+    entry.setAttributeNS(NS_R, "r:id", this.addRel(this.workbookPath, "pivotCacheDefinition", cache));
+    this.touch(this.workbookPath);
+    this.touch(sheetPath);
+    return table;
   }
 
   /** Remove a sheet's part, relationship and tab (its own rels and parts only it uses stay unreferenced). */

@@ -2377,3 +2377,73 @@ textarea.pptx-notes {
   outline: 2px solid var(--interactive-accent);
   outline-offset: 2px;
 }
+
+/* Touch: dragging a selected shape, a handle or a chart moves it instead of scrolling the page. */
+.pptx-shape.is-selected,
+.pptx-selbox,
+.pptx-handle,
+.docx-image-handle,
+.xlsx-chart,
+.xlsx-chart-handle {
+  touch-action: none;
+}
+
+/* Embeds in notes (![[file.docx]], ![[deck.pptx#3]], ![[book.xlsx#Sheet]]): a read-only preview in a frame. */
+.dw-embed {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+
+.dw-embed-title {
+  padding: var(--size-4-1) var(--size-4-2);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.dw-embed-title:hover {
+  color: var(--text-accent);
+}
+
+.dw-embed-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-1);
+  font-size: var(--font-ui-small);
+}
+
+.dw-embed-sheet {
+  max-height: 360px;
+  overflow: auto;
+  background: #ffffff;
+}
+
+.dw-embed-grid {
+  position: relative;
+  width: var(--dw-grid-w);
+  height: var(--dw-grid-h);
+}
+
+.dw-embed-tabs {
+  display: flex;
+  gap: var(--size-4-1);
+  padding: var(--size-4-1);
+  border-top: 1px solid var(--background-modifier-border);
+  overflow-x: auto;
+}
+
+.dw-embed-tabs button.is-active {
+  color: var(--text-accent);
+}
+
+/* Documents read as on paper, scrolled inside the frame. */
+.dw-embed-docx .docx-editor-host {
+  max-height: 480px;
+  padding: 0;
+  background: #ffffff;
+  color: #000000;
+}

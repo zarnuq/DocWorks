@@ -544,6 +544,19 @@ export class DocxDocument extends OoxmlPackage {
   }
 
   /** A numId for a multi-level bullet/ordered list, reusing one we created before or creating it. */
+  /** A new numbering instance of list `numId`'s definition that counts from 1 again (another list in the text). */
+  restartList(numId: string): string {
+    const numbering = this.numberingXml();
+    const src = numbering && Array.from(numbering.getElementsByTagNameNS(NS.w, "num")).find((n) => wVal(n, "numId") === numId);
+    if (!numbering || !src) return numId;
+    const next = String(Array.from(numbering.getElementsByTagNameNS(NS.w, "num")).reduce((m, e) => Math.max(m, Number(wVal(e, "numId")) || 0), 0) + 1);
+    const abs = wVal(childNS(src, NS.w, "abstractNumId"), "val") ?? "0";
+    const num = parseXml(`<w:num xmlns:w="${NS.w}" w:numId="${next}"><w:abstractNumId w:val="${abs}"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`)!.documentElement;
+    const root = numbering.documentElement;
+    root.insertBefore(numbering.importNode(num, true), childNS(root, NS.w, "numIdMacAtCleanup"));
+    return next;
+  }
+
   ensureList(kind: ListKind): string {
     let numbering = this.numberingXml();
     if (!numbering) {

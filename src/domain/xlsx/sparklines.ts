@@ -3,6 +3,7 @@
  * charts drawn inside a cell from a row or column of values. Read only; the XML stays as it is.
  */
 import { parseRange, Rect } from "./references";
+import { Scalar } from "./number-format";
 import { Sheet } from "./workbook-model";
 
 const X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
@@ -88,6 +89,70 @@ export function readSparklines(sheet: Sheet): Sparkline[] {
         rtl: on(group, "rightToLeft"),
       });
     }
+  }
+  return out;
+}
+
+/** Top-level arguments of `f(...)` as text (commas inside brackets, braces and quotes don't split). */
+function argsOf(formula: string): string[] {
+  const open = formula.indexOf("(");
+  const out: string[] = [];
+  let depth = 0, quote = false, start = open + 1;
+  for (let i = start; i < formula.length; i++) {
+    const ch = formula[i];
+    if (ch === '"') quote = !quote;
+    else if (quote) continue;
+    else if (ch === "(" || ch === "{") depth++;
+    else if (ch === ")" || ch === "}") {
+      if (depth === 0) {
+        out.push(formula.slice(start, i).trim());
+        return out;
+      }
+      depth--;
+    } else if ((ch === "," || ch === ";") && depth === 0) {
+      out.push(formula.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Google Sheets' =SPARKLINE(data, {options}) cells: the data and option pairs worked out by `evaluate` (an array
+ * result for a formula text at the cell), as sparklines the grid draws. Colours are CSS colours (names or #hex).
+ */
+export function formulaSparklines(sheet: Sheet, evaluate: (sheet: Sheet, row: number, col: number, formula: string) => Scalar[][] | null): Sparkline[] {
+  const used = sheet.used();
+  if (!used) return [];
+  const out: Sparkline[] = [];
+  for (const cell of sheet.cellsIn(used)) {
+    if (!cell.formula || !/^\s*SPARKLINE\s*\(/i.test(cell.formula)) continue;
+    const [data, options] = argsOf(cell.formula);
+    const rows = data ? evaluate(sheet, cell.row, cell.col, data) : null;
+    if (!rows) continue;
+    const opts = new Map<string, Scalar>();
+    for (const pair of (options && evaluate(sheet, cell.row, cell.col, options)) ?? []) if (typeof pair[0] === "string") opts.set(pair[0].toLowerCase(), pair[1] ?? null);
+    const str = (k: string) => (typeof opts.get(k) === "string" ? (opts.get(k) as string) : undefined);
+    const numOpt = (k: string) => (typeof opts.get(k) === "number" ? (opts.get(k) as number) : undefined);
+    const kind = str("charttype")?.toLowerCase();
+    out.push({
+      row: cell.row,
+      col: cell.col,
+      // ponytail: Google's "bar" (one horizontal stacked bar) is drawn as columns.
+      type: kind === "column" || kind === "bar" ? "column" : kind === "winloss" ? "stacked" : "line",
+      values: rows.flat().map((v) => (typeof v === "number" ? v : null)),
+      color: str("color1") ?? str("color") ?? "#4285F4",
+      negative: str("negcolor"),
+      high: str("highcolor"),
+      low: str("lowcolor"),
+      first: str("firstcolor"),
+      last: str("lastcolor"),
+      axis: opts.get("axis") === true ? str("axiscolor") ?? "#000000" : undefined,
+      min: numOpt("ymin"),
+      max: numOpt("ymax"),
+      weight: numOpt("linewidth") ?? 1,
+      rtl: opts.get("rtl") === true,
+    });
   }
   return out;
 }

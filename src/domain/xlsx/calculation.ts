@@ -134,6 +134,11 @@ export class Calc {
       case "call":
         if (isVolatile(node.name) || node.name === "ANCHORARRAY") info.always = true;
         node.args.forEach((a) => this.collect(a, sheet, info, seen));
+        // Google's exported formula text: its references are dependencies too.
+        if (node.name === "__XLUDF.DUMMYFUNCTION" && node.args[0]?.type === "str") {
+          const inner = this.parse(node.args[0].value);
+          if (inner) this.collect(inner, sheet, info, seen);
+        }
         break;
       case "un":
         this.collect(node.arg, sheet, info, seen);
@@ -216,6 +221,21 @@ export class Calc {
   }
 
   /** Evaluate `formula` as if it were in cell (row, col) of `sheet`. */
+  /** A formula's full result (every cell of an array), as if it were in (row, col); null when it can't be worked out. */
+  evaluateArray(sheet: Sheet, row: number, col: number, formula: string): Scalar[][] | null {
+    const node = this.parse(formula);
+    if (!node) return null;
+    this.write = false;
+    try {
+      return evaluateArray(node, this.context(sheet, row, col));
+    } catch (e) {
+      if (e instanceof Unsupported) return null;
+      throw e;
+    } finally {
+      this.done.clear();
+    }
+  }
+
   evaluate(sheet: Sheet, row: number, col: number, formula: string): Scalar {
     const node = this.parse(formula);
     if (!node) return Calc.UNSUPPORTED;

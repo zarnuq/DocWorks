@@ -5,6 +5,7 @@ import { tableReference } from "./tables";
  * file's cached result instead of showing a guess.
  */
 import { Node, parseFormula } from "./formula";
+import { runQuery } from "./query";
 import { Rect } from "./references";
 import { ErrorValue, Scalar, dateToSerial, formatValue, parseInput, serialToDate } from "./number-format";
 import type { Sheet, Workbook } from "./workbook-model";
@@ -422,7 +423,67 @@ function datedif(a: number, b: number, unit: string, ctx: EvalContext): number {
 const VOLATILE = new Set(["TODAY", "NOW", "RAND", "RANDBETWEEN", "OFFSET", "INDIRECT"]);
 export const isVolatile = (name: string) => VOLATILE.has(name);
 
+/** Apply `f` once, or element by element when an argument is an array (in ARRAYFORMULA), errors staying per cell. */
+function lifted(args: Thunk[], ctx: EvalContext, f: (vals: Scalar[]) => Scalar): Value {
+  const vs = args.map((a) => a());
+  const arrays = vs.map((v) => (isMatrix(v) || (ctx.arrays && isRange(v)) ? matrixOf(v, ctx) : null));
+  const one = (vals: Scalar[]) => {
+    try {
+      return f(vals);
+    } catch (e) {
+      if (e instanceof ErrorSignal) return e.value;
+      throw e;
+    }
+  };
+  if (!arrays.some(Boolean)) return f(vs.map((v) => scalar(v, ctx)));
+  const h = Math.max(...arrays.map((m) => m?.length ?? 1)), w = Math.max(...arrays.map((m) => m?.[0]?.length ?? 1));
+  const at = (i: number, r: number, c: number) => {
+    const m = arrays[i];
+    if (!m) return scalar(vs[i], ctx);
+    const row = m[m.length === 1 ? 0 : r];
+    return row?.[row.length === 1 ? 0 : c] ?? null;
+  };
+  return { kind: "matrix", rows: Array.from({ length: h }, (_, r) => Array.from({ length: w }, (_, c) => one(vs.map((_, i) => at(i, r, c))))) };
+}
+
+/** A regular expression from a formula (RE2 syntax is close enough to JavaScript's for common patterns). */
+function regex(pattern: string, flags = ""): RegExp {
+  try {
+    return new RegExp(pattern, flags);
+  } catch {
+    return fail("#REF!");
+  }
+}
+
 const FUNCTIONS: Record<string, Fn> = {
+  // Google Sheets: work the argument out over whole ranges (arithmetic and lifted functions go element by element).
+  ARRAYFORMULA: (a, c, nodes) => (arity(a, 1), evalInner(nodes[0], { ...c, arrays: true })),
+  // Google's export of its own functions: IFERROR(__xludf.DUMMYFUNCTION("REGEXMATCH(...)"), cached result).
+  "__XLUDF.DUMMYFUNCTION": (a, c) => evalInner(parseFormula(text(a[0], c)), c),
+  REGEXMATCH: (a, c) => (arity(a, 2), lifted(a, c, ([t, re]) => regex(toText(re)).test(toText(t)))),
+  REGEXTEST: (a, c) => (arity(a, 2, 3), lifted(a, c, ([t, re, ci]) => regex(toText(re), ci !== null && ci !== undefined && toBool(ci) ? "i" : "").test(toText(t)))),
+  REGEXEXTRACT: (a, c) => (arity(a, 2, 4), lifted(a.slice(0, 2), c, ([t, re]) => {
+    const m = regex(toText(re)).exec(toText(t));
+    return m ? m[1] ?? m[0] : fail("#N/A");
+  })),
+  REGEXREPLACE: (a, c) => (arity(a, 3, 5), lifted(a.slice(0, 3), c, ([t, re, to]) => toText(t).replace(regex(toText(re), "g"), toText(to)))),
+  QUERY: (a, c, nodes) => {
+    arity(a, 1, 3);
+    const data = matrixOf(a[0](), c);
+    let headers = a[2] ? Math.trunc(num(a[2], c)) : -1;
+    // -1: Google guesses one header row when the first row is text and a later one isn't.
+    if (headers < 0) headers = data.length > 1 && data[0].every((v) => typeof v === "string") && data.slice(1).some((r) => r.some((v) => typeof v !== "string" && v !== null)) ? 1 : 0;
+    try {
+      const rows = runQuery(data, a[1] ? text(a[1], c) : "", headers, nodes[0]?.type === "array");
+      return rows.length && rows[0].length ? { kind: "matrix", rows } : err("#N/A");
+    } catch (e) {
+      if (e instanceof ErrorSignal) throw e;
+      return err("#VALUE!");
+    }
+  },
+  // Drawn by the grid (see sparklines.ts); the cell itself shows nothing.
+  SPARKLINE: () => "",
+
   ANCHORARRAY: (a,c) => {
     const v=a[0]();
     if(!isRange(v)) return err("#REF!");

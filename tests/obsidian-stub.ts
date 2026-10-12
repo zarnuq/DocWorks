@@ -26,6 +26,8 @@ export class TFolder {}
 
 /** The vault's local storage behind App.loadLocalStorage / saveLocalStorage, shared by every App. */
 export const localData = new Map<string, unknown>();
+/** Desktop by default; tests flip it to check the mobile app. */
+export const Platform = { isDesktopApp: true, isMobile: false };
 
 export class App {
   scope = new Scope();
@@ -110,3 +112,11 @@ export class Setting {
 export class Plugin {}
 
 export function setIcon(_el: HTMLElement, _icon: string) {}
+
+export class Component {
+  load() { this.onload(); }
+  onload() {}
+  unload() { this.onunload(); }
+  onunload() {}
+  register(_cb: () => unknown) {}
+}

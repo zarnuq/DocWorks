@@ -180,6 +180,18 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
   if (layout.cols.length > 1) throw new Error("A pivot table here can have one column field.");
   if (!layout.values.length) throw new Error("Add at least one value.");
   const { header, records } = sourceOf(sheet, p);
+  // Sums, averages, maxima and minima show in their source column's number format (as Google's pivot tables do).
+  const src = sheet.wb.sheets.find((x) => x.name === p.source?.sheet);
+  const formats = layout.values.map((v) => {
+    if (v.fn === "count" || !src || !p.source) return null;
+    const { r1: top, r2: bottom, c1: left } = p.source.ref;
+    for (let r = top + 1; r <= bottom; r++) {
+      const cell = src.at(r, left + v.field);
+      if (typeof cell?.value === "number") return sheet.wb.styles.numFmt(cell.style);
+    }
+    return null;
+  });
+  const headRows = !layout.cols.length ? 1 : layout.values.length > 1 ? 3 : 2;
   const grid = pivotGrid(header, records, layout);
   const { r1, c1 } = p.location;
   const location: Rect = { r1, c1, r2: r1 + grid.length - 1, c2: c1 + grid[0].length - 1 };
@@ -241,7 +253,51 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
       // Cells: clear the old area, then write the table.
       const s = e.wb.sheets.find((x) => x.ref.path === path)!;
       for (const c of s.cellsIn({ r1: old.r1, c1: old.c1, r2: Math.max(old.r2, location.r2), c2: Math.max(old.c2, location.c2) })) if (c.value !== null || c.formula !== undefined) s.setCell(c.row, c.col, { value: null, formula: null });
-      grid.forEach((row, i) => row.forEach((v, j) => v !== null && s.setCell(r1 + i, c1 + j, { value: v })));
+      const styles = new Map<string, number>();
+      const styleOf = (fmt: string | null) => {
+        if (!fmt || fmt === "General") return 0;
+        if (!styles.has(fmt)) styles.set(fmt, s.wb.styles.derive(0, { numFmt: fmt }));
+        return styles.get(fmt)!;
+      };
+      if (formats.some((f) => f && f !== "General")) s.wb.touchStyles();
+      grid.forEach((row, i) =>
+        row.forEach((v, j) => {
+          if (v === null) return;
+          const fmt = typeof v === "number" && i >= headRows && j >= 1 ? formats[(j - 1) % layout.values.length] : null;
+          s.setCell(r1 + i, c1 + j, { value: v, style: styleOf(fmt) });
+        })
+      );
     }
   );
+}
+
+/**
+ * Google's Insert › Pivot table: a new sheet ("Pivot Table 1"...) with a pivot table over `r` on `source`,
+ * starting from the first text column as rows and the sum of the first number column (or a count). One undo step.
+ */
+export function insertPivot(e: Edits, source: Sheet, r: Rect): string {
+  if (r.r2 <= r.r1) throw new Error("Select a range with a header row and at least one row of data.");
+  const header = Array.from({ length: r.c2 - r.c1 + 1 }, (_, i) => source.at(r.r1, r.c1 + i)?.value ?? null);
+  const column = (i: number) => Array.from({ length: r.r2 - r.r1 }, (_, k) => source.at(r.r1 + 1 + k, r.c1 + i)?.value ?? null);
+  const text = header.findIndex((_, i) => column(i).some((v) => typeof v === "string"));
+  const number = header.findIndex((_, i) => i !== text && column(i).some((v) => typeof v === "number"));
+  const layout: PivotLayout = {
+    rows: text >= 0 ? [text] : [0],
+    cols: [],
+    values: [number >= 0 ? { field: number, fn: "sum" } : { field: text >= 0 ? text : 0, fn: "count" }],
+  };
+  let n = 1;
+  while (e.wb.sheet(`Pivot Table ${n}`)) n++;
+  const name = `Pivot Table ${n}`;
+  const at = e.wb.sheets.indexOf(source), sourceName = source.name;
+  e.run(() => {
+    e.structural(() => {
+      const ref = e.wb.pkg.addSheet(name, `<worksheet xmlns="${S_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetFormatPr defaultRowHeight="15"/><sheetData/></worksheet>`, at);
+      e.wb.pkg.addPivotTable(ref.path, sourceName, rangeName(r));
+    });
+    const sheet = e.wb.sheet(name)!;
+    refreshPivot(e, sheet, readPivots(sheet)[0], layout);
+    return [];
+  });
+  return name;
 }

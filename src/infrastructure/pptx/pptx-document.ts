@@ -63,6 +63,9 @@ interface SectionSpan {
 }
 
 const PRESENTATION = "ppt/presentation.xml";
+const P188 = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
+const REL_AUTHORS = "http://schemas.microsoft.com/office/2018/10/relationships/authors";
+const REL_COMMENTS = "http://schemas.microsoft.com/office/2018/10/relationships/comments";
 const SLIDE_CT = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
 const NOTES_CT = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
 const SKIPPED_PLACEHOLDERS = new Set(["dt", "ftr", "sldNum"]);
@@ -128,6 +131,34 @@ export class PptxDocument extends OoxmlPackage {
   themeOf = (masterPath: string) => this.relOfType(masterPath, "theme");
   notesOf = (slidePath: string) => this.relOfType(slidePath, "notesSlide");
 
+  /** PowerPoint's modern comment authors part (ppt/authors.xml), created on first use. */
+  commentAuthorsPart(create: boolean): string | null {
+    const found = this.rels(PRESENTATION).find((r) => r.uri === REL_AUTHORS)?.target;
+    if (found || !create) return found ?? null;
+    const path = "ppt/authors.xml";
+    this.putXml(path, parseXml(`<p188:authorLst xmlns:a="${NS.a}" xmlns:r="${NS.r}" xmlns:p188="${P188}"/>`)!, "application/vnd.ms-powerpoint.authors+xml");
+    this.addRel(PRESENTATION, REL_AUTHORS, path);
+    return path;
+  }
+
+  /** A slide's modern comment part, created (and linked from the slide's extension list) on first use. */
+  slideCommentPart(slidePath: string, create: boolean): string | null {
+    const found = this.rels(slidePath).find((r) => r.uri === REL_COMMENTS)?.target;
+    if (found || !create) return found ?? null;
+    const path = this.uniquePath("ppt/comments/modernComment_", ".xml");
+    this.putXml(path, parseXml(`<p188:cmLst xmlns:a="${NS.a}" xmlns:r="${NS.r}" xmlns:p188="${P188}"/>`)!, "application/vnd.ms-powerpoint.comments+xml");
+    const rId = this.addRel(slidePath, REL_COMMENTS, path);
+    const slide = this.parts.get(slidePath)!;
+    const root = slide.documentElement;
+    let extLst = Array.from(root.children).find((c) => c.localName === "extLst") ?? null;
+    if (!extLst) extLst = root.appendChild(slide.createElementNS(NS.p, "p:extLst"));
+    const ext = extLst.appendChild(slide.createElementNS(NS.p, "p:ext"));
+    ext.setAttribute("uri", "{6950BFC3-D8DA-4A85-94F7-54DA5524770B}");
+    ext.appendChild(slide.createElementNS(P188, "p188:commentRel")).setAttributeNS(NS.r, "r:id", rId);
+    this.touch(slidePath);
+    return path;
+  }
+
   /** Insert a new slide after `after` (-1 = first). Returns the new slide's index. */
   addSlide(after: number, layoutPath?: string): number {
     const slides = this.slides();
@@ -158,12 +189,16 @@ export class PptxDocument extends OoxmlPackage {
     const src = this.slides()[index];
     if (!src) throw new Error(`No slide at index ${index}`);
     const path = this.nextPartPath("ppt/slides/slide", ".xml");
-    this.parts.set(path, this.parts.get(src.path)!.cloneNode(true) as Document);
+    const copy = this.parts.get(src.path)!.cloneNode(true) as Document;
+    // Comments stay with the original slide (as in Google Slides): no comment part or link on the copy.
+    for (const link of Array.from(copy.getElementsByTagNameNS(P188, "commentRel"))) link.parentElement?.remove();
+    this.parts.set(path, copy);
 
     const rels = this.emptyRels();
     const srcRels = this.parts.get(relsPathOf(src.path));
     for (const r of Array.from(srcRels?.getElementsByTagNameNS(NS.pkgRels, "Relationship") ?? [])) {
-      if (!r.getAttribute("Type")?.endsWith("/notesSlide")) rels.documentElement.appendChild(rels.importNode(r, true));
+      const type = r.getAttribute("Type") ?? "";
+      if (!type.endsWith("/notesSlide") && !type.endsWith("/comments")) rels.documentElement.appendChild(rels.importNode(r, true));
     }
     this.parts.set(relsPathOf(path), rels);
     return this.registerSlide(path, index);
@@ -183,7 +218,8 @@ export class PptxDocument extends OoxmlPackage {
       const rels: SlideClip["slides"][number]["rels"] = [];
       let layout: SlideClip["slides"][number]["layout"] = null;
       for (const rel of this.rels(src.path)) {
-        if (rel.type === "notesSlide") continue;
+        // Notes travel as text; comments stay behind, as in Google Slides.
+        if (rel.type === "notesSlide" || rel.type === "comments") continue;
         if (rel.type === "slideLayout") {
           const root = this.xml(rel.target)?.documentElement;
           const master = this.masterOf(rel.target);
@@ -193,7 +229,9 @@ export class PptxDocument extends OoxmlPackage {
         }
         rels.push({ id: rel.id, uri: rel.uri, target: rel.target, external: rel.external, resources: rel.external ? undefined : await this.captureResources([rel.target]) });
       }
-      slides.push({ xml: new XMLSerializer().serializeToString(this.xml(src.path)!), layout, rels, notes: this.notesText(index) });
+      const xml = this.xml(src.path)!.cloneNode(true) as Document;
+      for (const link of Array.from(xml.getElementsByTagNameNS(P188, "commentRel"))) link.parentElement?.remove();
+      slides.push({ xml: new XMLSerializer().serializeToString(xml), layout, rels, notes: this.notesText(index) });
     }
     return { doc: this, slides, masters, size: { ...this.slideSize } };
   }

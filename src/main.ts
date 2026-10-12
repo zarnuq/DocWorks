@@ -1,4 +1,7 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFolder, WorkspaceLeaf } from "obsidian";
+import { exportNoteToDocx } from "./presentation/common/export-note";
+import { registerEmbeds } from "./presentation/common/embeds";
+import { canExportPdf } from "./presentation/common/pdf";
+import { App, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
 import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
 import { PptxView, VIEW_TYPE_PPTX } from "./presentation/pptx/pptx-view";
@@ -41,6 +44,8 @@ export default class DocWorksPlugin extends Plugin {
     if (this.settings.openDocx) this.claimExtension("docx", VIEW_TYPE_DOCX);
     if (this.settings.openPptx) this.claimExtension("pptx", VIEW_TYPE_PPTX);
     if (this.settings.openXlsx) this.claimExtension("xlsx", VIEW_TYPE_XLSX);
+    // Previews in notes (![[deck.pptx#3]]) for the same file types.
+    registerEmbeds(this, (["docx", "pptx", "xlsx"] as const).filter((k) => this.settings[k === "docx" ? "openDocx" : k === "pptx" ? "openPptx" : "openXlsx"]));
     this.app.workspace.onLayoutReady(() => this.nameBackgroundTabs());
 
     for (const [id, name, fromStart] of [
@@ -59,12 +64,30 @@ export default class DocWorksPlugin extends Plugin {
     }
 
     this.addCommand({
+      id: "export-note-docx",
+      name: "Export current note to .docx",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (file?.extension !== "md") return false;
+        if (!checking) void exportNoteToDocx(this.app, file);
+        return true;
+      },
+    });
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (file instanceof TFile && file.extension === "md")
+          menu.addItem((i) => i.setTitle("Export to .docx").setIcon("file-output").onClick(() => void exportNoteToDocx(this.app, file)));
+      })
+    );
+
+    this.addCommand({
       id: "export-pdf",
       name: "Export to PDF",
       checkCallback: (checking) => {
         const view = this.app.workspace.getActiveViewOfType(DocxView) ?? this.app.workspace.getActiveViewOfType(PptxView) ?? this.app.workspace.getActiveViewOfType(XlsxView);
-        if (view && !checking) void view.exportPdf();
-        return !!view;
+        if (!view || !canExportPdf()) return false;
+        if (!checking) void view.exportPdf();
+        return true;
       },
     });
 

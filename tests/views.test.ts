@@ -234,6 +234,31 @@ describe("PptxView empty text boxes", () => {
   });
 });
 
+describe("PptxView comments", () => {
+  it("posts, replies to and resolves a comment thread on the current slide", async () => {
+    const { slideComments } = await import("../src/domain/pptx/comments");
+    const view = mount(PptxView, "sample.pptx");
+    await open(view, "a.pptx");
+    const v = view as any;
+    v.commentsDialog();
+    const modal = () => Array.from(document.querySelectorAll(".test-modal")).pop()!;
+    const post = (label: string, text: string) => {
+      const box = modal().querySelector<HTMLTextAreaElement>(`textarea[aria-label='${label}']`)!;
+      box.value = text;
+      (box.nextElementSibling as HTMLButtonElement).click();
+    };
+    post("New comment", "Tighten this slide");
+    post("Reply", "On it");
+    Array.from(modal().querySelectorAll("button")).find((b) => b.textContent === "Resolve")!.click();
+    const [t] = slideComments(v.doc, v.doc.slides()[0].path);
+    expect(t.messages.map((m: { text: string }) => m.text)).toEqual(["Tighten this slide", "On it"]);
+    expect(t.resolved).toBe(true);
+    expect(modal().textContent).toContain("Resolved");
+    v.undo();
+    expect(slideComments(v.doc, v.doc.slides()[0].path)[0].resolved).toBe(false);
+  });
+});
+
 describe("PptxView notes", () => {
   it("sizes the notes box to the slide's width so the two line up on wide screens", async () => {
     const view = mount(PptxView, "sample.pptx");
