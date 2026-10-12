@@ -152,6 +152,8 @@ export class PptxView extends FileView {
   private stageEl!: HTMLElement;
   private slideHostEl!: HTMLElement;
   private notesEl!: HTMLTextAreaElement;
+  private notesHighlightEl!: HTMLElement;
+  private notesObserver: ResizeObserver | null = null;
   private notesTimer: number | null = null;
   private propsEl!: HTMLElement;
   private showProps = this.app.loadLocalStorage(PROPS_KEY) !== "hidden";
@@ -317,12 +319,28 @@ export class PptxView extends FileView {
     this.propsEl = body.createDiv({ cls: "pptx-props" });
     this.propsEl.hide();
     this.slideHostEl.addEventListener("pointerdown", (e) => this.drawing && this.startDraw(e), { capture: true });
-    this.notesEl = this.stageEl.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes", placeholder: "Click to add speaker notes" } });
+    const notesBox = this.stageEl.createDiv({ cls: "pptx-notes-box" });
+    this.notesHighlightEl = notesBox.createDiv({ cls: "pptx-notes-highlight", attr: { "aria-hidden": "true" } });
+    this.notesEl = notesBox.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes", placeholder: "Click to add speaker notes" } });
     this.notesEl.addEventListener("input", () => {
+      this.clearNotesHighlight();
       if (this.notesTimer) window.clearTimeout(this.notesTimer);
       this.notesTimer = window.setTimeout(() => this.flushNotes(), 400);
     });
     this.notesEl.addEventListener("blur", () => this.flushNotes());
+    const syncNotesHighlight = () => {
+      const style = getComputedStyle(this.notesEl);
+      for (const property of ["font-family", "font-size", "font-weight", "font-style", "line-height", "letter-spacing", "padding-top", "padding-right", "padding-bottom", "padding-left", "border-width", "word-break", "overflow-wrap", "tab-size", "text-align"]) {
+        this.notesHighlightEl.style.setProperty(property, style.getPropertyValue(property));
+      }
+      this.notesHighlightEl.style.width = `${this.notesEl.offsetWidth}px`;
+      this.notesHighlightEl.scrollTop = this.notesEl.scrollTop;
+      this.notesHighlightEl.scrollLeft = this.notesEl.scrollLeft;
+    };
+    this.notesEl.addEventListener("scroll", syncNotesHighlight);
+    this.notesObserver?.disconnect();
+    this.notesObserver = new ResizeObserver(syncNotesHighlight);
+    this.notesObserver.observe(this.notesEl);
 
     this.stageEl.addEventListener("keydown", this.onStageKey);
     this.stageEl.addEventListener("pointerdown", (e) => {
@@ -371,6 +389,8 @@ export class PptxView extends FileView {
     this.unloadFonts = null;
     this.thumbObserver?.disconnect();
     this.thumbObserver = null;
+    this.notesObserver?.disconnect();
+    this.notesObserver = null;
     document.removeEventListener("selectionchange", this.onSelectionChange);
     window.removeEventListener("blur", this.onWindowBlur);
     this.resizeObserver?.disconnect();
@@ -656,6 +676,9 @@ export class PptxView extends FileView {
     this.rendered.forEach((rs) => this.wireShape(rs));
 
     this.notesEl.value = this.doc.notesText(this.index);
+    this.clearNotesHighlight();
+    const notesMatch = this.findMatches[this.findIndex];
+    if (this.findEl && notesMatch?.kind === "notes" && notesMatch.slide === this.index && notesMatch.text === this.notesEl.value) this.highlightNotes(notesMatch.start, notesMatch.end);
     // Keep the selection across redraws of the same slide (resizes, edits).
     const xml = this.currentSlideXml();
     const keep = this.items.filter((i) => xml?.contains(i));
@@ -2229,6 +2252,8 @@ export class PptxView extends FileView {
       this.findIndex = Math.min(this.findIndex, this.findMatches.length - 1);
       count.setText(this.findInput.value ? (this.findMatches.length ? `${this.findIndex + 1} of ${this.findMatches.length}` : "No results") : "");
       preview.empty();
+      this.clearNotesHighlight();
+      if ("highlights" in CSS) highlights().delete("dw-find");
       replaceButton.disabled = this.findMatches[this.findIndex]?.kind !== "text";
       replaceAllButton.disabled = !this.findMatches.some(m => m.kind === "text");
     };
@@ -2242,12 +2267,11 @@ export class PptxView extends FileView {
     const show = (m: SlideSearchMatch) => {
       this.showMatch(m);
       replaceButton.disabled = m.kind !== "text";
-      if (m.kind === "text") { preview.empty(); return; }
-      showFindPreview(preview, `Slide ${m.slide + 1} · ${m.kind === "notes" ? "Speaker notes" : `${m.resolved ? "Resolved comment" : "Comment"}${m.author ? ` · ${m.author}` : ""}`}`, m.text, m.start, m.end,
-        m.kind === "notes" ? "Open notes" : "Open comment", () => {
+      if (m.kind !== "comment") { preview.empty(); return; }
+      showFindPreview(preview, `Slide ${m.slide + 1} · ${m.resolved ? "Resolved comment" : "Comment"}${m.author ? ` · ${m.author}` : ""}`, m.text, m.start, m.end,
+        "Open comment", () => {
           if (this.index !== m.slide) this.goTo(m.slide);
-          if (m.kind === "notes") { this.notesEl.focus(); this.notesEl.setSelectionRange(m.start, m.end); }
-          else this.commentsDialog(m);
+          this.commentsDialog(m);
         });
     };
     const button = (text: string, title: string, fn: () => void) => {
@@ -2295,6 +2319,7 @@ export class PptxView extends FileView {
     this.findEl?.remove();
     this.findEl = null;
     this.findMatches = [];
+    this.clearNotesHighlight();
     if ("highlights" in CSS) highlights().delete("dw-find");
     this.stageEl.focus({ preventScroll: true });
   }
@@ -2304,8 +2329,12 @@ export class PptxView extends FileView {
     if (m.slide !== this.index) this.goTo(m.slide);
     this.findInput.focus({ preventScroll: true });
     if ("highlights" in CSS) highlights().delete("dw-find");
+    this.clearNotesHighlight();
     if (m.kind !== "text") {
-      if (m.kind === "notes") this.notesEl.setSelectionRange(m.start, m.end);
+      if (m.kind === "notes") {
+        this.highlightNotes(m.start, m.end);
+        this.notesEl.scrollIntoView({ block: "nearest" });
+      }
       return;
     }
     const rs = this.rendered.find((r) => r.shape.el === m.owner && r.textEl);
@@ -2316,6 +2345,26 @@ export class PptxView extends FileView {
     const range = rangeInParagraph(p, m.start, m.end);
     if ("highlights" in CSS) highlights().set("dw-find", new Highlight(range));
     p.scrollIntoView({ block: "nearest" });
+  }
+
+  private clearNotesHighlight(): void {
+    this.notesHighlightEl?.empty();
+    this.notesHighlightEl?.parentElement?.removeClass("is-find");
+  }
+
+  private highlightNotes(start: number, end: number): void {
+    this.clearNotesHighlight();
+    const mirror = this.notesHighlightEl;
+    mirror.appendText(this.notesEl.value.slice(0, start));
+    const mark = mirror.createEl("mark", { text: this.notesEl.value.slice(start, end) });
+    mirror.appendText(this.notesEl.value.slice(end) + "\n");
+    mirror.parentElement?.addClass("is-find");
+    this.notesEl.dispatchEvent(new Event("scroll"));
+    const top = mark.offsetTop;
+    if (top < this.notesEl.scrollTop || top + mark.offsetHeight > this.notesEl.scrollTop + this.notesEl.clientHeight) {
+      this.notesEl.scrollTop = Math.max(0, top - this.notesEl.clientHeight / 2);
+      this.notesEl.dispatchEvent(new Event("scroll"));
+    }
   }
 
   private setZoom(zoom: number): void {

@@ -813,11 +813,51 @@ img.docx-behind,
 }
 
 /* Speaker notes, hidden slides */
+.pptx-notes-box {
+  position: relative;
+  flex-shrink: 0;
+  width: min(var(--pptx-slide-width, 100%), 100%);
+  margin: 0 auto;
+}
+
+.pptx-notes-highlight {
+  display: none;
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: pre-wrap;
+  border-style: solid;
+  border-color: transparent;
+  border-radius: 4px;
+  color: transparent;
+  pointer-events: none;
+}
+
+.pptx-notes-box.is-find {
+  background: var(--background-primary);
+  border-radius: 4px;
+}
+
+.pptx-notes-box.is-find .pptx-notes-highlight {
+  display: block;
+}
+
+.pptx-notes-highlight mark {
+  color: transparent;
+  background: var(--text-highlight-bg, #ffdf00);
+}
+
+.pptx-notes-box.is-find textarea.pptx-notes {
+  background: transparent;
+}
+
 textarea.pptx-notes {
+  position: relative;
   display: block;
   flex-shrink: 0;
   box-sizing: border-box;
-  width: min(var(--pptx-slide-width, 100%), 100%);
+  width: 100%;
   /* Centered under the slide even if app styles override the stage's align-items. */
   align-self: auto;
   margin: 0 auto;

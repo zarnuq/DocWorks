@@ -378,6 +378,38 @@ describe("DocxView find", () => {
 });
 
 describe("PptxView annotation find", () => {
+  it("highlights repeated notes in place and clears them on no results, close and editing", async () => {
+    const view = mount(PptxView, 'sample.pptx');
+    const file = await open(view, 'highlight-notes.pptx');
+    const v = view as any;
+    v.doc.setNotes(0, 'needle first\nsecond needle');
+    v.renderCurrent();
+    const before = v.doc.snapshot();
+    v.openFind();
+    const input = view.contentEl.querySelector<HTMLInputElement>('.pptx-find input[type=search]')!;
+    input.value = 'needle'; input.dispatchEvent(new Event('input'));
+    const mirror = view.contentEl.querySelector<HTMLElement>('.pptx-notes-highlight')!;
+    expect(mirror.getAttribute('aria-hidden')).toBe('true');
+    expect(mirror.textContent).toBe(v.notesEl.value + '\n');
+    expect(mirror.querySelector('mark')!.previousSibling?.textContent ?? '').toBe('');
+    expect(document.activeElement).toBe(input);
+    v.renderCurrent();
+    expect(mirror.querySelector('mark')!.textContent).toBe('needle');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(mirror.querySelector('mark')!.previousSibling!.textContent).toBe('needle first\nsecond ');
+    expect(v.doc.snapshot()).toEqual(before);
+    input.value = 'absent'; input.dispatchEvent(new Event('input'));
+    expect(mirror.querySelector('mark')).toBeNull();
+    input.value = 'needle'; input.dispatchEvent(new Event('input'));
+    v.notesEl.value = 'changed notes'; v.notesEl.dispatchEvent(new Event('input'));
+    expect(mirror.querySelector('mark')).toBeNull();
+    v.doc.setNotes(0, 'needle'); v.renderCurrent();
+    input.dispatchEvent(new Event('input'));
+    v.closeFind();
+    expect(mirror.querySelector('mark')).toBeNull();
+    await view.onUnloadFile(file);
+  });
+
   it("searches speaker-note edits before their delayed save", async () => {
     const view = mount(PptxView, 'sample.pptx');
     const file = await open(view, 'notes.pptx');
@@ -387,7 +419,8 @@ describe("PptxView annotation find", () => {
     v.openFind();
     const input = view.contentEl.querySelector<HTMLInputElement>('.pptx-find input[type=search]')!;
     input.value = 'needle'; input.dispatchEvent(new Event('input'));
-    expect(view.contentEl.querySelector('.dw-find-preview mark')!.textContent).toBe('needle');
+    expect(view.contentEl.querySelector('.pptx-notes-highlight mark')!.textContent).toBe('needle');
+    expect(view.contentEl.querySelector('.dw-find-preview')!.textContent).toBe('');
     expect(v.doc.notesText(0)).toBe('pending needle');
     await view.onUnloadFile(file);
   });
@@ -406,7 +439,8 @@ describe("PptxView annotation find", () => {
     const input = bar.querySelector<HTMLInputElement>('input[type=search]')!;
     input.value = 'needle'; input.dispatchEvent(new Event('input'));
     expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('1 of 4');
-    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Speaker notes');
+    expect(view.contentEl.querySelector('.pptx-notes-highlight mark')!.textContent).toBe('needle');
+    expect(bar.querySelector('.dw-find-preview')!.textContent).toBe('');
     expect(Array.from(bar.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Replace')!.disabled).toBe(true);
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Comment');
@@ -418,7 +452,8 @@ describe("PptxView annotation find", () => {
     input.focus();
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(v.index).toBe(1);
-    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Slide 2');
+    expect(view.contentEl.querySelector('.pptx-notes-highlight mark')!.textContent).toBe('needle');
+    expect(bar.querySelector('.dw-find-preview')!.textContent).toBe('');
     expect(document.activeElement).toBe(input);
     bar.querySelector<HTMLInputElement>('[aria-label="Search speaker notes"]')!.click();
     expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('1 of 2');
