@@ -71,9 +71,13 @@ export class Menu {
     cb(item);
     return this;
   }
+  hideCallbacks: Fn[] = [];
   addSeparator() { return this; }
-  showAtPosition() {}
-  showAtMouseEvent() {}
+  onHide(cb: Fn) { this.hideCallbacks.push(cb); return this; }
+  hide() { this.hideCallbacks.forEach((cb) => cb()); return this; }
+  showAtPosition() { Menu.last = this; }
+  showAtMouseEvent() { Menu.last = this; }
+  static last: Menu | null = null;
 }
 
 export class Modal {

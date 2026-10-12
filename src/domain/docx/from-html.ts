@@ -36,6 +36,16 @@ interface Para {
 
 export function htmlToDoc(root: HTMLElement, ctx: FromHtmlContext): PMNode {
   const out: PMNode[] = [];
+  // Embeds: a note's text stays (without its title and link chrome); pictures stay; any other file (a deck, sheet,
+  // PDF...) is written as its link text instead of the preview drawn in the note.
+  for (const embed of Array.from(root.querySelectorAll(".internal-embed"))) {
+    if (embed.classList.contains("markdown-embed")) {
+      embed.querySelectorAll(".markdown-embed-title, .markdown-embed-link, .embed-title").forEach((e) => e.remove());
+      continue;
+    }
+    if (embed.classList.contains("image-embed")) continue;
+    embed.replaceWith(document.createTextNode(embed.getAttribute("alt") || embed.getAttribute("src") || ""));
+  }
 
   /** Inline content of an element (text with marks, pictures, line breaks). */
   const inline = (el: Node, marks: readonly Mark[], into: PMNode[]) => {

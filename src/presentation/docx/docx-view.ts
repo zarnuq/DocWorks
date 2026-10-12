@@ -12,7 +12,7 @@ import { Origins, readDocx, startsWordPage } from "../../domain/docx/docx-reader
 import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
-import { FONTS, PaperTheme, promptText, showValue, Toolbar } from "../common/toolbar";
+import { FONTS, PaperTheme, promptText, showValue, Toolbar, shieldEditingKeys } from "../common/toolbar";
 import { pickImage } from "../common/images";
 import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
@@ -139,6 +139,13 @@ export class DocxView extends FileView {
       this.openFind();
       return false;
     });
+    this.scope.register(["Mod"], "h", () => {
+      this.openFind();
+      return false;
+    });
+    // Obsidian binds these to its markdown editor (bold, italic, link...) or the user to other commands: inside the
+    // document they belong to the document's editor, which handles them itself.
+    shieldEditingKeys(this.scope);
   }
 
   onPaneMenu(menu: Menu, source: string): void {
@@ -204,7 +211,9 @@ export class DocxView extends FileView {
 
     const toolbar = this.contentEl.createDiv({ cls: "dw-toolbar" });
     const body = this.contentEl.createDiv({ cls: "docx-body" });
-    this.outlineEl = body.createDiv({ cls: "docx-outline", attr: { "aria-label": "Document outline" } });
+    // Regions are named through hidden labels: Obsidian shows aria-label as a hover tooltip.
+    const outlineName = body.createDiv({ cls: "dw-sr-only", text: "Document outline", attr: { id: `docx-outline-name-${Math.random().toString(36).slice(2)}` } });
+    this.outlineEl = body.createDiv({ cls: "docx-outline", attr: { "aria-labelledby": outlineName.id } });
     this.outlineEl.toggle(this.outlineOpen);
     const pane = body.createDiv({ cls: "docx-editor-pane" });
     const rulerViewport = this.rulerViewport = pane.createDiv({ cls: "docx-ruler-viewport" });
@@ -231,7 +240,7 @@ export class DocxView extends FileView {
       if (pos !== undefined) this.equationDialog(pos);
     });
     this.editor = new EditorView(host, {
-      attributes: { role: "textbox", "aria-label": "Document content", "aria-multiline": "true" },
+      attributes: { role: "textbox", "aria-labelledby": host.createDiv({ cls: "dw-sr-only", text: "Document content", attr: { id: `docx-content-name-${Math.random().toString(36).slice(2)}` } }).id, "aria-multiline": "true" },
       state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize)] }),
       nodeViews: {
         image: (node, view, getPos) =>
@@ -913,8 +922,11 @@ export class DocxView extends FileView {
       return;
     }
     const editor = this.editor;
-    const bar = (this.findEl = createDiv({ cls: "pptx-find" }));
-    this.contentEl.insertBefore(bar, this.hostEl?.parentElement ?? null);
+    const bar = createDiv({ cls: "pptx-find" });
+    // Above the document area: the content element's child that holds the editor (outline, pages, review).
+    const body = Array.from(this.contentEl.children).find((c) => this.hostEl && c.contains(this.hostEl)) ?? null;
+    this.contentEl.insertBefore(bar, body);
+    this.findEl = bar;
     const input = bar.createEl("input", { type: "search", attr: { placeholder: "Find", "aria-label": "Find" } });
     const replace = bar.createEl("input", { type: "text", attr: { placeholder: "Replace with", "aria-label": "Replace with" } });
     const caseLabel = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": "Match case" } });

@@ -34,6 +34,7 @@ export function chartFormatForm(host: HTMLElement, format: ChartFormat, data: Ch
   const text = (label: string, value: string, set: (v: string) => void) => {
     const input = field(label).createEl("input", { type: "text", value, attr: { "aria-label": label } });
     input.addEventListener("input", () => set(input.value));
+    return input;
   };
   text("Chart title", format.title, (v) => (format.title = v));
   const legend = field("Legend").createEl("select", { cls: "dropdown", attr: { "aria-label": "Legend" } });
@@ -44,21 +45,26 @@ export function chartFormatForm(host: HTMLElement, format: ChartFormat, data: Ch
     const box = field(label).createEl("input", { type: "checkbox", attr: { "aria-label": label } });
     box.checked = value;
     box.addEventListener("change", () => set(box.checked));
+    return box;
   };
   check("Data labels", format.labels, (v) => (format.labels = v));
-  check("Gridlines", format.value.gridlines, (v) => (format.value.gridlines = v));
-  text("Category axis title", format.category.title, (v) => (format.category.title = v));
-  text("Value axis title", format.value.title, (v) => (format.value.title = v));
+  // Axis settings, hidden for pies (they have no axes), as in Google's chart editor.
+  const axisRows: HTMLElement[] = [];
+  axisRows.push(check("Gridlines", format.value.gridlines, (v) => (format.value.gridlines = v)).parentElement!);
+  axisRows.push(text("Category axis title", format.category.title, (v) => (format.category.title = v)).parentElement!);
+  axisRows.push(text("Value axis title", format.value.title, (v) => (format.value.title = v)).parentElement!);
   for (const end of ["min", "max"] as const) {
     const label = end === "min" ? "Value axis minimum" : "Value axis maximum";
     const input = field(label).createEl("input", { type: "number", value: format.value[end] === null ? "" : String(format.value[end]), attr: { "aria-label": label, placeholder: "Auto", step: "any" } });
     input.addEventListener("input", () => (format.value[end] = input.value === "" || !Number.isFinite(Number(input.value)) ? null : Number(input.value)));
+    axisRows.push(input.parentElement!);
   }
   const colorRow = host.createDiv({ cls: "dw-chart-colors" });
   /** One colour per series, or per slice on a pie; a combo also picks each series' type. */
   const renderColors = () => {
     colorRow.replaceChildren();
     const pie = format.kind === "pie" || format.kind === "doughnut";
+    for (const row of axisRows) row.toggle(!pie);
     (pie ? data.categories : data.series.map((s) => s.name)).forEach((name, i) => {
       const label = colorRow.createEl("label", { text: name });
       const input = label.createEl("input", { type: "color", value: (format.colors[i] ?? palette[i % palette.length]).slice(0, 7).toLowerCase(), attr: { "aria-label": `Colour of ${name}` } });

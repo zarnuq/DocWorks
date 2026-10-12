@@ -242,6 +242,19 @@ describe("charts in the grid", () => {
     el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
     expect(chartMenu).toHaveBeenCalledWith("xl/charts/chart1.xml", expect.anything());
   });
+
+  it("right-click on a chart opens the chart's menu, not the cell menu", async () => {
+    const { grid, host } = await mount();
+    const chartMenu = vi.fn(), contextMenu = vi.fn();
+    Object.assign(host, { charts: () => [{ key: "xl/charts/chart1.xml", x: 10, y: 10, w: 100, h: 80, draw: (el: HTMLElement) => el.createDiv({ cls: "svg-stub" }) }], chartMenu, contextMenu });
+    grid.render();
+    const el = grid.el.querySelector<HTMLElement>(".xlsx-chart .svg-stub")!;
+    const e = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 });
+    el.dispatchEvent(e);
+    expect(chartMenu).toHaveBeenCalledWith("xl/charts/chart1.xml", expect.anything());
+    expect(contextMenu).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(true);
+  });
 });
 
 describe("notes in the grid", () => {

@@ -152,7 +152,9 @@ export class Grid {
     this.el = parent.createDiv({ cls: "xlsx-grid" });
     this.scroll = this.el.createDiv({ cls: "xlsx-scroll" });
     this.spacer = this.scroll.createDiv({ cls: "xlsx-spacer" });
-    this.canvas = this.scroll.createDiv({ cls: "xlsx-canvas", attr: { role: "region", "aria-label": "Spreadsheet cells" } });
+    // Named through a hidden label: Obsidian shows aria-label as a hover tooltip, which a whole grid shouldn't have.
+    const name = this.el.createDiv({ cls: "dw-sr-only", text: "Spreadsheet cells", attr: { id: `dw-grid-name-${++accessibilityId}` } });
+    this.canvas = this.scroll.createDiv({ cls: "xlsx-canvas", attr: { role: "region", "aria-labelledby": name.id } });
     this.quads = ["corner", "top", "left", "main"].map((q) => {
       const el = this.canvas.createDiv({ cls: `xlsx-quad xlsx-quad-${q}` });
       el.createEl("canvas", { cls: "xlsx-paint", attr: { "aria-hidden": "true" } });
@@ -195,6 +197,12 @@ export class Grid {
     });
     this.canvas.addEventListener("pointerleave", () => this.showNote(null));
     this.canvas.addEventListener("contextmenu", (e) => {
+      const chart = (e.target as HTMLElement).closest<HTMLElement>(".xlsx-chart")?.dataset.chart;
+      if (chart && this.host.chartMenu) {
+        e.preventDefault();
+        this.host.chartMenu(chart, e);
+        return;
+      }
       const hit = this.hit(e.clientX, e.clientY);
       if (!hit) return;
       e.preventDefault();

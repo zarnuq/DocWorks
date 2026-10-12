@@ -117,6 +117,10 @@ describe("pivot table editor form", () => {
     col.value = "0";
     col.dispatchEvent(new Event("change"));
     host.querySelector<HTMLButtonElement>("button.xlsx-pivot-add")!.click();
+    // A new value starts on a field not used yet... (Region is now a column, Product a row, Amount a value: none left)
+    const fields = host.querySelectorAll<HTMLSelectElement>("select[aria-label='Value field']");
+    expect(fields[1].value).toBe("0");
+    fields[1].value = "0";
     const fns = host.querySelectorAll<HTMLSelectElement>("select[aria-label='Summarize by']");
     fns[1].value = "count";
     fns[1].dispatchEvent(new Event("change"));
@@ -124,6 +128,16 @@ describe("pivot table editor form", () => {
     // A field is on one axis: Region moved from the rows to the columns.
     expect(boxes[0].checked).toBe(false);
     expect(got).toEqual({ rows: [1], cols: [0], values: [{ field: 2, fn: "sum" }, { field: 0, fn: "count" }] });
+  });
+
+  it("adds a value on the first unused field, counting it when every field is taken", async () => {
+    const { pivotForm } = await import("../src/presentation/xlsx/rule-forms");
+    const host = document.body.createDiv();
+    pivotForm(host, { fields: ["Region", "Product", "Amount"], layout: { rows: [0], cols: [], values: [{ field: 2, fn: "sum" }] }, apply: () => undefined });
+    host.querySelector<HTMLButtonElement>("button.xlsx-pivot-add")!.click();
+    const field = host.querySelectorAll<HTMLSelectElement>("select[aria-label='Value field']")[1];
+    const fn = host.querySelectorAll<HTMLSelectElement>("select[aria-label='Summarize by']")[1];
+    expect([field.value, fn.value]).toEqual(["1", "count"]);
   });
 });
 

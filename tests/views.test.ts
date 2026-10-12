@@ -232,6 +232,25 @@ describe("PptxView empty text boxes", () => {
     textEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(getSelection()!.anchorNode).toBe(textEl.querySelector("p"));
   });
+
+  it("drags an empty shape by its body (it has no text to select yet)", async () => {
+    const { blankPptx } = await import("../src/infrastructure/blank");
+    const { PptxDocument } = await import("../src/infrastructure/pptx/pptx-document");
+    const { addShape } = await import("../src/domain/pptx/slide-edit");
+    const deck = await PptxDocument.load(await blankPptx());
+    addShape(deck.xml(deck.slides()[0].path)!, "ellipse", { x: 100000, y: 100000, w: 2000000, h: 1000000 });
+    const bytes = await deck.save();
+    const app = new App();
+    app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const view = new PptxView(new WorkspaceLeaf(app) as unknown as RealLeaf);
+    document.body.appendChild(view.containerEl);
+    await open(view, "drag.pptx");
+    const v = view as any;
+    const move = vi.spyOn(v, "startMoveItems").mockImplementation(() => undefined);
+    const shape = v.rendered.find((r: any) => r.shape.name.startsWith("Shape "));
+    shape.textEl.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    expect(move).toHaveBeenCalled();
+  });
 });
 
 describe("PptxView comments", () => {
@@ -316,6 +335,33 @@ describe("DocxView switching files", () => {
     expect(words).not.toHaveBeenCalled();
     expect(review).not.toHaveBeenCalled();
     localData.delete("doc-works-review-panel");
+  });
+});
+
+describe("DocxView find", () => {
+  it("opens the find bar above the document (Ctrl+F / Ctrl+H)", async () => {
+    const view = mount(DocxView, "sample.docx");
+    await open(view, "a.docx");
+    (view as any).openFind();
+    const bar = view.contentEl.querySelector(".pptx-find");
+    expect(bar?.isConnected).toBe(true);
+    expect(document.activeElement).toBe(bar!.querySelector("input"));
+  });
+});
+
+describe("editing keys Obsidian hotkeys could take", () => {
+  const shielded = (view: any, mods: string[], key: string) => view.scope.keys.find((k: any) => k.key === key && k.mods.join() === mods.join());
+  it("keeps Shift+Tab and Mod+B/I/K... for the editors when one has focus", async () => {
+    for (const [View, file] of [[DocxView, "sample.docx"], [PptxView, "sample.pptx"]] as const) {
+      const view = mount(View as any, file);
+      for (const [mods, key] of [[["Shift"], "Tab"], [["Mod"], "b"], [["Mod"], "i"]] as const) expect(shielded(view, [...mods], key), `${View.name} ${mods}+${key}`).toBeTruthy();
+      const editable = document.body.createDiv({ attr: { contenteditable: "true" } });
+      editable.focus();
+      const k = shielded(view, ["Shift"], "Tab");
+      // Not handled by the view (true): the key goes on to the focused editor, and no app hotkey takes it.
+      expect(k.fn(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true }))).toBe(true);
+      editable.remove();
+    }
   });
 });
 
@@ -685,7 +731,7 @@ describe("editor accessibility", () => {
     const file = await open(view, "accessibility.pptx");
     const saved = vi.spyOn(view.app.vault, "modifyBinary");
     const list = view.contentEl.querySelector<HTMLElement>('[role="listbox"]')!;
-    expect(list?.getAttribute("aria-label")).toBe("Slides");
+    expect(document.getElementById(list!.getAttribute("aria-labelledby")!)?.textContent).toBe("Slides");
     list.focus();
     list.dispatchEvent(new KeyboardEvent("keydown", {key: "End", bubbles: true}));
     const options = list.querySelectorAll('[role="option"]');
@@ -701,7 +747,10 @@ describe("editor accessibility", () => {
   it("names the document editor and theme/color controls", async () => {
     const view = mount(DocxView, "sample.docx");
     const file = await open(view, "accessibility.docx");
-    expect(view.contentEl.querySelector('.ProseMirror')?.getAttribute("aria-label")).toBe("Document content");
+    // Named by a hidden label, not aria-label (Obsidian turns aria-label into a hover tooltip over the whole page).
+    const pm = view.contentEl.querySelector('.ProseMirror')!;
+    expect(pm.getAttribute("aria-label")).toBeNull();
+    expect(document.getElementById(pm.getAttribute("aria-labelledby")!)?.textContent).toBe("Document content");
     for (const input of Array.from(view.contentEl.querySelectorAll('input[type="color"]'))) expect(input.getAttribute("aria-label")).toBeTruthy();
     expect(view.contentEl.querySelector('[aria-label="Light paper"]')?.getAttribute("aria-pressed")).toBe("true");
     await view.onUnloadFile(file);

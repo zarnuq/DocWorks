@@ -30,7 +30,11 @@ const kids = (el: Element | null | undefined, ns: string, name: string) => Array
 const kid = (el: Element | null | undefined, ns: string, name: string) => kids(el, ns, name)[0] ?? null;
 const textOf = (body: Element | null) => kids(body, NS.a, "p").map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join("")).join("\n");
 const guid = () => `{${crypto.randomUUID().toUpperCase()}}`;
-const now = () => new Date().toISOString().replace("Z", "");
+/** Local time without a zone ("2026-10-12T10:56:59.123"), as PowerPoint stamps comments. */
+const now = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().replace("Z", "");
+};
 
 function authorNames(doc: PptxDocument): Map<string, string> {
   const path = doc.commentAuthorsPart(false);

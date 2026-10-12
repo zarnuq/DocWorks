@@ -5,7 +5,7 @@
 import { Attrs, Mark, MarkType, Node as PMNode, ResolvedPos } from "prosemirror-model";
 import { Command, EditorState, Plugin, PluginKey, TextSelection, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
-import { baseKeymap, chainCommands, toggleMark } from "prosemirror-commands";
+import { baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, splitBlockAs, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { InputRule, inputRules } from "prosemirror-inputrules";
@@ -183,13 +183,18 @@ function setTableAttrs(fn: (a: TableAttrs, info: CellInfo) => Partial<TableAttrs
   };
 }
 
-function insertBlockAfter(node: PMNode): Command {
+function insertBlockAfter(node: PMNode, enter = false): Command {
   return (state, dispatch) => {
     const $from = state.selection.$from;
     // After the block the cursor is in; inside a column section, after the block in that section.
     const depth = $from.depth > 1 && $from.node(1).type === schema.nodes.columns ? 2 : 1;
     const pos = $from.depth >= depth ? $from.after(depth) : $from.pos;
-    if (dispatch) dispatch(state.tr.insert(pos, node).scrollIntoView());
+    if (dispatch) {
+      const tr = state.tr.insert(pos, node);
+      // `enter`: the caret goes to the start of the new block (a table's first cell), as in Google Docs.
+      if (enter) tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)));
+      dispatch(tr.scrollIntoView());
+    }
     return true;
   };
 }
@@ -584,6 +589,43 @@ export const cmd = {
     });
   },
 
+  /**
+   * Enter: the new paragraph continues the list (same numbering and level) as in Google Docs; after a heading or
+   * title it's normal text. The original keeps its identity (key) and section break; the new one gets neither.
+   */
+  splitParagraph: splitBlockAs((node, atEnd) => {
+    if (node.type !== schema.nodes.paragraph) return null;
+    const a = node.attrs as { style: string | null };
+    const heading = atEnd && !!a.style && /^(Heading\d|Title|Subtitle)$/.test(a.style);
+    return { type: node.type, attrs: { ...node.attrs, key: null, sectPr: null, ...(heading ? { style: null } : {}) } };
+  }),
+
+  /** Tab / Shift+Tab in a table: the next or previous cell; Tab in the last cell adds a row (as in Google Docs). */
+  goToCell(dir: 1 | -1): Command {
+    return (state, dispatch) => {
+      const $from = state.selection.$from;
+      let d = $from.depth;
+      while (d > 0 && $from.node(d).type !== schema.nodes.table_cell) d--;
+      if (d < 3) return false;
+      const table = $from.node(d - 2), tablePos = $from.before(d - 2);
+      const cells: number[] = [];
+      table.forEach((row, rowOffset) => row.forEach((_, cellOffset) => cells.push(tablePos + 1 + rowOffset + 1 + cellOffset)));
+      const i = cells.indexOf($from.before(d)) + dir;
+      if (!dispatch) return true;
+      if (i < 0) return true;
+      const tr = state.tr;
+      let target = cells[i];
+      if (target === undefined) {
+        const last = table.lastChild!;
+        const at = tablePos + table.nodeSize - 1;
+        tr.insert(at, schema.nodes.table_row.create(null, Array.from({ length: last.childCount }, newCell)));
+        target = at + 1;
+      }
+      dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(target + 1))).scrollIntoView());
+      return true;
+    };
+  },
+
   /** Enter in an empty list item ends the list instead of adding another item. */
   exitEmptyListItem: ((state, dispatch) => {
     const { $from, empty } = state.selection;
@@ -632,7 +674,7 @@ export const cmd = {
 
   insertTable(rows: number, cols: number): Command {
     const row = () => schema.nodes.table_row.create(null, Array.from({ length: cols }, newCell));
-    return insertBlockAfter(schema.nodes.table.create(null, Array.from({ length: rows }, row)));
+    return insertBlockAfter(schema.nodes.table.create(null, Array.from({ length: rows }, row)), true);
   },
 
   addRow: (after: boolean): Command =>
@@ -1099,9 +1141,9 @@ export function docxPlugins(ctx: EditorContext, extraKeys: Record<string, Comman
     }),
     keymap({
       ...extraKeys,
-      Enter: chainCommands(cmd.exitEmptyListItem, baseKeymap.Enter),
-      Tab: cmd.shiftLevel(1),
-      "Shift-Tab": cmd.shiftLevel(-1),
+      Enter: chainCommands(cmd.exitEmptyListItem, newlineInCode, createParagraphNear, liftEmptyBlock, cmd.splitParagraph),
+      Tab: chainCommands(cmd.goToCell(1), cmd.shiftLevel(1)),
+      "Shift-Tab": chainCommands(cmd.goToCell(-1), cmd.shiftLevel(-1)),
       "Mod-z": undo,
       "Mod-y": redo,
       "Mod-Shift-z": redo,

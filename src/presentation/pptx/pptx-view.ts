@@ -29,13 +29,12 @@ import { presetGeometry, solveAdjust } from "../../domain/pptx/geometry";
 import { buildShapeGallery, ShapeChoice } from "./shape-gallery";
 import { ArrangeControl, buildArrangePanel, buildShapePanel, buildSlidePanel, PanelControl, SlideControl } from "./shape-panel";
 import { alignRects, Alignment, Clip, copyItems, distributeRects, groupItems, itemRect, pasteItems, setItemRect, snapRect, topLevel, ungroupItem } from "../../domain/pptx/arrange";
-import { promptText } from "../common/toolbar";
 import { History } from "../../core/utils/history";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { pickImage } from "../common/images";
 import { findAll, Match, replaceAll, replaceMatch } from "../../domain/pptx/find";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
-import { FONTS, PaperTheme, showValue, Toolbar } from "../common/toolbar";
+import { EDITING_KEYS, FONTS, PaperTheme, promptText, shieldEditingKeys, showValue, Toolbar } from "../common/toolbar";
 import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
 import { loadEmbeddedFonts } from "./embedded-fonts";
@@ -204,6 +203,8 @@ export class PptxView extends FileView {
         return false;
       });
     }
+    // Text boxes and fields keep these keys (Mod+A, the stage's select-all, is registered above).
+    shieldEditingKeys(this.scope, EDITING_KEYS.filter(([, key]) => key !== "a"));
     // Undo / redo also when focus is on the page (after a dialog or a toolbar button); the stage and text boxes
     // handle their own keys, and fields keep their own undo.
     const history: [Modifier[], string, () => void][] = [
@@ -264,7 +265,9 @@ export class PptxView extends FileView {
 
     this.buildToolbar(this.contentEl.createDiv({ cls: "dw-toolbar pptx-toolbar" }));
     const body = this.contentEl.createDiv({ cls: "pptx-body" });
-    this.thumbsEl = body.createDiv({ cls: "pptx-thumbs", attr: { role: "listbox", "aria-label": "Slides" } });
+    // Named through a hidden label rather than aria-label, which Obsidian would show as a hover tooltip.
+    const thumbsName = body.createDiv({ cls: "dw-sr-only", text: "Slides", attr: { id: `pptx-thumbs-name-${Math.random().toString(36).slice(2)}` } });
+    this.thumbsEl = body.createDiv({ cls: "pptx-thumbs", attr: { role: "listbox", "aria-labelledby": thumbsName.id } });
     this.thumbsEl.tabIndex = 0;
     this.thumbsEl.id = `dw-slides-${crypto.randomUUID()}`;
     // Delete / Backspace on the thumbnails deletes the current slide (a deck keeps at least one).
@@ -700,8 +703,11 @@ export class PptxView extends FileView {
         return;
       }
       if (!this.items.includes(item)) this.setSelection([item], shape.el);
-      if (textEl?.contains(e.target as Node) || (e.target as HTMLElement).closest(".pptx-cell-text")) return;
-      this.stageEl.focus({ preventScroll: true });
+      // Pressing in text selects text; a shape without text (not a placeholder) moves by its body, as in Google
+      // Slides; a plain click still puts the caret in it.
+      const emptyShape = !shape.placeholder && !!textEl?.classList.contains("is-empty");
+      if (!emptyShape && (textEl?.contains(e.target as Node) || (e.target as HTMLElement).closest(".pptx-cell-text"))) return;
+      if (!emptyShape) this.stageEl.focus({ preventScroll: true });
       this.startMoveItems(e);
     });
 

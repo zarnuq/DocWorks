@@ -320,7 +320,10 @@ export function pivotForm(host: HTMLElement, o: PivotFormOptions): void {
       });
     });
     valueBox.createEl("button", { text: "Add value", cls: "xlsx-pivot-add" }).addEventListener("click", () => {
-      values.push({ field: 0, fn: "sum" });
+      // The first field not already in use; COUNTA works whatever the column holds (change it to SUM for numbers).
+      const used = new Set([...rows, ...(col === null ? [] : [col]), ...values.map((v) => v.field)]);
+      const free = o.fields.findIndex((_, i) => !used.has(i));
+      values.push({ field: free < 0 ? 0 : free, fn: "count" });
       drawValues();
     });
   };

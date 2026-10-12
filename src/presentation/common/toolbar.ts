@@ -1,4 +1,4 @@
-import { App, Modal, setIcon, Setting } from "obsidian";
+import { App, Modal, setIcon, Setting, Modifier, Scope } from "obsidian";
 
 export const FONTS = ["Aptos", "Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Verdana", "Segoe UI", "Trebuchet MS", "Courier New"];
 
@@ -120,4 +120,21 @@ export function promptText(app: App, title: string, value: string, password = fa
     modal.onClose = () => resolve(result);
     modal.open();
   });
+}
+
+/**
+ * Keys the editors need that Obsidian's hotkeys (or the user's own, e.g. Shift+Tab for the sidebar) may take:
+ * while an editable element has focus they reach it; otherwise they're left alone.
+ */
+export const EDITING_KEYS: [Modifier[], string][] = [
+  [["Mod"], "b"], [["Mod"], "i"], [["Mod"], "u"], [["Mod"], "k"], [["Mod"], "e"], [["Mod"], "l"], [["Mod"], "a"],
+  [["Shift"], "Tab"], [[], "Tab"],
+];
+export function shieldEditingKeys(scope: Scope, keys: [Modifier[], string][] = EDITING_KEYS): void {
+  for (const [mods, key] of keys)
+    scope.register(mods, key, () => {
+      const a = document.activeElement as HTMLElement | null;
+      const editable = a?.isContentEditable || !!a?.closest('[contenteditable=""], [contenteditable="true"]') || a?.tagName === "INPUT" || a?.tagName === "TEXTAREA";
+      return editable ? true : undefined;
+    });
 }

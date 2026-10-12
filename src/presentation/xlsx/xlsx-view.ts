@@ -14,7 +14,7 @@ import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboa
 import { CellMatch, findCells, replaceCells } from "../../domain/xlsx/find";
 import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
-import { FONTS, PaperTheme, Toolbar, promptText, showValue } from "../common/toolbar";
+import { FONTS, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys } from "../common/toolbar";
 import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
 import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
@@ -117,6 +117,8 @@ export class XlsxView extends FileView {
         return false;
       });
     }
+    // The grid's own keys (its input is a textarea) that a user hotkey could take.
+    shieldEditingKeys(this.scope, [[["Shift"], "Tab"], [[], "Tab"]]);
     this.scope.register([], "F6", () => {
       const grid = this.grid;
       if (!grid || !this.contentEl.contains(document.activeElement)) return true;
@@ -378,6 +380,7 @@ export class XlsxView extends FileView {
         this.grid?.focusGrid();
       }));
     if (current) menu.addSeparator().addItem((i) => i.setTitle("Clear").onClick(() => this.commit(row, col, "")));
+    this.refocusAfter(menu);
     menu.showAtPosition(at);
   }
 
@@ -418,6 +421,7 @@ export class XlsxView extends FileView {
     const menu = new Menu();
     menu.addItem((i) => i.setTitle("Edit chart").setIcon("pencil").onClick(() => this.chartDialog(path)));
     menu.addItem((i) => i.setTitle("Delete chart").setIcon("trash").onClick(() => this.change(() => deleteChart(this.edits!, this.sheet, found.chart))));
+    this.refocusAfter(menu);
     menu.showAtMouseEvent(e);
   }
 
@@ -979,6 +983,7 @@ export class XlsxView extends FileView {
       more.addEventListener("click", (e) => {
         const menu = new Menu();
         for (const s of hidden) menu.addItem((it) => it.setTitle(`Show "${s.name}"`).onClick(() => this.change(() => ops.setSheetHidden(this.edits!, this.wb.sheets[this.wb.sheets.indexOf(s)], false))));
+        this.refocusAfter(menu);
         menu.showAtMouseEvent(e);
       });
     }
@@ -1112,7 +1117,18 @@ export class XlsxView extends FileView {
       item(this.sheet.merges.some((m) => m.r1 <= r.r2 && r.r1 <= m.r2 && m.c1 <= r.c2 && r.c1 <= m.c2) ? "Unmerge cells" : "Merge cells", "merge", () => this.mergeToggle());
     }
     item("Freeze up to here", "snowflake", () => this.change(() => ops.freeze(ed, this.sheet, hit.area === "colHeader" ? 0 : r.r2 + 1, hit.area === "rowHeader" ? 0 : r.c2 + 1)));
+    this.refocusAfter(menu);
     menu.showAtMouseEvent(e);
+  }
+
+  /** Once a menu closes, the grid takes the keys again (unless what the menu did opened a dialog or field). */
+  private refocusAfter(menu: Menu): void {
+    menu.onHide(() =>
+      window.setTimeout(() => {
+        const a = document.activeElement;
+        if (!a || a === document.body || this.contentEl.contains(a)) this.grid?.focusGrid();
+      })
+    );
   }
 
   private async askSize(axis: "row" | "col", a: number, b: number): Promise<void> {

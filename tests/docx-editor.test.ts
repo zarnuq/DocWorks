@@ -51,6 +51,17 @@ describe("lists", () => {
     expect(attrs(st).indent).toBe(0);
   });
 
+  it("Enter at the end of a list item starts the next item (as in Google Docs); after a heading, a normal paragraph", () => {
+    let st = run(state([para("a", { numId: "B", ilvl: 1, key: "k1" })], 2), cmd.splitParagraph);
+    expect(st.doc.childCount).toBe(2);
+    expect(attrs(st, 1)).toMatchObject({ numId: "B", ilvl: 1, key: null });
+    st = run(state([para("Title", { style: "Heading2", key: "k2" })], 6), cmd.splitParagraph);
+    expect(attrs(st, 1)).toMatchObject({ style: null, key: null });
+    // In the middle, both halves keep the paragraph's settings; only the original keeps its key.
+    st = run(state([para("ab", { numId: "O", key: "k3" })], 2), cmd.splitParagraph);
+    expect([attrs(st, 0).key, attrs(st, 1).key, attrs(st, 1).numId]).toEqual(["k3", null, "O"]);
+  });
+
   it("Enter on an empty list item ends the list", () => {
     const st = run(state([para("", { numId: "B" })]), cmd.exitEmptyListItem);
     expect(attrs(st).numId).toBeNull();
@@ -126,6 +137,40 @@ describe("inserts", () => {
     const st = run(state([para("ab")], 2), cmd.insertRule);
     expect(st.doc.child(1).type.name).toBe("raw_block");
     expect(st.doc.child(1).attrs.kind).toBe("hr");
+  });
+});
+
+describe("inserting a table", () => {
+  it("puts the caret in its first cell, as Google Docs does", () => {
+    const st = run(state([para("a")], 2), cmd.insertTable(2, 2));
+    const $from = st.selection.$from;
+    expect($from.node($from.depth - 1).type).toBe(s.table_cell);
+    expect($from.index($from.depth - 3)).toBe(0); // first row
+    expect($from.index($from.depth - 2)).toBe(0); // first cell
+  });
+});
+
+describe("Tab in a table", () => {
+  const cellIndex = (st: EditorState) => {
+    const $f = st.selection.$from;
+    return [$f.index($f.depth - 3), $f.index($f.depth - 2)];
+  };
+  it("moves to the next cell, back with Shift+Tab, and adds a row from the last cell (as in Google Docs)", () => {
+    let st = run(state([para("a")], 2), cmd.insertTable(2, 2));
+    st = run(st, cmd.goToCell(1));
+    expect(cellIndex(st)).toEqual([0, 1]);
+    st = run(st, cmd.goToCell(1));
+    expect(cellIndex(st)).toEqual([1, 0]);
+    st = run(st, cmd.goToCell(-1));
+    expect(cellIndex(st)).toEqual([0, 1]);
+    st = run(run(st, cmd.goToCell(1)), cmd.goToCell(1));
+    expect(cellIndex(st)).toEqual([1, 1]);
+    st = run(st, cmd.goToCell(1));
+    expect(cellIndex(st)).toEqual([2, 0]);
+    let rows = 0;
+    st.doc.descendants((n) => { if (n.type === s.table) rows = n.childCount; });
+    expect(rows).toBe(3);
+    expect(cmd.goToCell(1)(state([para("x")], 1), () => {})).toBe(false);
   });
 });
 

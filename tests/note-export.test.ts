@@ -76,4 +76,21 @@ describe("note export to .docx", () => {
     const row = doc.firstChild!.firstChild!;
     expect([0, 1, 2].map((i) => row.child(i).firstChild!.attrs.align)).toEqual([null, "right", "center"]);
   });
+
+  it("writes embedded files as their name, not their preview, and keeps embedded notes' text", () => {
+    // Built with DOM calls, as Obsidian does (an HTML string would move the div out of the paragraph).
+    const root = html(`<p>Slide: <span class="internal-embed file-embed" src="deck.pptx#2"></span></p>` +
+      `<div class="internal-embed markdown-embed" src="Other"><div class="markdown-embed-title">Other</div><div class="markdown-embed-content"><p>Embedded note text</p></div><div class="markdown-embed-link"></div></div>`);
+    // The preview goes in the embed element itself (a document's preview has pictures too).
+    const preview = root.querySelector<HTMLElement>(".file-embed")!;
+    preview.addClass("dw-embed");
+    preview.createDiv({ cls: "dw-embed-title", text: "deck" });
+    const body = preview.createDiv({ cls: "dw-embed-body", text: "Today" });
+    body.createEl("button", { text: "‹" });
+    body.createEl("img", { attr: { src: "x.png" } });
+    const doc = htmlToDoc(root, ctx);
+    const texts: string[] = [];
+    doc.forEach((n) => texts.push(n.textContent));
+    expect(texts).toEqual(["Slide: deck.pptx#2", "Embedded note text"]);
+  });
 });

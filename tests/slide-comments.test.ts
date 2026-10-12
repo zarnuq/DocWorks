@@ -76,4 +76,12 @@ describe("slide comments (PowerPoint modern comments)", () => {
     addSlideComment(doc, copy, "Copy's own", "Ada");
     expect(slideComments(doc, slide).map((t) => t.messages[0].text)).toEqual(["Only here"]);
   });
+
+  it("stamps comments with local time (no zone), as PowerPoint writes and reads them", async () => {
+    const { doc, slide } = await deck();
+    addSlideComment(doc, slide, "Now", "Ada");
+    const date = slideComments(doc, slide)[0].messages[0].date;
+    expect(date).not.toMatch(/Z$/);
+    expect(Math.abs(new Date(date).getTime() - Date.now())).toBeLessThan(60_000);
+  });
 });

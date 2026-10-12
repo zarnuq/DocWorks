@@ -277,3 +277,32 @@ it("F6 moves focus between the cell editor and toolbar without committing naviga
   expect(saved).toEqual([]);
   await view.onUnloadFile(file);
 });
+
+describe("XlsxView keys Obsidian hotkeys could take", () => {
+  it("keeps Shift+Tab for the grid", async () => {
+    const app = new App();
+    const view = new XlsxView(new WorkspaceLeaf(app) as unknown as RealLeaf);
+    const k = (view as any).scope.keys.find((x: any) => x.key === "Tab" && x.mods.join() === "Shift");
+    expect(k).toBeTruthy();
+  });
+});
+
+describe("XlsxView focus after menus", () => {
+  it("gives the grid its focus back when the cell menu closes, so Ctrl+Z and typing keep working", async () => {
+    const { Menu } = await import("./obsidian-stub");
+    const app = new App();
+    const bytes = await xlsx();
+    app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const view = new XlsxView(new WorkspaceLeaf(app) as unknown as RealLeaf);
+    document.body.appendChild(view.containerEl);
+    const file = new TFile("menu.xlsx") as unknown as RealTFile;
+    view.file = file;
+    await view.onLoadFile(file);
+    const v = view as any;
+    v.contextMenu(new MouseEvent("contextmenu"), { area: "cell", row: 1, col: 1 });
+    (document.activeElement as HTMLElement | null)?.blur();
+    Menu.last!.hide();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(v.grid.input);
+  });
+});
