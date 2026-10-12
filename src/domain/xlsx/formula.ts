@@ -52,7 +52,17 @@ export function tokenize(src: string): Token[] {
     const rest = src.slice(i);
     let tok: Token | null = null;
     const ref = REF_RE.exec(rest);
-    if (ref) {
+    const structured = /^(?:[A-Za-z_\\À-￿][\w.\\?À-￿]*)?\[/.exec(rest);
+    if (structured) {
+      let depth = 0, j = rest.indexOf("[");
+      for (; j < rest.length; j++) {
+        if (rest[j] === "'" && j + 1 < rest.length) { j++; continue; }
+        if (rest[j] === "[") depth++;
+        else if (rest[j] === "]" && --depth === 0) break;
+      }
+      if (depth) throw new FormulaSyntaxError("Missing ]");
+      tok = { kind: "struct", text: rest.slice(0, j + 1) };
+    } else if (ref) {
       const sheet = ref[1] !== undefined ? ref[1].replace(/''/g, "'") : ref[2];
       if (ref[3] === "#REF!") tok = { kind: "err", text: ref[0] };
       else {
@@ -61,8 +71,8 @@ export function tokenize(src: string): Token[] {
       }
     } else if (rest[0] === "#") {
       const err = ERRORS.find((e) => rest.toUpperCase().startsWith(e));
-      if (!err) throw new FormulaSyntaxError(`Unknown error value at ${i + 1}`);
-      tok = { kind: "err", text: rest.slice(0, err.length) };
+      if (!err && out.at(-1)?.kind !== "ref") throw new FormulaSyntaxError(`Unknown error value at ${i + 1}`);
+      tok = err ? { kind: "err", text: rest.slice(0, err.length) } : { kind: "op", text: "#" };
     } else {
       for (const [kind, re] of RULES) {
         const m = re.exec(rest);
@@ -103,6 +113,8 @@ export type Node =
   | { type: "err"; value: string }
   | { type: "ref"; sheet?: string; range: Rect; area: boolean }
   | { type: "name"; name: string }
+  | { type: "struct"; text: string }
+  | { type: "spill"; arg: Node }
   | { type: "call"; name: string; args: Node[] }
   | { type: "un"; op: string; arg: Node }
   | { type: "bin"; op: string; left: Node; right: Node }
@@ -146,9 +158,9 @@ export function parseFormula(src: string): Node {
       return { type: "un", op, arg: unary() };
     }
     let node = primary();
-    while (is("%")) {
-      i++;
-      node = { type: "un", op: "%", arg: node };
+    while (is("%") || is("#")) {
+      const op = toks[i++].text;
+      node = op === "#" ? { type: "spill", arg: node } : { type: "un", op: "%", arg: node };
     }
     return node;
   };
@@ -177,7 +189,7 @@ export function parseFormula(src: string): Node {
       case "name":
         return { type: "name", name: t.text };
       case "struct":
-        return { type: "unsupported", text: t.text };
+        return { type: "struct", text: t.text };
       case "func": {
         expect("(");
         const args: Node[] = [];

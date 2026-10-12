@@ -117,12 +117,88 @@ export class XlsxWorkbook extends OoxmlPackage {
   }
 
   /** The sheet's drawing part and the sheet's relationship to it, created if missing. */
+  /** Reuse or append Excel's dynamic-array metadata record; existing metadata indexes remain stable. */
+  ensureDynamicMetadata(): number {
+    const rel = this.rels(this.workbookPath).find(r => r.type === "sheetMetadata");
+    const path = rel?.target ?? "xl/metadata.xml";
+    let doc = this.xml(path);
+    if (!doc) {
+      doc = parseXml(`<metadata xmlns="${NS_S}"/>`)!;
+      this.putXml(path, doc, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml");
+      this.addRel(this.workbookPath, "sheetMetadata", path);
+    }
+    const root = doc.documentElement;
+    const order = ["metadataTypes", "metadataStrings", "mdxMetadata", "futureMetadata", "cellMetadata", "valueMetadata", "extLst"];
+    const child = (parent: Element, tag: string) => Array.from(parent.children).find(c => c.localName === tag);
+    const add = (tag: string) => {
+      const el = doc.createElementNS(NS_S,tag);
+      root.insertBefore(el,Array.from(root.children).find(c => order.indexOf(c.localName) > order.indexOf(tag)) ?? null);
+      return el;
+    };
+    const types = child(root,"metadataTypes") ?? add("metadataTypes");
+    let type = Array.from(types.children).findIndex(t => t.getAttribute("name") === "XLDAPR");
+    if (type < 0) {
+      const el = doc.createElementNS(NS_S,"metadataType");
+      for (const [k,v] of Object.entries({name:"XLDAPR",minSupportedVersion:"120000",copy:"1",pasteAll:"1",pasteValues:"1",merge:"1",splitFirst:"1",rowColShift:"1",clearFormats:"1",clearComments:"1",assign:"1",coerce:"1",cellMeta:"1"})) el.setAttribute(k,v);
+      types.appendChild(el); types.setAttribute("count",String(types.children.length));type=types.children.length-1;
+    }
+    let future = Array.from(root.children).find(c => c.localName === "futureMetadata" && c.getAttribute("name") === "XLDAPR");
+    if (!future) {future=add("futureMetadata");future.setAttribute("name","XLDAPR");}
+    let record = Array.from(future.children).findIndex(b => Array.from(b.getElementsByTagNameNS("http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray","dynamicArrayProperties")).some(p => p.getAttribute("fDynamic") === "1"));
+    if (record < 0) {
+      const bk = parseXml(`<bk xmlns="${NS_S}"><extLst><ext uri="{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}"><xda:dynamicArrayProperties xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray" fDynamic="1" fCollapsed="0"/></ext></extLst></bk>`)!;
+      future.appendChild(doc.importNode(bk.documentElement,true));future.setAttribute("count",String(future.children.length));record=future.children.length-1;
+    }
+    const cells = child(root,"cellMetadata") ?? add("cellMetadata");
+    let index = Array.from(cells.children).findIndex(b => Array.from(b.children).some(r => r.getAttribute("t") === String(type+1) && r.getAttribute("v") === String(record)));
+    if (index < 0) {
+      const bk=doc.createElementNS(NS_S,"bk"), rc=doc.createElementNS(NS_S,"rc");
+      rc.setAttribute("t",String(type+1));rc.setAttribute("v",String(record));bk.appendChild(rc);cells.appendChild(bk);cells.setAttribute("count",String(cells.children.length));index=cells.children.length-1;
+    }
+    this.touch(path);return index+1;
+  }
+
+  /** Whether a cell's metadata marks it as a dynamic-array anchor. */
+  isDynamicMetadata(index: number): boolean {
+    if (!(index > 0)) return false;
+    const rel = this.rels(this.workbookPath).find(r => r.type === "sheetMetadata");
+    const root = rel && this.xml(rel.target)?.documentElement;
+    if (!root) return false;
+    const child = (parent: Element, tag: string) => Array.from(parent.children).find(c => c.localName === tag);
+    const bk=child(root,"cellMetadata")?.children[index-1], types=child(root,"metadataTypes");
+    return Array.from(bk?.children ?? []).some(r => {
+      const name=types?.children[Number(r.getAttribute("t"))-1]?.getAttribute("name");
+      if(name !== "XLDAPR") return false;
+      const future=Array.from(root.children).find(c => c.localName === "futureMetadata" && c.getAttribute("name") === name);
+      const record=future?.children[Number(r.getAttribute("v"))];
+      return Array.from(record?.getElementsByTagNameNS("http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray","dynamicArrayProperties") ?? []).some(p => ["1","true"].includes(p.getAttribute("fDynamic") ?? ""));
+    });
+  }
+
   ensureDrawing(sheetPath: string): { path: string; rId: string } {
     const rel = this.rels(sheetPath).find((r) => r.type === "drawing" && !r.external);
     if (rel) return { path: rel.target, rId: rel.id };
     const path = this.uniquePath("xl/drawings/drawing", ".xml");
     this.putXml(path, parseXml(`<xdr:wsDr xmlns:xdr="${XDR}" xmlns:a="${A}"/>`)!, DRAWING_CT);
     return { path, rId: this.addRel(sheetPath, "drawing", path) };
+  }
+
+  /** Worksheet comments and their workbook-wide author identities. */
+  ensureThreadedComments(sheetPath: string): string {
+    const existing = this.rels(sheetPath).find(r => r.type === "threadedComment" && !r.external);
+    if (existing) return existing.target;
+    const path = this.uniquePath("xl/threadedComments/threadedComment", ".xml");
+    this.putXml(path, parseXml('<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"/>')!, "application/vnd.ms-excel.threadedcomments+xml");
+    this.addRel(sheetPath, "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment", path);
+    return path;
+  }
+  ensurePersons(): string {
+    const existing = this.rels(this.workbookPath).find(r => r.type === "person" && !r.external);
+    if (existing) return existing.target;
+    const path = this.uniquePath("xl/persons/person", ".xml");
+    this.putXml(path, parseXml('<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"/>')!, "application/vnd.ms-excel.person+xml");
+    this.addRel(this.workbookPath, "http://schemas.microsoft.com/office/2017/10/relationships/person", path);
+    return path;
   }
 
   // --- Notes (Excel's legacy comments) --------------------------------------------

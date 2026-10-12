@@ -1,3 +1,5 @@
+import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
+import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
 import { App, FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
@@ -102,6 +104,7 @@ export class XlsxView extends FileView {
       [["Mod"], "r", () => this.fillFrom("right")],
       [["Mod"], ";", () => this.insertNow("date")],
       [["Mod", "Shift"], ";", () => this.insertNow("time")],
+      [["Mod", "Alt"], "m", () => this.commentDialog(this.sel.r1, this.sel.c1)],
       [["Shift"], "F2", () => void this.editNote(this.sel.r1, this.sel.c1)],
     ];
     for (const [mods, key, run] of keys) {
@@ -111,6 +114,14 @@ export class XlsxView extends FileView {
         return false;
       });
     }
+    this.scope.register([], "F6", () => {
+      const grid = this.grid;
+      if (!grid || !this.contentEl.contains(document.activeElement)) return true;
+      if (grid.edit && !grid.commitEdit()) return false;
+      if (document.activeElement === grid.input) this.contentEl.querySelector<HTMLButtonElement>(".dw-toolbar button")?.focus();
+      else grid.focusGrid();
+      return false;
+    });
     this.scope.register(["Mod"], "f", () => {
       this.openFind();
       return false;
@@ -196,6 +207,7 @@ export class XlsxView extends FileView {
       dropdown: (row, col) => validationAt(this.sheet, row, col)?.type === "list",
       moveChart: (key, box) => this.change(() => moveChart(this.edits!, key, box)),
       note: (row, col) => this.notes().get(cellName(row, col))?.text ?? null,
+      comment: (row, col) => this.comments().get(cellName(row, col))?.some(t => !t.resolved) ?? false,
       invalid: (row, col) => this.invalid(row, col),
       openDropdown: (row, col, at) => this.openDropdown(row, col, at),
       charts: () => this.charts(),
@@ -272,6 +284,7 @@ export class XlsxView extends FileView {
     }
     this.cfCache.clear();
     this.notesCache = null;
+    this.commentsCache = null;
     this.invalidCache.clear();
     this.chartCache.clear();
     for (const sheet of this.wb.sheets) invalidateValidations(sheet);
@@ -356,8 +369,7 @@ export class XlsxView extends FileView {
   // Charts
   // ---------------------------------------------------------------------------
 
-  private sheetChartModels(): { chart: SheetChart; model: ChartModel }[] {
-    const s = this.sheet;
+  private sheetChartModels(s = this.sheet): { chart: SheetChart; model: ChartModel }[] {
     let list = this.chartCache.get(s.ref.path);
     if (!list) {
       list = sheetCharts(this.wb, s).map((chart) => ({ chart, model: chartModel(this.wb, chart.path) }));
@@ -366,8 +378,8 @@ export class XlsxView extends FileView {
     return list;
   }
 
-  private charts() {
-    return this.sheetChartModels().map(({ chart, model }) => ({
+  private charts(sheet = this.sheet) {
+    return this.sheetChartModels(sheet).map(({ chart, model }) => ({
       key: chart.path,
       ...chart.box,
       draw: (el: HTMLElement) => {
@@ -479,8 +491,7 @@ export class XlsxView extends FileView {
     modal.open();
   }
 
-  private pictures(): Picture[] {
-    const s = this.sheet;
+  private pictures(s = this.sheet): Picture[] {
     let pics = this.pictureCache.get(s.ref.path);
     if (!pics) {
       pics = sheetPictures(this.wb, s);
@@ -508,6 +519,7 @@ export class XlsxView extends FileView {
     this.pictureCache.clear();
     this.cfCache.clear();
     this.notesCache = null;
+    this.commentsCache = null;
     this.invalidCache.clear();
     this.chartCache.clear();
     this.sheetIndex = Math.min(this.sheetIndex, this.wb.sheets.length - 1);
@@ -644,10 +656,65 @@ export class XlsxView extends FileView {
     return this.notesCache.notes;
   }
 
+  private commentsCache: { sheet: string; threads: Map<string, CommentThread[]> } | null = null;
+  private comments(): Map<string, CommentThread[]> {
+    const path = this.sheet.ref.path;
+    if (!this.commentsCache || this.commentsCache.sheet !== path) this.commentsCache = { sheet: path, threads: commentsOf(this.wb.pkg, path) };
+    return this.commentsCache.threads;
+  }
+
+  /** Discussions stay attached to the cell while the user replies, edits or resolves a thread. */
+  private commentDialog(row: number, col: number): void {
+    if (!this.edits) return;
+    const edits = this.edits, path = this.sheet.ref.path, ref = cellName(row, col);
+    const sheet = () => edits.wb.sheets.find(s => s.ref.path === path)!;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText(`Comments on ${ref}`);
+    modal.contentEl.addClass("xlsx-comments-modal");
+    const change = (fn: () => void) => {
+      if (this.edits !== edits || !sheet()) return;
+      if (this.change(fn)) draw();
+    };
+    const button = (parent: HTMLElement, text: string, fn: () => void) => {
+      const b = parent.createEl("button", { text }); b.addEventListener("click", fn); return b;
+    };
+    const compose = (parent: HTMLElement, label: string, post: (text: string) => void, value = "") => {
+      const input = parent.createEl("textarea", { value, attr: { "aria-label": label, rows: "3", placeholder: label } });
+      button(parent, value ? "Save" : "Post", () => { if (input.value.trim()) post(input.value); });
+    };
+    const draw = () => {
+      modal.contentEl.empty();
+      const threads = commentsOf(edits.wb.pkg, path).get(ref) ?? [];
+      if (!threads.length) modal.contentEl.createEl("p", { text: "No comments on this cell." });
+      for (const thread of threads) {
+        const box = modal.contentEl.createDiv({ cls: "xlsx-comment-thread" });
+        if (thread.resolved) box.createDiv({ text: "Resolved", cls: "dw-muted" });
+        for (const message of thread.messages) {
+          const item = box.createDiv({ cls: "xlsx-comment-message" });
+          item.createEl("strong", { text: message.author });
+          if (message.date) item.createEl("time", { text: new Date(message.date).toLocaleString(), attr: { datetime: message.date } });
+          item.createDiv({ cls: "xlsx-comment-text", text: message.text });
+          button(item, "Edit", () => {
+            item.empty(); compose(item, "Edit comment", text => change(() => editComment(edits, sheet(), message.id, text)), message.text);
+            button(item, "Cancel", draw);
+          });
+        }
+        const actions = box.createDiv({ cls: "xlsx-comment-actions" });
+        button(actions, thread.resolved ? "Reopen" : "Resolve", () => change(() => resolveThread(edits, sheet(), thread.id, !thread.resolved)));
+        button(actions, "Delete thread", () => change(() => removeThread(edits, sheet(), thread.id)));
+        if (!thread.resolved) compose(box, "Reply", text => change(() => addComment(edits, sheet(), ref, text, this.author(), thread.id)));
+      }
+      compose(modal.contentEl, "New comment", text => change(() => addComment(edits, sheet(), ref, text, this.author())));
+      button(modal.contentEl, "Close", () => modal.close());
+    };
+    draw(); modal.open();
+  }
+
   private setNoteText(row: number, col: number, text: string | null): void {
     const path = this.sheet.ref.path;
-    this.change(() => this.edits!.structural(() => setNote(this.edits!.wb.pkg, path, cellName(row, col), text, this.author())));
+    this.change(() => this.edits!.structural(() => { assertAction(this.sheet, "objects"); setNote(this.edits!.wb.pkg, path, cellName(row, col), text, this.author()); }));
     this.notesCache = null;
+    this.commentsCache = null;
     this.grid?.invalidate();
   }
 
@@ -821,7 +888,10 @@ export class XlsxView extends FileView {
       this.formulaInput.value = cell?.formula !== undefined ? "=" + cell.formula : cell ? (grid.edit ?? "") || this.rawText(grid.active.row, grid.active.col) : "";
     }
     const f = this.wb.styles.format(cell?.style ?? 0);
-    for (const [k, el] of this.toggles) el.toggleClass("is-active", !!f[k as "bold"]);
+    for (const [k, el] of this.toggles) {
+      el.toggleClass("is-active", !!f[k as "bold"]);
+      el.setAttribute("aria-pressed", String(!!f[k as "bold"]));
+    }
     if (this.fontSelect) showValue(this.fontSelect, f.fontName);
     if (this.sizeSelect) showValue(this.sizeSelect, String(f.fontSize));
     if (this.formatSelect) showValue(this.formatSelect, NUMBER_FORMATS.find(([, c]) => c === f.numFmt) ? f.numFmt : f.numFmt === "General" ? null : f.numFmt);
@@ -860,7 +930,7 @@ export class XlsxView extends FileView {
     });
     this.wb.sheets.forEach((s, i) => {
       if (s.ref.state !== "visible") return;
-      const tab = bar.createEl("button", { cls: i === this.sheetIndex ? "xlsx-tab is-active" : "xlsx-tab", text: s.name, attr: { "aria-label": `Sheet ${s.name}` } });
+      const tab = bar.createEl("button", { cls: i === this.sheetIndex ? "xlsx-tab is-active" : "xlsx-tab", text: s.name, attr: { "aria-label": `Sheet ${s.name}`, "aria-current": i === this.sheetIndex ? "true" : "false" } });
       tab.addEventListener("click", () => this.showSheet(i));
       tab.addEventListener("dblclick", () => void this.renameSheet(i));
       tab.addEventListener("contextmenu", (e) => {
@@ -896,10 +966,21 @@ export class XlsxView extends FileView {
     if (name !== null) this.change(() => ops.renameSheet(this.edits!, this.wb.sheets[i], name));
   }
 
+  private async unprotect(sheet: Sheet): Promise<void> {
+    const pw = await promptText(this.app, "Sheet password", "", true);
+    if (pw === null || !this.edits) return;
+    if (await unprotectWithPassword(this.edits, sheet, pw)) this.change(() => {});
+    else new Notice("The password is incorrect.");
+  }
+
   private sheetMenu(i: number): Menu {
     const e = this.edits!;
     const s = () => this.wb.sheets[i];
     const menu = new Menu();
+    menu.addItem((it) => it.setTitle(isProtected(s()) ? "Unprotect sheet" : "Protect sheet").setIcon("lock").onClick(() => {
+      if (isProtected(s()) && hasPassword(s())) void this.unprotect(s());
+      else this.change(() => setProtected(e, s(), !isProtected(s())));
+    }));
     menu.addItem((it) => it.setTitle("Rename").setIcon("pencil").onClick(() => void this.renameSheet(i)));
     menu.addItem((it) => it.setTitle("Duplicate").setIcon("copy").onClick(() => {
       this.change(() => ops.duplicateSheet(e, s()));
@@ -952,6 +1033,11 @@ export class XlsxView extends FileView {
     if (hit.area !== "rowHeader") item(`Delete ${cols}`, "trash", () => this.change(() => ops.deleteCols(ed, this.sheet, r.c1, r.c2 - r.c1 + 1)));
     item("Clear contents", "eraser", () => this.change(() => ed.clear(this.sheet, r)));
     if (hit.area === "cell") {
+      if (!isProtected(this.sheet)) {
+        item("Unlock cells", "lock-open", () => this.format({ locked: false }));
+        item("Lock cells", "lock", () => this.format({ locked: true }));
+      }
+      item(this.comments().has(cellName(r.r1, r.c1)) ? "View comments" : "Insert comment", "message-square", () => this.commentDialog(r.r1, r.c1));
       const note = this.notes().get(cellName(r.r1, r.c1));
       item(note ? "Edit note" : "Insert note", "sticky-note", () => void this.editNote(r.r1, r.c1));
       if (note) item("Delete note", "trash", () => this.setNoteText(r.r1, r.c1, null));
@@ -1179,7 +1265,11 @@ export class XlsxView extends FileView {
     const jobs: { sheet: Sheet; range: Rect }[] = [];
     if (what === "selection") jobs.push({ sheet: this.sheet, range: this.sel });
     else for (const sheet of what === "workbook" ? this.edits.wb.sheets.filter((s) => s.ref.state === "visible") : [this.sheet]) {
-      const used = sheet.used();
+      let used = sheet.used();
+      for (const box of [...this.pictures(sheet), ...this.charts(sheet)]) {
+        const end = { r1: sheet.rowAt(box.y), c1: sheet.colAt(box.x), r2: sheet.rowAt(box.y + box.h - 0.01), c2: sheet.colAt(box.x + box.w - 0.01) };
+        used = used ? { r1: Math.min(used.r1, end.r1), c1: Math.min(used.c1, end.c1), r2: Math.max(used.r2, end.r2), c2: Math.max(used.c2, end.c2) } : end;
+      }
       if (used) jobs.push({ sheet, range: used });
     }
     if (!jobs.length) return void new Notice("There's nothing to print.");
@@ -1193,8 +1283,20 @@ export class XlsxView extends FileView {
       const plan = pagePlan(cols, rows, ps);
       // ponytail: one paper size per PDF (the first sheet's); sheets on other paper are scaled onto it.
       if (!pages.length) size = { width: plan.width, height: plan.height };
+      const pictures = this.pictures(sheet);
+      await Promise.all(pictures.map(async (p) => {
+        if (this.imageUrls.get(p.image)) return;
+        try {
+          const bytes = await this.wb.pkg.media(p.image);
+          const ext = p.image.slice(p.image.lastIndexOf(".") + 1).toLowerCase();
+          this.imageUrls.set(p.image, URL.createObjectURL(new Blob([bytes as BlobPart], { type: IMAGE_MIME[ext] ?? `image/${ext}` })));
+        } catch { /* Keep unavailable images blank, as the grid does. */ }
+      }));
       const painter = new Grid(createDiv(), {
         sheet: () => sheet,
+        pictures: () => pictures,
+        imageUrl: (path) => this.imageUrls.get(path) ?? null,
+        charts: () => this.charts(sheet),
         conditional: (row, col) => this.conditional(sheet, row, col),
         isStale: () => false,
         isCircular: () => false,

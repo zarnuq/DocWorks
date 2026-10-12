@@ -30,7 +30,7 @@ run(js);
 let result = "run";
 for (let i = 0; i < 2400 && result === "run"; i++) {
   await new Promise((r) => setTimeout(r, 500));
-  result = run("window.__dwPages");
+  result = run("window.__dwPages") || "run"; // eval output is sometimes lost
 }
 const rows = JSON.parse(result);
 if (rows.error) throw new Error(rows.error);

@@ -1,3 +1,4 @@
+import { assertAction } from "./protection";
 /*
  * Structural edits: rows / columns, sheets, sizes, merges, panes, sorting and filters. Inserting or deleting rows
  * and columns rewrites every reference that can point at them (formulas on all sheets, names, merges, conditional
@@ -152,6 +153,9 @@ function shiftSheet(e: Edits, sheet: Sheet, axis: "row" | "col", at: number, cou
     if (rel.type === "table") {
       for (const el of [doc.documentElement, ...Array.from(doc.getElementsByTagNameNS(NS_S, "autoFilter"))]) shiftAttr(el, "ref", o);
       e.wb.pkg.touch(rel.target);
+    } else if (rel.type === "threadedComment") {
+      for (const c of Array.from(doc.getElementsByTagNameNS("http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments", "threadedComment"))) if (!shiftAttr(c, "ref", o)) c.remove();
+      e.wb.pkg.touch(rel.target);
     } else if (rel.type === "comments") {
       // Notes move with their cells; ones on deleted cells go (their VML drawing is rebuilt on save).
       for (const c of Array.from(doc.getElementsByTagNameNS(NS_S, "comment"))) if (!shiftAttr(c, "ref", o)) c.remove();
@@ -170,6 +174,7 @@ function shiftSheet(e: Edits, sheet: Sheet, axis: "row" | "col", at: number, cou
 }
 
 function insertOrDelete(e: Edits, sheet: Sheet, axis: "row" | "col", at: number, count: number): void {
+  assertAction(sheet, axis === "row" ? (count > 0 ? "insertRows" : "deleteRows") : (count > 0 ? "insertColumns" : "deleteColumns"));
   const name = sheet.name, path = sheet.ref.path;
   e.structural(
     () => {
@@ -351,6 +356,7 @@ function editCols(sheet: Sheet, c1: number, c2: number, fn: (col: Element) => vo
 }
 
 export function setColWidth(e: Edits, sheet: Sheet, c1: number, c2: number, px: number): void {
+  assertAction(sheet, "formatColumns");
   e.structural(() =>
     editCols(sheet, c1, c2, (col) => {
       col.setAttribute("width", String(+(px / 7).toFixed(4)));
@@ -361,6 +367,7 @@ export function setColWidth(e: Edits, sheet: Sheet, c1: number, c2: number, px: 
 }
 
 export function setRowHeight(e: Edits, sheet: Sheet, r1: number, r2: number, px: number): void {
+  assertAction(sheet, "formatRows");
   e.structural(() => {
     for (let r = r1; r <= r2; r++) {
       const row = sheet.rowEl(r, true)!;
@@ -373,6 +380,7 @@ export function setRowHeight(e: Edits, sheet: Sheet, r1: number, r2: number, px:
 }
 
 export function setHidden(e: Edits, sheet: Sheet, axis: "row" | "col", a: number, b: number, hidden: boolean): void {
+  assertAction(sheet, axis === "row" ? "formatRows" : "formatColumns");
   e.structural(() => {
     if (axis === "col") {
       editCols(sheet, a, b, (col) => {
@@ -392,6 +400,7 @@ export function setHidden(e: Edits, sheet: Sheet, axis: "row" | "col", a: number
 }
 
 export function freeze(e: Edits, sheet: Sheet, rows: number, cols: number): void {
+  assertAction(sheet, "sheet");
   e.structural(() => {
     const views = child(sheet, "sheetViews", true)!;
     let view = sheet.first(views, "sheetView");
@@ -414,6 +423,7 @@ export function freeze(e: Edits, sheet: Sheet, rows: number, cols: number): void
 }
 
 export function merge(e: Edits, sheet: Sheet, r: Rect): void {
+  assertAction(sheet, "formatCells");
   if (r.r1 === r.r2 && r.c1 === r.c2) return;
   e.structural(() => {
     for (const c of sheet.cellsIn(r)) if (c.row !== r.r1 || c.col !== r.c1) sheet.setCell(c.row, c.col, { value: null, formula: null });
@@ -431,6 +441,7 @@ export function merge(e: Edits, sheet: Sheet, r: Rect): void {
 
 /** Unmerge every merged range overlapping `r`. */
 export function unmerge(e: Edits, sheet: Sheet, r: Rect): void {
+  assertAction(sheet, "formatCells");
   const hits = sheet.merges.filter((x) => x.r1 <= r.r2 && r.r1 <= x.r2 && x.c1 <= r.c2 && r.c1 <= x.c2).map(rangeName);
   if (!hits.length) return;
   e.structural(() => {
@@ -458,6 +469,7 @@ function sortCompare(a: Scalar, b: Scalar, desc: boolean): number {
 
 /** Sort the rows of `r` by columns (absolute indexes); rows move with their formats and formulas. */
 export function sortRange(e: Edits, sheet: Sheet, r: Rect, keys: { col: number; desc?: boolean }[]): void {
+  assertAction(sheet, "sort");
   type Moved = { value: Scalar; formula?: string; style: number; row: number; col: number };
   const rows: { row: number; cells: (Moved | null)[]; keys: Scalar[] }[] = [];
   for (let row = r.r1; row <= r.r2; row++) {
@@ -495,6 +507,7 @@ export function sortRange(e: Edits, sheet: Sheet, r: Rect, keys: { col: number; 
 
 /** Turn the filter on for `r` (header row first), or off with null (showing every row again). */
 export function setFilter(e: Edits, sheet: Sheet, r: Rect | null): void {
+  assertAction(sheet, "sheet");
   e.structural(() => {
     const old = child(sheet, "autoFilter");
     if (old && sheet.filter) for (let row = sheet.filter.r1 + 1; row <= sheet.filter.r2; row++) sheet.rowEl(row, false)?.removeAttribute("hidden");
@@ -538,6 +551,7 @@ export function filterValues(sheet: Sheet, col: number): Set<string> | null {
 
 /** Show only rows whose displayed value in `col` is in `allowed` (null clears the column's filter). */
 export function filterColumn(e: Edits, sheet: Sheet, col: number, allowed: Set<string> | null): void {
+  assertAction(sheet, "autoFilter");
   const f = sheet.filter;
   if (!f) return;
   e.structural(() => {

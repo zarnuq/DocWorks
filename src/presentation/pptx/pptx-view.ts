@@ -263,10 +263,17 @@ export class PptxView extends FileView {
 
     this.buildToolbar(this.contentEl.createDiv({ cls: "dw-toolbar pptx-toolbar" }));
     const body = this.contentEl.createDiv({ cls: "pptx-body" });
-    this.thumbsEl = body.createDiv({ cls: "pptx-thumbs" });
+    this.thumbsEl = body.createDiv({ cls: "pptx-thumbs", attr: { role: "listbox", "aria-label": "Slides" } });
     this.thumbsEl.tabIndex = 0;
+    this.thumbsEl.id = `dw-slides-${crypto.randomUUID()}`;
     // Delete / Backspace on the thumbnails deletes the current slide (a deck keeps at least one).
     this.thumbsEl.addEventListener("keydown", (e) => {
+      if (e.target === this.thumbsEl && this.doc && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+        e.preventDefault();
+        const last = this.doc.slides().length - 1;
+        this.goTo(e.key === "Home" ? 0 : e.key === "End" ? last : Math.max(0, Math.min(last, this.index + (e.key === "ArrowDown" ? 1 : -1))));
+        return;
+      }
       if ((e.key !== "Delete" && e.key !== "Backspace") || e.target !== this.thumbsEl || !this.doc) return;
       e.preventDefault();
       const count = this.doc.slides().length;
@@ -436,7 +443,7 @@ export class PptxView extends FileView {
     };
     const slides = this.doc.slides();
     slides.forEach((slide, i) => {
-      const item = this.thumbsEl.createDiv({ cls: "pptx-thumb" });
+      const item = this.thumbsEl.createDiv({ cls: "pptx-thumb", attr: { role: "option", id: `${this.thumbsEl.id}-slide-${i}`, "aria-label": `Slide ${i + 1}${this.doc!.isHidden(i) ? ", hidden" : ""}`, "aria-selected": String(i === this.index) } });
       // Section headers sit inside the first slide's item, so thumbsEl.children[i] stays slide i.
       sections.forEach((sec, k) => sec.start === i && header(item, k));
       item.toggleClass("is-active", i === this.index);
@@ -463,6 +470,7 @@ export class PptxView extends FileView {
     });
     // Empty sections at the end have no slide to sit on.
     sections.forEach((sec, k) => sec.start >= slides.length && header(this.thumbsEl, k));
+    this.thumbsEl.setAttribute("aria-activedescendant", `${this.thumbsEl.id}-slide-${this.index}`);
     const add = this.thumbsEl.createEl("button", { cls: "pptx-thumb-add", attr: { "aria-label": "New slide" } });
     setIcon(add, "plus");
     add.addEventListener("click", () => this.mutate((d) => (this.index = d.addSlide(d.slides().length - 1))));
@@ -652,7 +660,11 @@ export class PptxView extends FileView {
     this.setSelection(keep, primary);
     this.activeText = null;
     this.savedRange = null;
-    Array.from(this.thumbsEl.children).forEach((c, i) => c.toggleClass("is-active", i === this.index));
+    Array.from(this.thumbsEl.querySelectorAll('[role="option"]')).forEach((c, i) => {
+      c.toggleClass("is-active", i === this.index);
+      c.setAttribute("aria-selected", String(i === this.index));
+    });
+    this.thumbsEl.setAttribute("aria-activedescendant", `${this.thumbsEl.id}-slide-${this.index}`);
     this.thumbsEl.children[this.index]?.scrollIntoView({ block: "nearest" });
   }
 

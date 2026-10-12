@@ -36,6 +36,7 @@ type Side = "left" | "right" | "top" | "bottom";
 const SIDES: Side[] = ["left", "right", "top", "bottom"];
 
 export interface StyleChange {
+  locked?: boolean;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -382,6 +383,12 @@ export class Styles {
       set("wrapText", change.wrap === undefined ? undefined : change.wrap ? "1" : "0", "0");
       if (!align.attributes.length) align.remove();
       xf.setAttribute("applyAlignment", "1");
+    }
+    if (change.locked !== undefined) {
+      let p = this.child(xf, "protection");
+      if (!p) p = xf.insertBefore(this.el("protection"), this.child(xf, "extLst"));
+      p.setAttribute("locked", change.locked ? "1" : "0");
+      xf.setAttribute("applyProtection", "1");
     }
     return this.intern("cellXfs", xf);
   }

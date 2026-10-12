@@ -1,3 +1,4 @@
+import { assertAction } from "./protection";
 /*
  * Conditional formatting: the sheet's cfRule elements read, evaluated per cell (lazily, for the cells being
  * drawn) and written as Google's sidebar offers them. Formulas in rules are relative to the top-left cell of the
@@ -7,7 +8,7 @@ import { NS_S } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Edits } from "./commands";
 import { compareValues } from "./formula-evaluator";
 import { translateFormula } from "./formula";
-import { Scalar } from "./number-format";
+import { dateToSerial, Scalar, serialToDate } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
 import { DxfStyle } from "./styles";
 import { Sheet } from "./workbook-model";
@@ -15,11 +16,17 @@ import { Sheet } from "./workbook-model";
 export interface CfStyle extends DxfStyle {
   /** A data bar: the part of the cell's width it fills. */
   bar?: { fraction: number; color: string };
+  /** An icon set's icon, drawn at the cell's left. */
+  icon?: { glyph: string; color: string };
+  /** An icon set with showValue="0": the icon only. */
+  hideValue?: boolean;
 }
 
 interface Point {
   type: string;
   val: string | null;
+  /** Icon set thresholds: reached at >= (default) or only above. */
+  gte: boolean;
 }
 
 export interface CfRule {
@@ -58,13 +65,40 @@ export function readRules(sheet: Sheet): CfRule[] {
         dxf: el.hasAttribute("dxfId") ? Number(el.getAttribute("dxfId")) : null,
         priority: Number(el.getAttribute("priority") ?? 0),
         stopIfTrue: on(el, "stopIfTrue", false),
-        points: kids(scale, "cfvo").map((p) => ({ type: p.getAttribute("type") ?? "min", val: p.getAttribute("val") })),
+        points: kids(scale, "cfvo").map((p) => ({ type: p.getAttribute("type") ?? "min", val: p.getAttribute("val"), gte: on(p, "gte", true) })),
         colors: kids(scale, "color").map((c) => sheet.wb.styles.color(c) ?? "#000000"),
       });
     }
   }
   return out.sort((a, b) => a.priority - b.priority);
 }
+
+const R = "#D93025", Y = "#F4B400", G = "#0F9D58", K = "#5F6368", B = "#000000", U = "#4285F4";
+const icons = (glyphs: string, colors: string[]) => Array.from(glyphs).map((glyph, i) => ({ glyph, color: colors[i] }));
+const bars = (n: number) => Array.from({ length: n }, (_, i) => ({ glyph: "▂▄▆█".slice(0, Math.max(1, i + 5 - n)), color: i + 5 - n > 0 ? U : "#C0C0C0" }));
+// ponytail: Excel's icons drawn as Unicode glyphs (lowest first); custom x14 icon sets are not read.
+const ICON_SETS: Record<string, { glyph: string; color: string }[]> = {
+  "3Arrows": icons("↓→↑", [R, Y, G]),
+  "3ArrowsGray": icons("↓→↑", [K, K, K]),
+  "3Flags": icons("⚑⚑⚑", [R, Y, G]),
+  "3TrafficLights1": icons("●●●", [R, Y, G]),
+  "3TrafficLights2": icons("●●●", [R, Y, G]),
+  "3Signs": icons("◆▲●", [R, Y, G]),
+  "3Symbols": icons("✖!✔", [R, Y, G]),
+  "3Symbols2": icons("✖!✔", [R, Y, G]),
+  "3Stars": icons("☆★★", [Y, "#F9DC8C", Y]),
+  "3Triangles": icons("▼▬▲", [R, Y, G]),
+  "4Arrows": icons("↓↘↗↑", [R, Y, Y, G]),
+  "4ArrowsGray": icons("↓↘↗↑", [K, K, K, K]),
+  "4RedToBlack": icons("●●●●", [B, K, "#F4A7A0", R]),
+  "4Rating": bars(4),
+  "4TrafficLights": icons("●●●●", [B, R, Y, G]),
+  "5Arrows": icons("↓↘→↗↑", [R, Y, Y, Y, G]),
+  "5ArrowsGray": icons("↓↘→↗↑", [K, K, K, K, K]),
+  "5Rating": bars(5),
+  "5Quarters": icons("○◔◑◕●", [K, K, K, K, K]),
+  "5Boxes": icons("□◔◑◕■", [U, U, U, U, U]),
+};
 
 const inRanges = (ranges: Rect[], row: number, col: number) => ranges.some((r) => row >= r.r1 && row <= r.r2 && col >= r.c1 && col <= r.c2);
 const isErr = (v: Scalar) => typeof v === "object" && v !== null;
@@ -275,8 +309,48 @@ export class ConditionalFormats {
         const fraction = hi === lo ? 1 : Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
         return { bar: { fraction, color: rule.colors[0] ?? "#638EC6" } };
       }
+      case "iconSet": {
+        if (typeof v !== "number" || !rule.points.length) return null;
+        const set = rule.el.getElementsByTagNameNS(rule.el.namespaceURI, "iconSet")[0] ?? null;
+        const glyphs = ICON_SETS[set?.getAttribute("iconSet") ?? "3TrafficLights1"] ?? ICON_SETS["3TrafficLights1"];
+        let i = 0;
+        rule.points.forEach((p, k) => {
+          const t = this.point(rule, p, row, col);
+          if (k > 0 && (v > t || (p.gte && v === t))) i = k;
+        });
+        if (set && on(set, "reverse", false)) i = rule.points.length - 1 - i;
+        const out: CfStyle = { icon: glyphs[Math.min(i, glyphs.length - 1)] };
+        if (set && !on(set, "showValue", true)) out.hideValue = true;
+        return out;
+      }
+      case "timePeriod": {
+        if (typeof v !== "number") return null;
+        const now = new Date();
+        const date1904 = this.sheet.wb.date1904;
+        const today = dateToSerial(now.getFullYear(), now.getMonth() + 1, now.getDate(), date1904);
+        const day = Math.floor(v), dow = now.getDay();
+        const month = (dm: number) => {
+          const d = serialToDate(day, date1904);
+          const t = new Date(now.getFullYear(), now.getMonth() + dm, 1);
+          return d.y === t.getFullYear() && d.m === t.getMonth() + 1;
+        };
+        const week = (dw: number) => day >= today - dow + 7 * dw && day <= today - dow + 7 * dw + 6;
+        const hits: Record<string, () => boolean> = {
+          today: () => day === today,
+          yesterday: () => day === today - 1,
+          tomorrow: () => day === today + 1,
+          last7Days: () => day <= today && day > today - 7,
+          thisWeek: () => week(0),
+          lastWeek: () => week(-1),
+          nextWeek: () => week(1),
+          thisMonth: () => month(0),
+          lastMonth: () => month(-1),
+          nextMonth: () => month(1),
+        };
+        return yes(hits[rule.el.getAttribute("timePeriod") ?? ""]?.() ?? false);
+      }
       default:
-        return null; // icon sets and time periods are kept but not drawn
+        return null;
     }
   }
 }
@@ -318,6 +392,7 @@ function operand(raw: string): string {
 
 /** Add a rule for `ranges`, below the sheet's existing rules. */
 export function addRule(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewRule): void {
+  assertAction(sheet, "formatCells");
   const priority = Math.max(0, ...readRules(sheet).map((r) => r.priority)) + 1;
   const first = rangeName({ ...ranges[0], r2: ranges[0].r1, c2: ranges[0].c1 });
   const values = rule.values ?? [];
@@ -373,6 +448,7 @@ export function addRule(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewRule): 
 
 /** Remove one rule (and its block when it was the block's last). */
 export function deleteRule(e: Edits, sheet: Sheet, rule: CfRule): void {
+  assertAction(sheet, "formatCells");
   e.structural(() => {
     const live = readRules(sheet).find((r) => r.priority === rule.priority && r.type === rule.type);
     if (!live) return;

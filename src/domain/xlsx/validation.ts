@@ -1,3 +1,4 @@
+import { assertAction } from "./protection";
 /*
  * Data validation: dropdown lists (items typed in, or a range's values), number limits and custom formulas, read
  * from a sheet's dataValidation elements, checked on input, and written as Google's data validation sidebar does.
@@ -191,6 +192,7 @@ const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").rep
 
 /** Set `rule` on `ranges` (replacing any rule there). */
 export function setValidation(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewValidation): void {
+  assertAction(sheet, "sheet");
   const formulas =
     rule.type === "list" ? [rule.items ? `"${rule.items.map((i) => i.replace(/"/g, '""')).join(",")}"` : rule.source ?? ""] : rule.formulas ?? [];
   const attrs = [`type="${rule.type}"`, `allowBlank="1"`, `showErrorMessage="1"`, rule.reject ? "" : `errorStyle="warning"`, rule.type === "decimal" ? `operator="${rule.operator ?? "between"}"` : "", `sqref="${ranges.map(rangeName).join(" ")}"`].filter(Boolean).join(" ");
@@ -212,6 +214,7 @@ export function setValidation(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewV
 }
 
 export function removeValidation(e: Edits, sheet: Sheet, ranges: Rect[]): void {
+  assertAction(sheet, "sheet");
   e.structural(() => {
     clear(sheet, ranges);
     invalidateValidations(sheet);

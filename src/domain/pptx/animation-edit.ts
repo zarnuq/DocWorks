@@ -3,9 +3,12 @@ import { NS } from "../../core/utils/xml";
 import { Effect, readAnimations } from "./animation";
 
 export const ANIMATION_TYPES = [
-  ["Appear", "appear"], ["Fade in", "fade-in"], ["Fade out", "fade-out"],
+  ["Appear", "appear"], ["Disappear", "disappear"], ["Fade in", "fade-in"], ["Fade out", "fade-out"],
   ["Fly in from left", "fly-left"], ["Fly in from right", "fly-right"],
-  ["Fly in from top", "fly-up"], ["Fly in from bottom", "fly-down"], ["Zoom in", "zoom-in"], ["Spin", "spin"],
+  ["Fly in from top", "fly-up"], ["Fly in from bottom", "fly-down"],
+  ["Fly out to left", "fly-out-left"], ["Fly out to right", "fly-out-right"],
+  ["Fly out to top", "fly-out-up"], ["Fly out to bottom", "fly-out-down"],
+  ["Zoom in", "zoom-in"], ["Zoom out", "zoom-out"], ["Spin", "spin"],
 ] as const;
 export type AnimationType = typeof ANIMATION_TYPES[number][1];
 export interface AnimationSettings {
@@ -36,20 +39,19 @@ const validate = (s: AnimationSettings) => {
 };
 
 function kindOf(e: Effect): AnimationType | null {
-
-  if (e.behaviors.length === 1 && e.behaviors[0].type === "visibility" && e.behaviors[0].visible) return "appear";
+  const exit = e.cls === "exit";
+  if (e.behaviors.length === 1 && e.behaviors[0].type === "visibility") return e.behaviors[0].visible ? "appear" : "disappear";
   const filter = e.behaviors.find((b) => b.type === "effect");
-  if (filter?.type === "effect" && filter.filter === "fade") return e.cls === "exit" ? "fade-out" : "fade-in";
+  if (filter?.type === "effect" && filter.filter === "fade") return exit ? "fade-out" : "fade-in";
   if (e.behaviors.some((b) => b.type === "rotate" && b.by === 360)) return "spin";
   const props = e.behaviors.filter((b) => b.type === "prop");
-  if (props.some((b) => b.attr === "ppt_w") && props.some((b) => b.attr === "ppt_h")) return "zoom-in";
+  if (props.some((b) => b.attr === "ppt_w") && props.some((b) => b.attr === "ppt_h")) return exit ? "zoom-out" : "zoom-in";
   const p = props[0];
   if (p && ["ppt_x", "ppt_y"].includes(p.attr)) {
-    const from = p.keys[0]?.v;
-    if (from === "0-#ppt_w/2") return "fly-left";
-    if (from === "1+#ppt_w/2") return "fly-right";
-    if (from === "0-#ppt_h/2") return "fly-up";
-    if (from === "1+#ppt_h/2") return "fly-down";
+    // Flying in starts off the slide; flying out ends there.
+    const off = p.keys[exit ? p.keys.length - 1 : 0]?.v;
+    const side = off === "0-#ppt_w/2" ? "left" : off === "1+#ppt_w/2" ? "right" : off === "0-#ppt_h/2" ? "up" : off === "1+#ppt_h/2" ? "down" : null;
+    if (side) return `fly-${exit ? "out-" : ""}${side}` as AnimationType;
   }
   return null;
 }
@@ -65,7 +67,7 @@ export function animationEntries(doc: Document): AnimationEntry[] {
     const groups = Array.from(child(child(click, "cTn"), "childTnLst")?.children ?? []);
     const effectPars = groups.flatMap((g) => Array.from(child(child(g, "cTn"), "childTnLst")?.children ?? []));
     const behaviorCount = child(child(effectPars[0] ?? null, "cTn"), "childTnLst")?.children.length ?? 0;
-    const expectedCount = type === "appear" || type === "spin" ? 1 : type === "zoom-in" ? 3 : 2;
+    const expectedCount = type === "appear" || type === "disappear" || type === "spin" ? 1 : type === "zoom-in" || type === "zoom-out" ? 3 : 2;
     const editable = !!type && step.effects.length === 1 && groups.length === 1 && effectPars.length === 1 && behaviorCount === expectedCount && e.behaviors.length === expectedCount;
     const targetName = Array.from(doc.getElementsByTagNameNS(NS.p, "cNvPr")).find((n) => n.getAttribute("id") === e?.spid)?.getAttribute("name") || "Object";
     return { el: click, spid: e?.spid ?? "", type: type ?? "fade-in", trigger: step.auto ? "after" : "click", dur: Math.max(1, ...step.effects.map(effect => effect.dur)) || 500,
@@ -119,23 +121,30 @@ function behaviors(doc: Document, spid: string, s: AnimationSettings, e = builde
   const prop = (attr: string, from: string, to: string) => e("anim", { calcmode: "lin", valueType: "num" }, common(attr),
     e("tavLst", {}, e("tav", { tm: "0" }, e("val", {}, e("strVal", { val: from }))), e("tav", { tm: "100000" }, e("val", {}, e("strVal", { val: to })))));
   const list = e("childTnLst");
-  if (s.type !== "spin" && s.type !== "fade-out") list.append(visibility(true));
+  const exit = isExit(s.type);
+  const hide = () => visibility(false, Math.round(s.dur) - 1);
+  if (s.type === "disappear") list.append(visibility(false));
+  else if (s.type !== "spin" && !exit) list.append(visibility(true));
   if (s.type === "fade-in" || s.type === "fade-out") {
     list.append(e("animEffect", { transition: s.type === "fade-out" ? "out" : "in", filter: "fade" }, common()));
-    if (s.type === "fade-out") list.append(visibility(false, Math.round(s.dur) - 1));
+    if (s.type === "fade-out") list.append(hide());
   } else if (s.type.startsWith("fly-")) {
-    const horiz = s.type === "fly-left" || s.type === "fly-right";
+    const dir = s.type.replace(/^fly-(out-)?/, "");
+    const horiz = dir === "left" || dir === "right";
     const pos = horiz ? "ppt_x" : "ppt_y";
     const size = horiz ? "ppt_w" : "ppt_h";
-    const from = s.type === "fly-left" || s.type === "fly-up" ? `0-#${size}/2` : `1+#${size}/2`;
-    list.append(prop(pos, from, `#${pos}`));
+    const off = dir === "left" || dir === "up" ? `0-#${size}/2` : `1+#${size}/2`;
+    if (exit) list.append(prop(pos, `#${pos}`, off), hide());
+    else list.append(prop(pos, off, `#${pos}`));
   } else if (s.type === "zoom-in") list.append(prop("ppt_w", "0.1*#ppt_w", "#ppt_w"), prop("ppt_h", "0.1*#ppt_h", "#ppt_h"));
+  else if (s.type === "zoom-out") list.append(prop("ppt_w", "#ppt_w", "0.1*#ppt_w"), prop("ppt_h", "#ppt_h", "0.1*#ppt_h"), hide());
   else if (s.type === "spin") list.append(e("animRot", { by: "21600000" }, common("r")));
   return list;
 }
 
-const effectAttrs = (s: AnimationSettings) => ({ presetID: s.type === "appear" ? "1" : s.type.startsWith("fade-") ? "10" : s.type.startsWith("fly-") ? "2" : s.type === "zoom-in" ? "23" : "8",
-  presetClass: s.type === "fade-out" ? "exit" : s.type === "spin" ? "emph" : "entr", presetSubtype: "0", fill: "hold", nodeType: s.trigger === "click" ? "clickEffect" : s.trigger === "with" ? "withEffect" : "afterEffect" });
+const isExit = (t: AnimationType) => t === "disappear" || t === "fade-out" || t === "zoom-out" || t.startsWith("fly-out");
+const effectAttrs = (s: AnimationSettings) => ({ presetID: s.type === "appear" || s.type === "disappear" ? "1" : s.type.startsWith("fade-") ? "10" : s.type.startsWith("fly-") ? "2" : s.type.startsWith("zoom-") ? "23" : "8",
+  presetClass: isExit(s.type) ? "exit" : s.type === "spin" ? "emph" : "entr", presetSubtype: "0", fill: "hold", nodeType: s.trigger === "click" ? "clickEffect" : s.trigger === "with" ? "withEffect" : "afterEffect" });
 
 export function addAnimation(doc: Document, spid: string, patch: Partial<AnimationSettings> = {}): void {
   const s = { ...defaults, ...patch };

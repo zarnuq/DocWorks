@@ -9,14 +9,15 @@ const slide = (body = "") => new DOMParser().parseFromString(`<p:sld xmlns:p="${
 const serialize = (e: Node) => new XMLSerializer().serializeToString(e);
 
 describe("animation editing", () => {
-  it.each(["appear", "fade-in", "fade-out", "fly-left", "fly-right", "fly-up", "fly-down", "zoom-in", "spin"] as const)("adds a playable %s to the selected shape", (type) => {
+  it.each(["appear", "disappear", "fade-in", "fade-out", "fly-left", "fly-right", "fly-up", "fly-down", "fly-out-left", "fly-out-right", "fly-out-up", "fly-out-down", "zoom-in", "zoom-out", "spin"] as const)("adds a playable %s to the selected shape", (type) => {
     const doc = slide('<p:extLst/>');
     const content = serialize(doc.getElementsByTagNameNS(NS.p, "cSld")[0]);
     addAnimation(doc, "3", { type, trigger: "click", dur: 800, delay: 200 });
     const [step] = readAnimations(doc);
     expect(step.auto).toBe(false);
-    expect(step.effects[0]).toMatchObject({ spid: "3", start: 200, dur: type === "appear" ? 1 : 800, cls: type === "fade-out" ? "exit" : type === "spin" ? "emph" : "entr" });
-    expect(animationEntries(doc)[0]).toMatchObject({ type, trigger: "click", delay: 200 });
+    const exit = type === "disappear" || type.endsWith("-out") || type.startsWith("fly-out");
+    expect(step.effects[0]).toMatchObject({ spid: "3", start: 200, dur: type === "appear" || type === "disappear" ? 1 : 800, cls: exit ? "exit" : type === "spin" ? "emph" : "entr" });
+    expect(animationEntries(doc)[0]).toMatchObject({ type, trigger: "click", delay: 200, simple: true });
     expect(serialize(doc.getElementsByTagNameNS(NS.p, "cSld")[0])).toBe(content);
     expect(Array.from(doc.documentElement.children).map((e) => e.localName)).toEqual(["cSld", "timing", "extLst"]);
     const ids = Array.from(doc.getElementsByTagNameNS(NS.p, "cTn")).map((e) => e.getAttribute("id"));

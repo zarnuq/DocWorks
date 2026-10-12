@@ -16,6 +16,7 @@ import { Op, paint } from "./paint";
 
 export const HEADER_W = 46;
 export const HEADER_H = 24;
+let accessibilityId = 0;
 const REF_COLORS = ["#1a73e8", "#e8710a", "#9334e6", "#188038", "#d93025", "#12b5cb"];
 
 export interface Pos {
@@ -53,6 +54,7 @@ export interface GridHost {
   dropdown?(row: number, col: number): boolean;
   /** A cell's note, if it has one (marked in its corner, shown on hover). */
   note?(row: number, col: number): string | null;
+  comment?(row: number, col: number): boolean;
   /** Whether a cell's value breaks its validation rule (marked, as Sheets does). */
   invalid?(row: number, col: number): boolean;
   /** Show a cell's choices below the point `at` (the arrow's bottom left, in client pixels). */
@@ -128,6 +130,7 @@ export class Grid {
   /** Selected text range of the formula being built by clicking cells. */
   private refRange: { start: number; end: number } | null = null;
   private tabStartCol: number | null = null;
+  private announcement: HTMLElement;
   private textCache = new Map<number, Record<string, string>>();
   private boxCache = new Map<number, Record<string, string>>();
   /** Font properties last copied onto the editor. */
@@ -146,16 +149,16 @@ export class Grid {
     this.el = parent.createDiv({ cls: "xlsx-grid" });
     this.scroll = this.el.createDiv({ cls: "xlsx-scroll" });
     this.spacer = this.scroll.createDiv({ cls: "xlsx-spacer" });
-    this.canvas = this.scroll.createDiv({ cls: "xlsx-canvas", attr: { role: "grid" } });
+    this.canvas = this.scroll.createDiv({ cls: "xlsx-canvas", attr: { role: "region", "aria-label": "Spreadsheet cells" } });
     this.quads = ["corner", "top", "left", "main"].map((q) => {
       const el = this.canvas.createDiv({ cls: `xlsx-quad xlsx-quad-${q}` });
-      el.createEl("canvas", { cls: "xlsx-paint" });
+      el.createEl("canvas", { cls: "xlsx-paint", attr: { "aria-hidden": "true" } });
       el.createDiv({ cls: "xlsx-overlay" });
       return el;
     });
     const heads = (cls: string) => [0, 1].map(() => {
       const el = this.canvas.createDiv({ cls: `xlsx-heads ${cls}` });
-      el.createEl("canvas", { cls: "xlsx-paint" });
+      el.createEl("canvas", { cls: "xlsx-paint", attr: { "aria-hidden": "true" } });
       return el;
     });
     this.colHeads = heads("xlsx-colheads");
@@ -166,6 +169,10 @@ export class Grid {
     this.guide.hide();
     // Outside the scroll container: typing would otherwise make the browser scroll it to show the caret.
     this.input = this.el.createEl("textarea", { cls: "xlsx-editor", attr: { spellcheck: "false", "aria-multiline": "false", autocapitalize: "off" } });
+
+    const hint = this.el.createDiv({ cls: "dw-sr-only", text: "Use arrow keys to navigate, Enter or F2 to edit, Escape to cancel, Shift+F10 for cell actions. Use F6 to move between cells and toolbar, then Tab to reach other controls. Use the name box to jump to a cell.", attr: { id: `dw-grid-help-${++accessibilityId}` } });
+    this.input.setAttribute("aria-describedby", hint.id);
+    this.announcement = this.el.createDiv({ cls: "dw-sr-only", attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" } });
 
     this.scroll.addEventListener("scroll", () => this.schedule());
     this.canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
@@ -464,7 +471,17 @@ export class Grid {
     const box = this.boxOf(a, { left: sl, top: st });
     place(this.input, box.x, box.y, box.w, box.h);
     this.input.toggleClass("is-editing", !!this.edit);
-    this.input.setAttribute("aria-label", `${cellName(this.active.row, this.active.col)} ${s.display(this.active.row, this.active.col).text}`);
+    const name = `${s.name}!${cellName(this.active.row, this.active.col)}`;
+    const value = s.display(this.active.row, this.active.col).text || "Blank";
+    this.input.setAttribute("aria-label", `${name}, ${value}`);
+    const activeCell = s.at(this.active.row, this.active.col);
+    const note = this.host.note?.(this.active.row, this.active.col);
+    const details = [name, value, activeCell?.formula === undefined ? "" : `Formula: =${activeCell.formula}`,
+      note ? `Note: ${note}` : "", this.host.comment?.(this.active.row, this.active.col) ? "Comment thread" : "",
+      this.host.invalid?.(this.active.row, this.active.col) ? "Invalid value" : "",
+      activeCell && this.host.isStale(activeCell) ? "Result is stale" : "",
+      `Selected ${rangeName(sel)}`].filter(Boolean).join(". ");
+    if (!this.edit && this.announcement.textContent !== details) this.announcement.setText(details);
     // While editing, the editor shows the cell's font.
     const cell = this.edit ? s.at(this.active.row, this.active.col) : undefined;
     const editFont = Object.fromEntries(Object.entries(cell ? this.css(cell.style, false) : {}).filter(([k]) => /^(font|color)/.test(k)));
@@ -490,7 +507,7 @@ export class Grid {
     const rows: number[] = [], cols: number[] = [];
     for (let i = r.r1; i <= r.r2; i++) if (s.rowHeight(i) > 0) rows.push(i);
     for (let i = r.c1; i <= r.c2; i++) if (s.colWidth(i) > 0) cols.push(i);
-    const canvas = el.createEl("canvas", { cls: "xlsx-paint" });
+    const canvas = el.createEl("canvas", { cls: "xlsx-paint", attr: { "aria-hidden": "true" } });
     const overlay = el.createDiv({ cls: "xlsx-overlay" });
     const w = s.colX(r.c2 + 1) - s.colX(r.c1), h = s.rowY(r.r2 + 1) - s.rowY(r.r1);
     this.drawQuadrant({ el, canvas, overlay, rows, cols, ox: -s.colX(r.c1), oy: -s.rowY(r.r1), w, h }, false, scale);
@@ -560,7 +577,9 @@ export class Grid {
       const stale = this.host.isStale(cell);
       if (stale) texts.push({ kind: "corner", x: x + w - 1, y, color: "#e37400" });
       else if (this.host.invalid?.(row, col)) texts.push({ kind: "corner", x: x + w - 1, y, color: "#d93025" });
-      if (!shown.text) return;
+      const px = (fmt.fontSize * 4) / 3;
+      if (cf?.icon) texts.push({ kind: "text", x, y, w, h, text: cf.icon.glyph, font: `${px}px sans-serif`, size: px, color: cf.icon.color, align: "left", valign: "center", wrap: false, underline: false, strike: false, pad: 0 });
+      if (!shown.text || cf?.hideValue) return;
       const isNum = typeof cell.value === "number";
       const align = fmt.hAlign !== "general" ? fmt.hAlign : isNum ? "right" : typeof cell.value === "boolean" || typeof cell.value === "object" ? "center" : "left";
       // Unwrapped left-aligned text runs on over empty cells to its right.
@@ -572,7 +591,6 @@ export class Grid {
       let color = fmt.color ?? (fill ? "#000000" : pal.ink);
       if (this.dark && !fill && luminance(color) < 0.25) color = pal.ink;
       if (shown.color) color = shown.color;
-      const px = (fmt.fontSize * 4) / 3;
       const indent = parseFloat(this.css(cell.style, false)["padding-left"] ?? this.css(cell.style, false)["padding-right"] ?? "0") || 0;
       texts.push({
         kind: "text",
@@ -589,20 +607,21 @@ export class Grid {
         wrap: fmt.wrap,
         underline: fmt.underline,
         strike: fmt.strike,
-        pad: indent ? indent - 3 : 0,
+        pad: (indent ? indent - 3 : 0) + (cf?.icon && align === "left" ? px + 2 : 0),
       });
     };
     for (const m of merges) drawCell(m.r1, m.c1, m);
     for (const row of q.rows) for (const col of q.cols) if (!covered(row, col)) drawCell(row, col, { r1: row, c1: col, r2: row, c2: col });
     // Notes: a small triangle in the cell's top right corner, as Sheets marks them (empty cells too).
     const notes: Op[] = [];
-    if (this.host.note)
+    if (this.host.note || this.host.comment)
       for (const row of q.rows)
         for (const col of q.cols) {
           if (covered(row, col) && !merges.some((m) => m.r1 === row && m.c1 === col)) continue;
-          if (!this.host.note(row, col)) continue;
+          const comment = this.host.comment?.(row, col);
+          if (!this.host.note?.(row, col) && !comment) continue;
           const m = merges.find((x) => x.r1 === row && x.c1 === col);
-          notes.push({ kind: "corner", x: s.colX((m?.c2 ?? col) + 1) + q.ox - 1, y: s.rowY(row) + q.oy, color: this.dark ? "#e8eaed" : "#000000" });
+          notes.push({ kind: "corner", x: s.colX((m?.c2 ?? col) + 1) + q.ox - 1, y: s.rowY(row) + q.oy, color: comment ? "#f9ab00" : this.dark ? "#e8eaed" : "#000000" });
         }
     ops.push(...fills, ...borders, ...texts, ...notes);
     // Painted at the screen's resolution times the zoom, so zoomed text stays sharp.
@@ -1006,6 +1025,12 @@ export class Grid {
   private onKey(e: KeyboardEvent): void {
     if (e.isComposing) return;
     const mod = e.ctrlKey || e.metaKey;
+    if (!this.edit && ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu")) {
+      e.preventDefault();
+      const box = this.input.getBoundingClientRect();
+      this.host.contextMenu(new MouseEvent("contextmenu", {clientX: box.left, clientY: box.bottom}), {area: "cell", ...this.active});
+      return;
+    }
     if (this.edit) {
       if (e.key === "Escape") {
         e.preventDefault();

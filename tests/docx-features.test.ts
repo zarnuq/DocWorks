@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { kerningEm, textWidthEm } from "../src/presentation/pptx/text-fit";
-import { EditorState, TextSelection, Command } from "prosemirror-state";
+import { AllSelection, EditorState, TextSelection, Command } from "prosemirror-state";
 import { DecorationSet, EditorView } from "prosemirror-view";
 import { docxSchema as schema } from "../src/domain/docx/schema";
 import { DocxStyles } from "../src/domain/docx/docx-styles";
@@ -1070,6 +1070,39 @@ describe("superscript size", () => {
 
 describe("code", () => {
   const two = () => s.doc.create(null, [s.paragraph.create(null, schema.text("let a = 1;")), s.paragraph.create(null, schema.text("let b = 2;")), s.paragraph.create(null, schema.text("after"))]);
+
+  it("boxes Select All with grey fill, Consolas 10 pt and disabled spellcheck", () => {
+    const doc = two();
+    const st = run(EditorState.create({ doc, selection: new AllSelection(doc) }), cmd.toggleCode);
+    const cell = st.doc.firstChild!.firstChild!.firstChild!;
+    expect(st.doc.firstChild!.type).toBe(s.table);
+    expect(cell.attrs.background).toBe("#F1F3F4");
+    const el = DOMSerializer.fromSchema(schema).serializeNode(st.doc.firstChild!) as HTMLElement;
+    expect(el.querySelector("td")!.style.backgroundColor).toBe("rgb(241, 243, 244)");
+    cell.descendants(n => {
+      if (n.isText) {
+        expect(n.marks.some(mk => mk.type === m.font && mk.attrs.font === "Consolas")).toBe(true);
+        expect(n.marks.some(mk => mk.type === m.size && mk.attrs.pt === 10)).toBe(true);
+        expect(n.marks.some(mk => mk.type === m.noProof)).toBe(true);
+      }
+    });
+  });
+
+  it("boxes a whole paragraph when the selection includes its trailing paragraph boundary", () => {
+    const doc = two();
+    const st = run(EditorState.create({ doc, selection: TextSelection.create(doc, 1, doc.firstChild!.nodeSize + 1) }), cmd.toggleCode);
+    expect(st.doc.firstChild!.type).toBe(s.table);
+    expect(st.doc.firstChild!.textContent).toBe("let a = 1;");
+    expect(st.doc.child(1).textContent).toBe("let b = 2;");
+  });
+
+  it("boxes whole paragraphs within a column section", () => {
+    const doc = s.doc.create(null, s.columns.create({count:2}, [s.paragraph.create(null,schema.text("code")),s.paragraph.create(null,schema.text("after"))]));
+    const st = run(EditorState.create({ doc, selection: TextSelection.create(doc, 2, 6) }), cmd.toggleCode);
+    expect(st.doc.firstChild!.firstChild!.type).toBe(s.table);
+    expect(st.doc.firstChild!.firstChild!.firstChild!.firstChild!.attrs.background).toBe("#F1F3F4");
+  });
+
   it("sets a monospace font on part of a line", () => {
     const st = run(EditorState.create({ doc: two(), selection: TextSelection.create(two(), 5, 6) }), cmd.toggleCode);
     expect(st.doc.child(0).type).toBe(s.paragraph);
@@ -1090,7 +1123,7 @@ describe("code", () => {
     expect(cell.textContent).toBe("let a = 1;let b = 2;");
     cell.forEach((p) => {
       expect(p.attrs.spaceAfter).toBe(0);
-      p.forEach((t) => expect(t.marks.some((mk) => mk.type === m.font && mk.attrs.font === "Courier New")).toBe(true));
+      p.forEach((t) => expect(t.marks.some((mk) => mk.type === m.font && mk.attrs.font === "Consolas")).toBe(true));
     });
     expect(st.doc.child(1).textContent).toBe("after");
     const shown = EditorState.create({ doc: st.doc, plugins: docxPlugins(ctx) });
@@ -1103,7 +1136,7 @@ describe("code", () => {
     expect(st.doc.child(0).firstChild!.marks.some((mk) => mk.type === m.font)).toBe(false);
   });
 
-  it("saves a code block as a shaded table of Courier New text that reads back as one", async () => {
+  it("saves a code block as a shaded table of Consolas text that reads back as one", async () => {
     const { DocxDocument } = await import("../src/infrastructure/docx/docx-document");
     const doc = two();
     const end = doc.child(0).nodeSize + doc.child(1).nodeSize - 1;
@@ -1112,9 +1145,12 @@ describe("code", () => {
     writeBody(pkg.body, st.doc, new Map(), pkg);
     const xml = new XMLSerializer().serializeToString(pkg.body);
     expect(xml).toContain('w:fill="F1F3F4"');
-    expect(xml).toContain('w:ascii="Courier New"');
+    expect(xml).toContain('w:ascii="Consolas"');
+    expect(xml).toContain("w:noProof");
+    expect(xml).toContain('w:sz w:val="20"');
     const back = readDocx(pkg.body, { imageSrc: () => null, hyperlinkHref: () => null }).doc;
     expect(back.child(0).type).toBe(s.table);
+    expect(back.child(0).firstChild!.firstChild!.firstChild!.firstChild!.marks.some(mark => mark.type === m.noProof)).toBe(true);
     expect(back.child(0).child(0).child(0).attrs.background?.toUpperCase()).toBe("#F1F3F4");
   });
 });

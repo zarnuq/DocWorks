@@ -140,6 +140,7 @@ export function runMarks(rPr: Element | null): Mark[] {
   const marks: Mark[] = [m.rpr.create({ xml: xmlOf(rPr) })];
   if (isOn(w(rPr, "b"))) marks.push(m.bold.create());
   if (isOn(w(rPr, "i"))) marks.push(m.italic.create());
+  if (isOn(w(rPr, "noProof"))) marks.push(m.noProof.create());
   const u = w(rPr, "u");
   if (u && wVal(u) !== "none") marks.push(m.underline.create());
   if (isOn(w(rPr, "strike")) || isOn(w(rPr, "dstrike"))) marks.push(m.strike.create());

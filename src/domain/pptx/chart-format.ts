@@ -306,6 +306,15 @@ function convert(p: Parts, kind: ChartKind, stacking: Stacking): void {
   if (tag === "lineChart") add("marker", 1);
   if (pie) add("firstSliceAng", 0);
   if (kind === "doughnut") add("holeSize", 50);
+  // A 3-D chart turns flat: its depth axis and 3-D view go.
+  if (old.localName.includes("3D")) {
+    for (const ax of kids(p.plot, "serAx")) {
+      const id = val(kid(ax, "axId"));
+      kids(old, "axId").find((a) => val(a) === id)?.remove();
+      ax.remove();
+    }
+    for (const name of ["view3D", "floor", "sideWall", "backWall"]) kid(p.chart, name)?.remove();
+  }
   const ids = kids(old, "axId").map(val);
   if (pie) {
     for (const ax of Array.from(p.plot.children)) if (ax.localName.endsWith("Ax") && ids.includes(val(kid(ax, "axId")))) ax.remove();

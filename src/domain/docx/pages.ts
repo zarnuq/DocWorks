@@ -140,6 +140,8 @@ export interface PageLayout {
   fills: number[];
   /** Page breaks inside paragraphs and table rows. */
   spacers: Spacer[];
+  /** Invisible content completing a manually ended column page, so its columns retain the page's height. */
+  columnPads?: { pos: number; height: number }[];
   pages: number;
 }
 
@@ -280,16 +282,38 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number, 
     const { count, group } = blocks[first].columns!;
     let column = avail - used;
     let text = 0;
+    let segmentStart = 0;
+    let segments: number[] = [];
+    // A forced break reserves a column while fitting text, but CSS balances its final height.
+    // Find the shortest height that fits every forced segment in the available columns.
+    const balancedHeight = () => {
+      if (!segments.length) return text / count;
+      const lengths = [...segments];
+      if (text > segmentStart) lengths.push(text - segmentStart);
+      let low = 0, high = column;
+      for (let step = 0; step < 40; step++) {
+        const mid = (low + high) / 2;
+        const needed = lengths.reduce((sum, length) => sum + Math.max(1, Math.ceil(length / mid)), 0);
+        if (needed > count) low = mid; else high = mid;
+      }
+      return Math.round(high * 1e6) / 1e6;
+    };
     let j = first;
     for (; j < blocks.length && blocks[j].columns?.group === group; j++) {
       const b = blocks[j];
-      const end = () => {
-        used += text / count;
+      const finish = (full: boolean) => {
+        if (full && text < count * column) (out.columnPads ??= []).push({ pos: blocks[j].unit.pos, height: count * column - text });
+        used += full ? column : balancedHeight();
+      };
+      const end = (full = false) => {
+        finish(full);
         newPage(j);
         column = avail;
         text = 0;
+        segmentStart = 0;
+        segments = [];
       };
-      if (j > first && blocks[j - 1].breakAfter) end();
+      if (j > first && blocks[j - 1].breakAfter) end(true);
       const u = b.unit;
       const startTop = 0;
       if (u.kind === "text" || u.kind === "table") {
@@ -302,7 +326,7 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number, 
           columnFlow = { count, base: 0, firstPage: page };
           result = run()!;
         }
-        if (result.page !== page) { used = 0; column = avail; }
+        if (result.page !== page) { used = 0; column = avail; segments = []; segmentStart = 0; }
         page = result.page;
         text = result.used;
         columnFlow = null;
@@ -310,9 +334,15 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number, 
         if (text + u.height > count * column && (text > 0 || used > 0)) end();
         text += u.height - startTop;
       }
-      if (b.columnBreak && text % column) text = Math.min(count * column, Math.ceil(text / column) * column);
+      if (b.columnBreak) {
+        segments.push(text - segmentStart);
+        text = Math.min(count * column, text === segmentStart ? text + column : Math.ceil(text / column) * column);
+        segmentStart = text;
+      }
     }
-    used += text / count;
+    const full = j < blocks.length && blocks[j - 1].breakAfter;
+    if (full && text < count * column) (out.columnPads ??= []).push({ pos: blocks[j].unit.pos, height: count * column - text });
+    used += full ? column : balancedHeight();
     return j;
   };
 

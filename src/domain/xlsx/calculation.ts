@@ -1,3 +1,4 @@
+import { tableReference } from "./tables";
 /*
  * Recalculation. Formula cells index the rectangles they read (bucketed by column, so whole-column references
  * aren't expanded); an edit marks the formulas reading the changed cells, transitively, and only those are
@@ -8,7 +9,7 @@
  */
 import { NS_S } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Node, parseFormula } from "./formula";
-import { EvalContext, Unsupported, evaluate, isVolatile } from "./formula-evaluator";
+import { EvalContext, Unsupported, evaluate, evaluateArray, isVolatile } from "./formula-evaluator";
 import { Rect } from "./references";
 import { ErrorValue, Scalar } from "./number-format";
 import { Cell, Sheet, Workbook } from "./workbook-model";
@@ -110,13 +111,20 @@ export class Calc {
 
   private collect(node: Node, sheet: Sheet, info: Info, seen = new Set<string>()): void {
     switch (node.type) {
+      case "spill":
+        info.always = true;
+        this.collect(node.arg, sheet, info, seen);
+        break;
+      case "struct":
+        this.collect(tableReference(this.wb, sheet, info.cell.row, info.cell.col, node.text), sheet, info, seen);
+        break;
       case "ref": {
         const target = node.sheet === undefined ? sheet : this.wb.sheet(node.sheet);
         if (target) info.deps.push({ sheet: target, rect: node.range });
         break;
       }
       case "name": {
-        const def = this.name(node.name, sheet);
+        const def = this.name(node.name, sheet) ?? tableReference(this.wb, sheet, info.cell.row, info.cell.col, node.name);
         if (def && !seen.has(node.name.toLowerCase())) {
           seen.add(node.name.toLowerCase());
           this.collect(def, sheet, info, seen);
@@ -124,7 +132,7 @@ export class Calc {
         break;
       }
       case "call":
-        if (isVolatile(node.name)) info.always = true;
+        if (isVolatile(node.name) || node.name === "ANCHORARRAY") info.always = true;
         node.args.forEach((a) => this.collect(a, sheet, info, seen));
         break;
       case "un":
@@ -155,7 +163,7 @@ export class Calc {
     this.unindex(cell);
     if (cell.formula === undefined) return;
     const node = this.parse(cell.formula);
-    const info: Info = { sheet, cell, node, deps: [], always: !node };
+    const info: Info = { sheet, cell, node, deps: [], always: !node || !!cell.dynamic };
     if (node) this.collect(node, sheet, info);
     this.infos.set(cell, info);
     if (!this.byPos.has(sheet)) this.byPos.set(sheet, new Map());
@@ -194,7 +202,9 @@ export class Calc {
       row,
       col,
       value: (s, r, c) => {
-        const cell = s.at(r, c);
+        let cell = s.at(r, c);
+        const anchor = cell?.array && s.at(cell.array.r1,cell.array.c1);
+        if(anchor && anchor !== cell && this.pending.has(anchor)) {this.compute(anchor);cell=s.at(r,c);}
         if (!cell) return null;
         if (this.computing.has(cell)) throw new Circular(cell);
         if (this.pending.has(cell) || (cell.noCache && !this.done.has(cell))) this.compute(cell);
@@ -233,7 +243,18 @@ export class Calc {
     let value: Scalar;
     let unsupported = !info.node;
     try {
-      value = info.node ? evaluate(info.node, this.context(info.sheet, cell.row, cell.col)) : null;
+      if (info.node && cell.dynamic) {
+        const rows=evaluateArray(info.node,this.context(info.sheet,cell.row,cell.col));
+        const wantsSpill=!!cell.array || rows.length > 1 || (rows[0]?.length ?? 0) > 1 || /(?:^|\W)(?:_xlfn\.)?(?:_xlws\.)?(?:SEQUENCE|FILTER|SORT|UNIQUE|TRANSPOSE)\s*\(/i.test(cell.formula ?? "");
+        if(wantsSpill) {
+          const outputs=info.sheet.setSpill(cell,rows,this.write);
+          this.changed.push(...outputs);
+          if(this.write) for(const output of outputs) for(const reader of this.readers(info.sheet,output.row,output.col)) {
+            if(!this.computing.has(reader.cell) && !this.done.has(reader.cell)) this.pending.add(reader.cell);
+          }
+          value=cell.value;
+        } else value=rows[0]?.[0] ?? 0;
+      } else value = info.node ? evaluate(info.node, this.context(info.sheet, cell.row, cell.col)) : null;
       this.circular.delete(cell);
     } catch (e) {
       if (e instanceof Unsupported) {
@@ -273,7 +294,7 @@ export class Calc {
     this.write = write;
     this.changed = [];
     for (const c of cells) this.pending.add(c);
-    for (const c of [...this.pending]) if (this.pending.has(c)) this.compute(c);
+    while(this.pending.size) this.compute(this.pending.values().next().value!);
     this.pending.clear();
     this.done.clear();
     return this.changed;

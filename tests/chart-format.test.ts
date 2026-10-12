@@ -147,6 +147,27 @@ describe("chart format", () => {
   });
 });
 
+describe("3-D charts", () => {
+  const bar3d = () => new DOMParser().parseFromString(
+    `<c:chartSpace xmlns:c="${C}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:view3D><c:rotX val="15"/></c:view3D><c:floor/><c:sideWall/><c:backWall/><c:plotArea><c:bar3DChart><c:barDir val="col"/><c:grouping val="standard"/><c:varyColors val="0"/><c:ser><c:idx val="0"/><c:order val="0"/><c:cat><c:strRef><c:strCache><c:ptCount val="2"/><c:pt idx="0"><c:v>A</c:v></c:pt><c:pt idx="1"><c:v>B</c:v></c:pt></c:strCache></c:strRef></c:cat><c:val><c:numRef><c:numCache><c:ptCount val="2"/><c:pt idx="0"><c:v>1</c:v></c:pt><c:pt idx="1"><c:v>2</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:gapWidth val="150"/><c:shape val="box"/><c:axId val="1"/><c:axId val="2"/><c:axId val="3"/></c:bar3DChart><c:catAx><c:axId val="1"/><c:scaling/><c:axPos val="b"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling/><c:axPos val="l"/><c:crossAx val="1"/></c:valAx><c:serAx><c:axId val="3"/><c:scaling/><c:axPos val="b"/><c:crossAx val="2"/></c:serAx></c:plotArea></c:chart></c:chartSpace>`,
+    "application/xml");
+
+  it("stacks 3-D columns without the 2-D-only overlap setting", () => {
+    const xml = bar3d();
+    expect(edit(xml, (f) => (f.stacking = "stacked"))).toMatchObject({ kind: "column", stacking: "stacked" });
+    expect(local(xml, "overlap")).toHaveLength(0);
+    expect(local(xml, "bar3DChart")).toHaveLength(1);
+  });
+
+  it("converts a 3-D chart to a flat one, dropping the depth axis and 3-D view", () => {
+    const xml = bar3d();
+    expect(edit(xml, (f) => (f.kind = "line")).kind).toBe("line");
+    expect(local(xml, "lineChart")[0].getElementsByTagNameNS(C, "axId")).toHaveLength(2);
+    for (const gone of ["serAx", "view3D", "floor", "sideWall", "backWall", "bar3DChart"]) expect(local(xml, gone)).toHaveLength(0);
+    expect(local(xml, "catAx")).toHaveLength(1);
+  });
+});
+
 describe("chart rendering", () => {
   const draw = (format: Partial<ChartFormat>, d = data, kind = "barChart") => {
     const host = document.createElement("div");

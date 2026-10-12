@@ -1,3 +1,4 @@
+import { assertAction, assertCell } from "./protection";
 /*
  * The workbook as sparse cells over the live worksheet XML. Each cell keeps its <c> element, so a write patches
  * just that element (and the shared string table / styles it needs); every other byte of the sheet stays as it was.
@@ -24,6 +25,7 @@ export interface Cell {
   shared?: string;
   /** Array formula range (on every member; the master has the formula). */
   array?: Rect;
+  dynamic?: boolean;
 }
 
 export interface CellInput {
@@ -216,7 +218,7 @@ export class Sheet {
       else if (t === "d") value = isoToSerial(v, this.wb.date1904);
       else value = Number(v);
     }
-    const cell: Cell = { row, col, el: c, value, style: Number(c.getAttribute("s") ?? 0) };
+    const cell: Cell = { row, col, el: c, value, style: Number(c.getAttribute("s") ?? 0), dynamic: this.wb.pkg.isDynamicMetadata(Number(c.getAttribute("cm"))) };
     if (f && f.getAttribute("t") !== "dataTable") {
       cell.formula = f.textContent ?? "";
       if (v === null && t !== "inlineStr") cell.noCache = true;
@@ -344,6 +346,14 @@ export class Sheet {
     return cell;
   }
 
+  /** Effective style, including row and column defaults for empty cells. */
+  styleAt(row: number, col: number): number {
+    const cell = this.at(row, col);
+    if (cell) return cell.style;
+    const r = this.rowEl(row, false);
+    return r?.getAttribute("customFormat") === "1" ? Number(r.getAttribute("s") ?? 0) : this.colStyle(col);
+  }
+
   private colStyle(col: number): number {
     for (const c of this.all(this.first(this.doc.documentElement, "cols"), "col")) {
       if (col + 1 >= Number(c.getAttribute("min")) && col + 1 <= Number(c.getAttribute("max"))) return Number(c.getAttribute("style") ?? 0);
@@ -356,7 +366,8 @@ export class Sheet {
     this.first(el, "v")?.remove();
     this.first(el, "is")?.remove();
     el.removeAttribute("t");
-    for (const a of ["vm", "cm"]) el.removeAttribute(a); // rich value metadata no longer matches
+    el.removeAttribute("vm"); // rich value metadata no longer matches
+    if (!this.wb.pkg.isDynamicMetadata(Number(el.getAttribute("cm")))) el.removeAttribute("cm");
     if (value === null) return;
     let t: string | null = null, v: string;
     if (typeof value === "number") v = String(value);
@@ -387,6 +398,8 @@ export class Sheet {
 
   /** Set a cell's value / formula / style. Returns the cell (undefined when it was removed). */
   setCell(row: number, col: number, input: CellInput): Cell | undefined {
+    if ("value" in input || "formula" in input) assertCell(this, row, col);
+    if (input.style !== undefined) assertAction(this, "formatCells");
     const current = this.at(row, col);
     this.wb.journal?.cell(this, row, col);
     if (current?.array && !(current.array.r1 === row && current.array.c1 === col) && ("value" in input || "formula" in input)) {
@@ -402,8 +415,10 @@ export class Sheet {
     if ("formula" in input || "value" in input) {
       if (input.formula === null || (input.formula === undefined && "value" in input)) {
         this.first(cell.el, "f")?.remove();
-        delete cell.formula;
         if (cell.array) this.clearArray(cell);
+        delete cell.formula;
+        delete cell.dynamic;
+        cell.el.removeAttribute("cm");
       }
       if (input.formula) {
         let f = this.first(cell.el, "f");
@@ -414,6 +429,7 @@ export class Sheet {
         }
         f.textContent = input.formula;
         cell.formula = input.formula;
+        cell.dynamic = true;
       }
       cell.value = input.value ?? null;
       delete cell.noCache;
@@ -429,7 +445,55 @@ export class Sheet {
   }
 
   private clearArray(master: Cell): void {
-    for (const c of this.cellsIn(master.array!)) delete c.array;
+    for (const c of [...this.cellsIn(master.array!)]) {
+      if (c !== master && master.dynamic) {
+        this.wb.journal?.cell(this,c.row,c.col);
+        c.value=null;
+        this.writeValue(c.el,null,false);
+        if (!c.style) this.removeCell(c);
+      }
+      delete c.array;
+    }
+    delete master.array;
+  }
+
+  /** Write the calculated spill as cached cells. Opening uses the same values in memory without touching XML. */
+  setSpill(master: Cell, rows: Scalar[][], write: boolean): Cell[] {
+    const height=rows.length, width=rows[0]?.length ?? 0;
+    const range: Rect={r1:master.row,c1:master.col,r2:master.row+height-1,c2:master.col+width-1};
+    let blocked = !height || !width || height*width > 100000 || range.r2 > 1048575 || range.c2 > 16383;
+    for(const c of this.cellsIn(range)) if(c!==master && !(master.array && c.array === master.array) && (c.value!==null || c.formula!==undefined)) blocked=true;
+    if(this.merges.some(m => m.r1<=range.r2 && m.r2>=range.r1 && m.c1<=range.c2 && m.c2>=range.c1)) blocked=true;
+    for(const rel of this.wb.pkg.rels(this.ref.path)) if(rel.type === "table") {
+      const t=parseRange(this.wb.pkg.xml(rel.target)?.documentElement.getAttribute("ref") ?? "");
+      if(t && t.r1<=master.row && t.r2>=master.row && t.c1<=master.col && t.c2>=master.col) blocked=true;
+    }
+    if(blocked) { rows=[[{error:"#SPILL!"}]];range.r2=master.row;range.c2=master.col; }
+    const changed: Cell[]=[];
+    if(write) {
+      this.wb.journal?.cell(this,master.row,master.col);
+      if(master.array) {
+        for(const c of this.cellsIn(master.array)) if(c!==master) changed.push(c);
+        this.clearArray(master);
+      }
+      const f=this.first(master.el,"f")!;
+      f.setAttribute("t","array");f.setAttribute("ref",rangeName(range));f.setAttribute("aca","1");
+      master.el.setAttribute("cm",String(this.wb.pkg.ensureDynamicMetadata()));
+    } else if(master.array) {
+      for(const c of this.cellsIn(master.array)) if(c!==master) {c.value=null;delete c.array;}
+    }
+    master.array=range;
+    for(let r=0;r<rows.length;r++) for(let c=0;c<rows[r].length;c++) {
+      const row=master.row+r,col=master.col+c;
+      if(write) this.wb.journal?.cell(this,row,col);
+      const cell = write ? this.cellEl(row,col) : this.at(row,col) ?? {row,col,el:this.node("c"),value:null,style:this.styleAt(row,col)};
+      if(!write) this.cells.set(key(row,col),cell);
+      cell.value=rows[r][c];cell.array=range;delete cell.noCache;
+      if(write) {this.writeValue(cell.el,cell.value,cell===master);this.growDimension(row,col);}
+      changed.push(cell);
+    }
+    if(write) this.touch();
+    return changed;
   }
 
   private removeCell(cell: Cell): void {
@@ -477,6 +541,12 @@ export class Sheet {
 
   /** Formulas of shared-formula members, from their group's master (after cells were restored). */
   resolveShared(): void {
+    for (const c of this.cells.values()) delete c.array;
+    for (const master of this.cells.values()) {
+      const f=this.first(master.el,"f");
+      const range=f?.getAttribute("t") === "array" ? parseRange(f.getAttribute("ref") ?? "") : null;
+      if(range) for(const c of this.cellsIn(range)) c.array=range;
+    }
     const masters = new Map<string, Cell>();
     for (const c of this.cells.values()) if (c.shared !== undefined && this.first(c.el, "f")?.textContent) masters.set(c.shared, c);
     for (const c of this.cells.values()) {

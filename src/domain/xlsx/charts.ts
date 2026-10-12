@@ -1,3 +1,4 @@
+import { assertAction } from "./protection";
 /*
  * Charts on sheets: graphic frames in the sheet's drawing part pointing at chart parts. They're drawn with the
  * slide chart renderer from the sheet's current cell values (Google's exports carry no cached values), formatted
@@ -172,6 +173,7 @@ function marker(sheet: Sheet, tag: string, x: number, y: number): string {
 
 /** Insert a chart of the selection beside it (600 × 371 px, Google's default size); returns the chart part's path. */
 export function insertChart(e: Edits, sheet: Sheet, r: Rect, format?: (f: ChartFormat) => void): string {
+  assertAction(sheet, "objects");
   const xml = parseXml(chartXml(sheet, r))!;
   if (format) {
     const f = readChartFormat(xml, chartColors(e.wb));
@@ -204,6 +206,7 @@ export function insertChart(e: Edits, sheet: Sheet, r: Rect, format?: (f: ChartF
 
 /** Apply chart editor settings (type, title, legend...) to a chart part. */
 export function formatChart(e: Edits, path: string, format: ChartFormat): void {
+  for (const sheet of e.wb.sheets) if (sheetCharts(e.wb, sheet).some((c) => c.path === path)) assertAction(sheet, "objects");
   e.structural(() => {
     const xml = e.wb.pkg.xml(path);
     if (!xml) return;
@@ -214,6 +217,7 @@ export function formatChart(e: Edits, path: string, format: ChartFormat): void {
 
 /** Point a chart at another range: series per column, as when it was inserted; keeps its formatting. */
 export function setChartSource(e: Edits, path: string, source: string): void {
+  for (const sheet of e.wb.sheets) if (sheetCharts(e.wb, sheet).some((c) => c.path === path)) assertAction(sheet, "objects");
   const at = resolve(e.wb, source.includes("!") ? source : `${quoteSheet(e.wb.sheets[0].name)}!${source}`);
   if (!at) throw new Error("Enter a range like Sheet1!A1:C10.");
   e.structural(() => {
@@ -253,6 +257,7 @@ export function moveChart(e: Edits, path: string, box: { x: number; y: number; w
   const sheet = e.wb.sheets.find((s) => sheetCharts(e.wb, s).some((c) => c.path === path));
   const chart = sheet && sheetCharts(e.wb, sheet).find((c) => c.path === path);
   if (!sheet || !chart) return;
+  assertAction(sheet, "objects");
   const x = Math.max(0, box.x), y = Math.max(0, box.y), w = Math.max(20, box.w), h = Math.max(20, box.h);
   e.structural(() => {
     const live = e.wb.pkg.xml(chart.drawing);
@@ -283,6 +288,7 @@ export function moveChart(e: Edits, path: string, box: { x: number; y: number; w
 }
 
 export function deleteChart(e: Edits, _sheet: Sheet, chart: SheetChart): void {
+  assertAction(_sheet, "objects");
   e.structural(() => {
     const live = e.wb.pkg.xml(chart.drawing);
     const anchor = Array.from(live?.documentElement.children ?? []).find((a) => Array.from(a.getElementsByTagNameNS(C, "chart")).some((c) => c.getAttributeNS(R, "id") === chart.rId));

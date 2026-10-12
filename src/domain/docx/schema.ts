@@ -327,6 +327,9 @@ export const docxSchema = new Schema({
       attrs: { xml: {} },
       toDOM: () => ["span", 0],
     },
+    noProof: {
+      toDOM: () => ["span", { spellcheck: "false" }, 0],
+    },
     /** Tracked insertion (w:ins / w:moveTo); `xml` is the empty wrapper element with all its attributes. */
     insertion: {
       attrs: { xml: {}, author: { default: "" }, date: { default: "" } },

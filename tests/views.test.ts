@@ -368,6 +368,33 @@ describe("Toolbar groups", () => {
   });
 });
 
+describe("DocxView drawings", () => {
+  it("inserts native shapes, edits their text and retains them after saving", async () => {
+    const view = mount(DocxView, "sample.docx");
+    const saved = vi.spyOn(view.app.vault, "modifyBinary");
+    const file = await open(view, "drawing.docx");
+    const opened = vi.spyOn(Modal.prototype, "open");
+    const button = (host: HTMLElement, label: string) => Array.from(host.querySelectorAll("button")).find(b => b.textContent === label)!;
+    button(view.contentEl, "Drawing").click();
+    let modal = opened.mock.contexts.at(-1) as Modal;
+    button(modal.contentEl, "Add shape").click();
+    const text = modal.contentEl.querySelector<HTMLTextAreaElement>('[aria-label="Shape text"]')!;
+    text.value = "Native drawing"; text.dispatchEvent(new Event("input"));
+    button(modal.contentEl, "Insert").click();
+    const drawing = view.contentEl.querySelector(".docx-drawing")!;
+    expect(drawing.textContent).toContain("Native drawing");
+    drawing.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    modal = opened.mock.contexts.at(-1) as Modal;
+    const edit = modal.contentEl.querySelector<HTMLTextAreaElement>('[aria-label="Shape text"]')!;
+    edit.value = "Edited drawing"; edit.dispatchEvent(new Event("input"));
+    button(modal.contentEl, "Save").click();
+    await view.requestSave();
+    const back = await DocxDocument.load(saved.mock.calls.at(-1)![1]);
+    expect(back.body.getElementsByTagNameNS(W, "txbxContent")[0].textContent).toBe("Edited drawing");
+    await view.onUnloadFile(file);
+  });
+});
+
 describe("DocxView header and footer", () => {
   it("opens the header and footer editor on a double-click of the header or footer band", async () => {
     const view = mount(DocxView, "sample.docx");
@@ -624,4 +651,34 @@ describe("slide authoring additions",()=>{
   v.undo();expect(v.model.shapes.some((s:any)=>s.chart)).toBe(false);
   await view.onUnloadFile(file);
  });
+});
+
+
+describe("editor accessibility", () => {
+  it("navigates slide thumbnails with arrows/Home/End and exposes selection without saving", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "accessibility.pptx");
+    const saved = vi.spyOn(view.app.vault, "modifyBinary");
+    const list = view.contentEl.querySelector<HTMLElement>('[role="listbox"]')!;
+    expect(list?.getAttribute("aria-label")).toBe("Slides");
+    list.focus();
+    list.dispatchEvent(new KeyboardEvent("keydown", {key: "End", bubbles: true}));
+    const options = list.querySelectorAll('[role="option"]');
+    expect(options[options.length-1].getAttribute("aria-selected")).toBe("true");
+    expect(list.getAttribute("aria-activedescendant")).toBe(options[options.length-1].id);
+    list.dispatchEvent(new KeyboardEvent("keydown", {key: "Home", bubbles: true}));
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+    list.dispatchEvent(new KeyboardEvent("keydown", {key: "ArrowDown", bubbles: true}));
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    expect(saved).not.toHaveBeenCalled();
+    await view.onUnloadFile(file);
+  });
+  it("names the document editor and theme/color controls", async () => {
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "accessibility.docx");
+    expect(view.contentEl.querySelector('.ProseMirror')?.getAttribute("aria-label")).toBe("Document content");
+    for (const input of Array.from(view.contentEl.querySelectorAll('input[type="color"]'))) expect(input.getAttribute("aria-label")).toBeTruthy();
+    expect(view.contentEl.querySelector('[aria-label="Light paper"]')?.getAttribute("aria-pressed")).toBe("true");
+    await view.onUnloadFile(file);
+  });
 });

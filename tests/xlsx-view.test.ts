@@ -1,3 +1,4 @@
+vi.mock("../src/presentation/common/pdf", () => ({ exportPdf: vi.fn(async () => null) }));
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
 import { App, TFile, WorkspaceLeaf } from "./obsidian-stub";
@@ -171,6 +172,16 @@ describe("XlsxView conditional formatting and dropdowns", () => {
     expect(v.sheet.at(1, 1).value).toBe("no");
   });
 
+  it("paints icon set icons, without the value when the rule hides it", async () => {
+    const { ops } = await mountWith(
+      `<conditionalFormatting sqref="A1:A2"><cfRule type="iconSet" priority="1"><iconSet iconSet="3Arrows" showValue="0"><cfvo type="percent" val="0"/><cfvo type="percent" val="33"/><cfvo type="percent" val="67"/></iconSet></cfRule></conditionalFormatting>`
+    );
+    const texts = ops().filter((o) => o.kind === "text").map((o) => o.text);
+    expect(texts).toContain("↑");
+    expect(texts).toContain("↓");
+    expect(texts.filter((t) => t === "5")).toHaveLength(1); // the row header only
+  });
+
   it("adds a conditional format rule and a dropdown from the dialogs, and saves them", async () => {
     const { view, file, saved, ops } = await mountWith("");
     const v = view as any;
@@ -200,4 +211,59 @@ describe("XlsxView conditional formatting and dropdowns", () => {
     expect(back.sheets[0].doc.getElementsByTagNameNS(S_, "cfRule")).toHaveLength(1);
     expect(back.sheets[0].doc.getElementsByTagNameNS(S_, "formula1")[1]?.textContent ?? back.sheets[0].doc.getElementsByTagNameNS(S_, "formula1")[0].textContent).toContain("Low,High");
   });
+});
+
+describe('spreadsheet printing', () => {
+  it('includes charts outside the used cells in the printed pages', async () => {
+    const { view, file } = await mount();
+    const v = view as unknown as { edits: import('../src/domain/xlsx/commands').Edits; sheet: import('../src/domain/xlsx/workbook-model').Sheet; exportPdf(): Promise<void> };
+    const { insertChart, moveChart } = await import('../src/domain/xlsx/charts');
+    const path = insertChart(v.edits, v.sheet, {r1: 0, c1: 0, r2: 3, c2: 2});
+    moveChart(v.edits, path, {x: 50, y: 400, w: 300, h: 200});
+    const exporting = view.exportPdf();
+    const button = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Export to PDF')!;
+    expect(button).toBeTruthy(); button.click();
+    await exporting;
+    const { exportPdf } = await import('../src/presentation/common/pdf');
+    const pages = vi.mocked(exportPdf).mock.calls.at(-1)![2];
+    expect(pages.some(p => p.querySelector('.xlsx-chart svg'))).toBe(true);
+    expect(Math.max(...pages.map(p => parseFloat(p.querySelector<HTMLElement>('.xlsx-print-sheet')!.style.getPropertyValue('--xlsx-print-h'))))).toBeGreaterThanOrEqual(600);
+    await view.onUnloadFile(file);
+  });
+});
+
+describe('spreadsheet comment dialog', () => {
+  it('posts a thread and reply, resolves it, and saves both messages', async () => {
+    const {view,file,saved}=await mount();
+    const v=view as unknown as {commentDialog(row:number,col:number):void;grid:{render():void}};
+    v.commentDialog(1,0);
+    const modal=document.querySelector<HTMLElement>('.xlsx-comments-modal')!;
+    const post=(label:string,text:string) => {
+      const input=modal.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
+      input.value=text;
+      (input.nextElementSibling as HTMLButtonElement).click();
+    };
+    post('New comment','Check the amount');post('Reply','Confirmed');
+    expect(modal.textContent).toContain('Confirmed');
+    Array.from(modal.querySelectorAll('button')).find(b=>b.textContent==='Resolve')!.click();
+    expect(modal.textContent).toContain('Resolved');
+    expect(modal.querySelector('[aria-label="Reply"]')).toBeNull();
+    await view.onUnloadFile(file);
+    const wb=await reopen(saved[0]);
+    const {commentsOf}=await import('../src/domain/xlsx/comments');
+    expect(commentsOf(wb.pkg,wb.sheets[0].ref.path).get('A2')![0]).toMatchObject({resolved:true,messages:[{text:'Check the amount'},{text:'Confirmed'}]});
+  });
+});
+
+
+it("F6 moves focus between the cell editor and toolbar without committing navigation", async () => {
+  const {view, file, input, saved} = await mount();
+  const scope = view.scope as unknown as { keys: {mods: string[]; key: string; fn: () => boolean}[] };
+  const f6 = scope.keys.find(k => k.key === "F6" && !k.mods.length)!;
+  expect(f6).toBeDefined();
+  input.focus(); f6.fn();
+  expect(document.activeElement).toBe(view.contentEl.querySelector('.dw-toolbar button'));
+  f6.fn(); expect(document.activeElement).toBe(input);
+  expect(saved).toEqual([]);
+  await view.onUnloadFile(file);
 });

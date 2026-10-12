@@ -1,3 +1,4 @@
+import { assertAction, isProtected } from "./protection";
 /*
  * Edits as undoable transactions. While one runs, the workbook journals each cell element before it changes (and
  * whole parts for structural edits); undo puts those back and recalculates. Shared strings and style records are
@@ -75,6 +76,11 @@ export class Edits {
     try {
       const changes = fn();
       if (changes.length) this.calc.recalc(changes);
+    } catch (err) {
+      this.wb.journal = null;
+      this.tx = null;
+      if (!tx.empty) this.apply(tx, "before");
+      throw err;
     } finally {
       this.wb.journal = null;
       this.tx = null;
@@ -94,8 +100,10 @@ export class Edits {
     const before = new Set(pkg.xmlPaths());
     this.run(() => {
       for (const p of before) if (p !== pkg.stringsPath && p !== pkg.stylesPath) this.tx!.part(p);
-      fn();
-      for (const p of pkg.xmlPaths()) if (!before.has(p)) this.tx!.parts.set(p, { before: null });
+      try { fn(); }
+      finally {
+        for (const p of pkg.xmlPaths()) if (!before.has(p)) this.tx!.parts.set(p, { before: null });
+      }
       this.reload();
       this.wb.journal = this.tx;
       after?.();
@@ -191,7 +199,17 @@ export class Edits {
     }
     if (depth > 0) f += ")".repeat(depth);
     parseFormula(f);
-    return f;
+    const tokens = tokenize(f);
+    return tokens.map((t, i) => {
+      if (t.text === "#" && tokens[i - 1]?.kind === "ref") return "";
+      if (t.kind === "ref" && tokens[i + 1]?.text === "#") return `_xlfn.ANCHORARRAY(${t.text})`;
+      if (t.kind === "func" && !t.text.startsWith("_")) {
+        const name=t.text.toUpperCase();
+        if (["FILTER","SORT"].includes(name)) return `_xlfn._xlws.${name}`;
+        if (["SEQUENCE","UNIQUE"].includes(name)) return `_xlfn.${name}`;
+      }
+      return t.text;
+    }).join("");
   }
 
   /** What typing `raw` into a cell writes (without applying it). */
@@ -253,6 +271,8 @@ export class Edits {
 
   /** Apply a style change to every cell of a range. */
   format(sheet: Sheet, r: Rect, change: StyleChange): void {
+    assertAction(sheet, "formatCells");
+    if (change.locked !== undefined && isProtected(sheet)) throw new Error("Unprotect the sheet before changing cell locks.");
     const area = this.formatArea(sheet, r);
     if (!area) return;
     this.run(() => {

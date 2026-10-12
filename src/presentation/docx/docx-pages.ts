@@ -195,7 +195,6 @@ function measure(view: EditorView, opts: PagesOptions): TopBlock[] {
     }
     const unit = it.el ? measureUnit(view, it.node, it.pos, it.el, height, origin) : { kind: "block" as const, height, pos: it.pos };
     const breakAfter = hasPageBreak(it.node, sectionEnds);
-    // ponytail: Word treats a page break inside columns as a column break; that needs columns laid out per page, not one CSS multicol block.
     if (it.columns) return { unit, breakAfter, columns: it.columns, columnBreak: hasColumnBreak(it.node) };
     const wordBreak = opts.wordBreak?.(it.node) || undefined;
     if (it.node.type !== schema.nodes.paragraph) return { unit, breakAfter, wordBreak };
@@ -222,6 +221,12 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
   view.dom.setCssProps({ zoom: "1" });
   let bands: [number, number];
   view.dom.classList.add("docx-measuring");
+  // Measure one continuous column. Forced CSS breaks would create overlapping fragments even
+  // with column-count: 1, so restore them only after reading the uninterrupted text heights.
+  const forced = Array.from(view.dom.querySelectorAll<HTMLElement>(".docx-page-break, .docx-column-break"));
+  const breakStyles = forced.map(el => el.style.breakAfter);
+  const setForcedBreaks = (measuring: boolean) => forced.forEach((el, i) => el.setCssStyles({ breakAfter: measuring ? "auto" : breakStyles[i] }));
+  setForcedBreaks(true);
   let layout: PageLayout;
   try {
     bands = bandHeights(view, setup);
@@ -251,6 +256,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
       }
     }
   } finally {
+    setForcedBreaks(false);
     view.dom.classList.remove("docx-measuring");
     view.dom.style.zoom = zoom;
   }
@@ -308,6 +314,11 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
       )
     ),
     ...spacers.map((s, k) => Decoration.widget(s.pos, () => spacer(s), { side: -1, key: `spacer-${gen}-${k}`, ignoreSelection: true })),
+    ...(layout.columnPads ?? []).map((pad, k) => Decoration.widget(pad.pos, () => {
+      const el = createDiv({ cls: "docx-column-pad", attr: { contenteditable: "false", "aria-hidden": "true" } });
+      el.style.height = `${pad.height}px`;
+      return el;
+    }, { side: -2, key: `column-pad-${gen}-${k}`, ignoreSelection: true })),
     Decoration.widget(
       doc.content.size,
       () => {

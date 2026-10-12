@@ -1,3 +1,4 @@
+import { tableReference } from "./tables";
 /*
  * Formula values and functions. Ranges stay references (sheet + rectangle) until a function needs their cells, so
  * SUM(A:A) reads only the cells that exist. Anything not implemented throws Unsupported, so the caller keeps the
@@ -22,6 +23,7 @@ export type Value = Scalar | RangeValue | Matrix;
 export class Unsupported extends Error {}
 
 export interface EvalContext {
+  arrays?: boolean;
   wb: Workbook;
   sheet: Sheet;
   row: number;
@@ -97,8 +99,10 @@ function matrixOf(v: Value, ctx: EvalContext): Scalar[][] {
   if (isMatrix(v)) return v.rows;
   if (!isRange(v)) return [[v]];
   const used = v.sheet.used();
-  const r2 = Math.min(v.rect.r2, used ? Math.max(used.r2, v.rect.r1) : v.rect.r1);
-  const c2 = Math.min(v.rect.c2, used ? Math.max(used.c2, v.rect.c1) : v.rect.c1);
+  const bounded=(v.rect.r2-v.rect.r1+1)*(v.rect.c2-v.rect.c1+1)<=100000;
+  const r2 = bounded ? v.rect.r2 : Math.min(v.rect.r2, used ? Math.max(used.r2, v.rect.r1) : v.rect.r1);
+  const c2 = bounded ? v.rect.c2 : Math.min(v.rect.c2, used ? Math.max(used.c2, v.rect.c1) : v.rect.c1);
+  if((r2-v.rect.r1+1)*(c2-v.rect.c1+1)>100000) throw new Unsupported("Array exceeds 100000 cells");
   const rows: Scalar[][] = [];
   for (let r = v.rect.r1; r <= r2; r++) {
     const row: Scalar[] = [];
@@ -187,6 +191,15 @@ function evalInner(node: Node, ctx: EvalContext): Value {
       return null;
     case "array":
       return { kind: "matrix", rows: node.rows };
+    case "spill": {
+      const v = evalInner(node.arg, ctx);
+      if (!isRange(v)) return err("#REF!");
+      const cell = v.sheet.at(v.rect.r1, v.rect.c1);
+      if (cell && isErr(cell.value)) return cell.value;
+      return cell?.array ? { ...v, rect: cell.array } : err("#REF!");
+    }
+    case "struct":
+      return evalInner(tableReference(ctx.wb, ctx.sheet, ctx.row, ctx.col, node.text), ctx);
     case "unsupported":
       throw new Unsupported(node.text);
     case "ref": {
@@ -196,7 +209,7 @@ function evalInner(node: Node, ctx: EvalContext): Value {
     }
     case "name": {
       const def = ctx.name(node.name, ctx.sheet);
-      return def ? evalInner(def, ctx) : err("#NAME?");
+      return evalInner(def ?? tableReference(ctx.wb, ctx.sheet, ctx.row, ctx.col, node.name), ctx);
     }
     case "un": {
       const v = scalar(evalInner(node.arg, ctx), ctx);
@@ -204,8 +217,20 @@ function evalInner(node: Node, ctx: EvalContext): Value {
       if (node.op === "%") return toNum(v) / 100;
       return node.op === "-" ? -toNum(v) : toNum(v);
     }
-    case "bin":
-      return binary(node.op, scalar(evalInner(node.left, ctx), ctx), scalar(evalInner(node.right, ctx), ctx));
+    case "bin": {
+      const a = evalInner(node.left, ctx), b = evalInner(node.right, ctx);
+      if (isMatrix(a) || isMatrix(b) || ctx.arrays && (isRange(a) || isRange(b))) {
+        const left = matrixOf(a, ctx), right = matrixOf(b, ctx);
+        const h = Math.max(left.length, right.length), w = Math.max(left[0]?.length ?? 1, right[0]?.length ?? 1);
+        if (h * w > 100000) return err("#NUM!");
+        const get = (m: Scalar[][], r: number, c: number) => {
+          const row=m[m.length === 1 ? 0 : r], col=m[0]?.length === 1 ? 0 : c;
+          return row && col < row.length ? row[col] : err("#N/A");
+        };
+        return { kind: "matrix", rows: Array.from({length: h}, (_, r) => Array.from({length: w}, (_, c) => binary(node.op, get(left,r,c), get(right,r,c)))) };
+      }
+      return binary(node.op, scalar(a, ctx), scalar(b, ctx));
+    }
     case "call": {
       const fn = FUNCTIONS[node.name];
       if (!fn) throw new Unsupported(node.name);
@@ -398,6 +423,51 @@ const VOLATILE = new Set(["TODAY", "NOW", "RAND", "RANDBETWEEN", "OFFSET", "INDI
 export const isVolatile = (name: string) => VOLATILE.has(name);
 
 const FUNCTIONS: Record<string, Fn> = {
+  ANCHORARRAY: (a,c) => {
+    const v=a[0]();
+    if(!isRange(v)) return err("#REF!");
+    const value=c.value(v.sheet,v.rect.r1,v.rect.c1);
+    if(isErr(value)) return value;
+    const cell=v.sheet.at(v.rect.r1,v.rect.c1);
+    return cell?.array ? {...v,rect:cell.array} : err("#REF!");
+  },
+  SEQUENCE: (a,c) => {
+    const h = Math.trunc(num(a[0],c,1)), w = Math.trunc(num(a[1],c,1)), start = num(a[2],c,1), step = num(a[3],c,1);
+    if (h < 1 || w < 1 || h * w > 100000) return err("#NUM!");
+    return {kind: "matrix", rows: Array.from({length:h}, (_,r) => Array.from({length:w}, (_,col) => start+(r*w+col)*step))};
+  },
+  TRANSPOSE: (a,c) => {
+    const rows = matrixOf(a[0](),c);
+    return {kind: "matrix", rows: (rows[0] ?? []).map((_,i) => rows.map(r => r[i] ?? null))};
+  },
+  FILTER: (a,c) => {
+    const rows = matrixOf(a[0](),c), mask = matrixOf(a[1](),{...c, arrays:true});
+    let result: Scalar[][];
+    if (mask.length === rows.length && mask.every(r => r.length === 1)) result = rows.filter((_,i) => toBool(mask[i][0]));
+    else if (mask.length === 1 && mask[0].length === rows[0]?.length) result = rows.map(r => r.filter((_,i) => toBool(mask[0][i])));
+    else return err("#VALUE!");
+    return result.length && result[0].length ? {kind:"matrix",rows:result} : a[2] ? a[2]() : err("#CALC!");
+  },
+  SORT: (a,c) => {
+    const rows = matrixOf(a[0](),c), index = Math.trunc(num(a[1],c,1))-1, order = num(a[2],c,1), byCol = a[3] ? toBool(scalar(a[3](),c)) : false;
+    if (![1,-1].includes(order) || index < 0 || index >= (byCol ? rows.length : rows[0]?.length ?? 0)) return err("#VALUE!");
+    if (byCol) {
+      const cols = (rows[0] ?? []).map((_,i) => i).sort((i,j) => order * compareValues(rows[index][i],rows[index][j]));
+      return {kind:"matrix",rows:rows.map(r => cols.map(i => r[i]))};
+    }
+    return {kind:"matrix",rows:[...rows].sort((a,b) => order * compareValues(a[index],b[index]))};
+  },
+  UNIQUE: (a,c) => {
+    const input = matrixOf(a[0](),c), byCol = a[1] ? toBool(scalar(a[1](),c)) : false, once = a[2] ? toBool(scalar(a[2](),c)) : false;
+    const rows = byCol ? (input[0] ?? []).map((_,i) => input.map(r => r[i])) : input;
+    const key = (r: Scalar[]) => JSON.stringify(r.map(v => typeof v === "string" ? v.toLowerCase() : v));
+    const counts = new Map<string,number>();
+    for (const r of rows) counts.set(key(r),(counts.get(key(r)) ?? 0)+1);
+    const seen = new Set<string>();
+    const out = rows.filter(r => {const k=key(r); if (seen.has(k) || once && counts.get(k)! > 1) return false; seen.add(k);return true;});
+    if (!out.length) return err("#CALC!");
+    return {kind:"matrix",rows:byCol ? out[0].map((_,i) => out.map(r => r[i])) : out};
+  },
   SUM: aggregate((ns) => fix(ns.reduce((a, b) => a + b, 0))),
   PRODUCT: aggregate((ns) => ns.reduce((a, b) => a * b, 1)),
   AVERAGE: (args, ctx) => {
@@ -792,4 +862,10 @@ export function evaluate(node: Node, ctx: EvalContext): Scalar {
   if (isMatrix(v)) v = v.rows[0]?.[0] ?? null;
   // A formula pointing at a blank cell shows 0, like a spreadsheet.
   return v ?? 0;
+}
+
+/** Full result for a dynamic array anchor; bounded ranges become rows without losing their shape. */
+export function evaluateArray(node: Node, ctx: EvalContext): Scalar[][] {
+  const v = evalNode(node, {...ctx, arrays:true});
+  return matrixOf(v,ctx);
 }

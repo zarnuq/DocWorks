@@ -1,3 +1,6 @@
+import { readDrawing, newDrawing, writeDrawing } from "../../domain/docx/drawings";
+import { DrawingView } from "./docx-drawing-view";
+import { drawingEditor } from "./drawing-editor";
 import { App, FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { Command, EditorState, Plugin, TextSelection } from "prosemirror-state";
 import { DOMSerializer, Node as PMNode } from "prosemirror-model";
@@ -228,6 +231,7 @@ export class DocxView extends FileView {
       if (pos !== undefined) this.equationDialog(pos);
     });
     this.editor = new EditorView(host, {
+      attributes: { role: "textbox", "aria-label": "Document content", "aria-multiline": "true" },
       state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize)] }),
       nodeViews: {
         image: (node, view, getPos) =>
@@ -241,7 +245,10 @@ export class DocxView extends FileView {
               }),
           }),
         // Text boxes are edited in place; other run content is drawn as usual.
-        opaque: (node, view, getPos) => new TextBoxView(node, view, getPos, ctx, { imageSrc: (id) => urls.get(id) ?? null, hyperlinkHref: (id) => docx.hyperlinkHref(id) }, docx),
+        opaque: (node, view, getPos) => {
+          const xml=node.attrs.xml as string;
+          return readDrawing(xml) && !/txBox="1"/.test(xml) ? new DrawingView(node,view,getPos,pos=>this.drawingDialog(pos)) : new TextBoxView(node, view, getPos, ctx, { imageSrc: (id) => urls.get(id) ?? null, hyperlinkHref: (id) => docx.hyperlinkHref(id) }, docx);
+        },
       },
       dispatchTransaction: (tr) => {
         if (!this.editor) return;
@@ -480,7 +487,7 @@ export class DocxView extends FileView {
     btn("S", "Strikethrough (Ctrl+Shift+X)", toggleMark(m.strike), "strike");
     btn("x₂", "Subscript", toggleMark(m.subscript));
     btn("x²", "Superscript", toggleMark(m.superscript));
-    btn("</>", "Code font (Ctrl+`)", cmd.toggleCode);
+    btn("</>", "Code font or code box (Ctrl+`)", cmd.toggleCode);
     tb.color("A", "Text color", "#000000", (color) => run(cmd.setMark(m.color, { color })));
     tb.color("HL", "Highlight color", "#FFFF00", (color) => run(cmd.setMark(m.highlight, { color })));
     btn("Tx", "Clear formatting", cmd.clearFormatting);
@@ -510,6 +517,7 @@ export class DocxView extends FileView {
     });
     action("Columns…", "Columns for this section or the selection", () => this.columnsDialog());
     btn("Line", "Insert horizontal line", cmd.insertRule);
+    action("Drawing", "Insert a drawing", () => this.drawingDialog(null));
     action("Equation", "Insert an equation", () => this.equationDialog(null));
     sep();
     action("Header & footer", "Edit the header and footer", () => this.headerFooterDialog());
@@ -1103,6 +1111,28 @@ export class DocxView extends FileView {
       )
       .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
     modal.open();
+  }
+
+  private drawingDialog(pos: number | null): void {
+    if (!this.editor || !this.docx) return;
+    const editor=this.editor,docx=this.docx;
+    const original=pos===null ? null : editor.state.doc.nodeAt(pos);
+    const drawing=original ? readDrawing(original.attrs.xml as string) : newDrawing();
+    if(!drawing?.editable)return;
+    const modal=new Modal(this.app);modal.titleEl.setText(pos===null ? "Insert drawing" : "Edit drawing");
+    modal.contentEl.addClass("docx-drawing-modal");drawingEditor(modal.contentEl,drawing);
+    const done=modal.contentEl.createEl("button",{text:pos===null ? "Insert" : "Save"});
+    done.addEventListener("click",()=>{
+      if(this.editor!==editor || this.docx!==docx)return;
+      if(!drawing.shapes.length)return void new Notice("Add a shape before saving.");
+      if(pos!==null && editor.state.doc.nodeAt(pos)!==original)return void new Notice("The drawing changed while this dialog was open. Reopen it to continue.");
+      const xml=writeDrawing(drawing,docx.nextDocPrId());
+      const node=schema.nodes.opaque.create({xml,text:drawing.shapes.map(s=>s.text).join(" ")});
+      if(pos===null)editor.dispatch(editor.state.tr.replaceSelectionWith(node));
+      else editor.dispatch(editor.state.tr.replaceWith(pos,pos+original!.nodeSize,node));
+      modal.close();editor.focus();
+    });
+    const cancel=modal.contentEl.createEl("button",{text:"Cancel"});cancel.addEventListener("click",()=>modal.close());modal.open();
   }
 
   /** Insert an equation (`pos` null) or edit the one at `pos`, typed as LaTeX with a live preview. */

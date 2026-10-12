@@ -100,7 +100,11 @@ export class Setting {
   addToggle(cb: Fn) { return this.control(cb); }
   addDropdown(cb: Fn) { return this.control(cb); }
   addText(cb: Fn) { return this.control(cb); }
-  addButton(cb: Fn) { const b: any = { setButtonText: () => b, setCta: () => b, onClick: () => b }; cb(b); return this; }
+  addButton(cb: Fn) {
+    const el = this.settingEl.createEl("button");
+    const b: any = { setButtonText: (text: string) => { el.textContent = text; return b; }, setCta: () => b, onClick: (fn: () => void) => { el.addEventListener("click", fn); return b; } };
+    cb(b); return this;
+  }
 }
 
 export class Plugin {}

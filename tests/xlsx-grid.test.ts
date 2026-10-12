@@ -270,3 +270,36 @@ describe("zoom", () => {
     expect(grid.el.style.getPropertyValue("zoom")).toBe("2");
   });
 });
+
+
+describe("grid accessibility", () => {
+  it("announces the sheet, cell, value, formula and notes when keyboard navigation changes selection", async () => {
+    const { grid, host } = await mount();
+    host.note = () => "Check this total";
+    host.comment = () => true;
+    grid.select({row: 1, col: 2});
+    expect(grid.input.getAttribute("aria-label")).toContain("Data!C2");
+    expect(grid.input.getAttribute("aria-label")).toContain("20");
+    const status = grid.el.querySelector('[role="status"]')!;
+    expect(status.textContent).toContain("Formula: =A2*2");
+    expect(status.textContent).toContain("Note: Check this total");
+    expect(status.textContent).toContain("Comment thread");
+    key(grid, "ArrowDown");
+    expect(status.textContent).toContain("Data!C3");
+    expect(grid.el.querySelector('[role="grid"]')).toBeNull();
+  });
+  it("opens the selected cell menu using Shift+F10 without editing", async () => {
+    const { grid, host, commits } = await mount();
+    grid.select({row: 3, col: 2});
+    key(grid, "F10", {shiftKey: true});
+    expect(host.contextMenu).toHaveBeenCalledWith(expect.any(MouseEvent), {area: "cell", row: 3, col: 2});
+    expect(commits).toEqual([]);
+  });
+  it("exposes the selected range and leaves composing input untouched", async () => {
+    const { grid } = await mount();
+    grid.select({row: 1, col: 0}, {row: 2, col: 2});
+    expect(grid.el.querySelector('[role="status"]')!.textContent).toContain("Selected A2:C3");
+    key(grid, "ArrowDown", {isComposing: true});
+    expect(grid.selection()).toEqual({r1: 1, c1: 0, r2: 2, c2: 2});
+  });
+});

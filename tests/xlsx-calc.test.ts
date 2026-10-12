@@ -208,7 +208,7 @@ describe("formula evaluation", () => {
   it("reports unsupported functions instead of guessing", async () => {
     const { wb, calc } = await book({ Sheet1: {} });
     expect(calc.evaluate(wb.sheets[0], 0, 0, "WEBSERVICE(\"x\")")).toEqual(Calc.UNSUPPORTED);
-    expect(calc.evaluate(wb.sheets[0], 0, 0, "Table1[Col]")).toEqual(Calc.UNSUPPORTED);
+    expect(calc.evaluate(wb.sheets[0], 0, 0, "Table1[Col]")).toEqual({ error: "#NAME?" });
   });
 });
 

@@ -29,7 +29,7 @@ const ORDER: Record<string, string[]> = {
 };
 
 const HIGHLIGHT_NAMES = Object.fromEntries(Object.entries(HIGHLIGHTS).map(([name, hex]) => [hex, name]));
-const MODELED_MARKS = ["bold", "italic", "underline", "strike", "subscript", "superscript", "font", "size", "color", "highlight"] as const;
+const MODELED_MARKS = ["bold", "italic", "noProof", "underline", "strike", "subscript", "superscript", "font", "size", "color", "highlight"] as const;
 
 const parse = (xml: string) => new DOMParser().parseFromString(xml, "application/xml").documentElement;
 
@@ -460,8 +460,9 @@ class Writer {
       if (now === before || (now && before && now.eq(before))) continue;
       switch (name) {
         case "bold":
-        case "italic": {
-          const local = name === "bold" ? "b" : "i";
+        case "italic":
+        case "noProof": {
+          const local = name === "bold" ? "b" : name === "italic" ? "i" : "noProof";
           this.drop(rPr, local);
           if (now) this.upsert(rPr, local);
           break;

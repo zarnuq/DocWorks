@@ -47,7 +47,7 @@ export class Toolbar {
   color(label: string, title: string, initial: string, onChange: (hex: string) => void): void {
     const wrap = this.group.createEl("label", { text: label, cls: "dw-btn dw-color", attr: { "aria-label": title } });
     wrap.setCssProps({ "--dw-swatch": initial });
-    const input = wrap.createEl("input", { type: "color", value: initial });
+    const input = wrap.createEl("input", { type: "color", value: initial, attr: { "aria-label": title } });
     input.addEventListener("change", () => {
       wrap.setCssProps({ "--dw-swatch": input.value });
       onChange(input.value.toUpperCase());
@@ -68,9 +68,12 @@ export class Toolbar {
       b.addEventListener("click", () => onTheme(t));
       return [t, b] as const;
     });
-    const syncTheme = (current: PaperTheme) => btns.forEach(([t, b]) => b.toggleClass("is-active", t === current));
+    const syncTheme = (current: PaperTheme) => btns.forEach(([t, b]) => {
+      b.toggleClass("is-active", t === current);
+      b.setAttribute("aria-pressed", String(t === current));
+    });
     syncTheme(theme);
-    return { syncTheme, status: end.createSpan({ cls: "dw-status", text: "Saved" }) };
+    return { syncTheme, status: end.createSpan({ cls: "dw-status", text: "Saved", attr: { role: "status" } }) };
   }
 }
 
@@ -91,7 +94,7 @@ function fillSelect(s: HTMLSelectElement, placeholder: string, options: [label: 
 }
 
 /** Ask for one line of text; resolves null when cancelled. */
-export function promptText(app: App, title: string, value: string): Promise<string | null> {
+export function promptText(app: App, title: string, value: string, password = false): Promise<string | null> {
   return new Promise((resolve) => {
     let result: string | null = null;
     const modal = new Modal(app);
@@ -102,6 +105,7 @@ export function promptText(app: App, title: string, value: string): Promise<stri
     };
     new Setting(modal.contentEl).addText((text) => {
       text.setValue(value).onChange((v) => (value = v));
+      if (password) text.inputEl.type = "password";
       // Cancel the key too: focus returns to the editor before the key's input, which would add a line break there.
       text.inputEl.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" || e.isComposing) return;

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "check:files": "bash scripts/check-files.sh",
-    "check:pages": "node scripts/check-pages.mjs"
+    "check:pages": "node scripts/check-pages.mjs",
+    "benchmark": "node scripts/benchmark.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1",

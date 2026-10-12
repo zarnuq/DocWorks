@@ -3,6 +3,7 @@ import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
 import { Edits } from "../src/domain/xlsx/commands";
 import { addRule, ConditionalFormats, deleteRule, readRules } from "../src/domain/xlsx/conditional";
+import { dateToSerial } from "../src/domain/xlsx/number-format";
 import { sheetXml, STYLES, S, xlsx } from "./xlsx-fixtures";
 
 const DXFS = `<dxfs count="2"><dxf><font><b/></font><fill><patternFill><bgColor rgb="FFFF0000"/></patternFill></fill></dxf><dxf><font><color rgb="FF0000FF"/></font></dxf></dxfs>`;
@@ -11,8 +12,8 @@ const str = (ref: string, v: string) => `<c r="${ref}" t="inlineStr"><is><t>${v}
 const DATA =
   [1, 2, 3, 4, 5].map((v, i) => `<row r="${i + 1}">${num(`A${i + 1}`, v)}${i < 4 ? str(`B${i + 1}`, ["banana", "apple", "", "banana"][i]) : ""}</row>`).join("");
 
-async function setup(cf: string) {
-  const bytes = await xlsx({ sheets: [sheetXml(DATA, { before: "", after: cf })], names: ["Data"], styles: STYLES.replace("</styleSheet>", `${DXFS}</styleSheet>`) });
+async function setup(cf: string, data = DATA) {
+  const bytes = await xlsx({ sheets: [sheetXml(data, { before: "", after: cf })], names: ["Data"], styles: STYLES.replace("</styleSheet>", `${DXFS}</styleSheet>`) });
   const e = new Edits(Workbook.open(await XlsxWorkbook.load(bytes)));
   const sheet = e.wb.sheets[0];
   const cf_ = () => new ConditionalFormats(e.wb.sheets[0], (row, col, f) => e.calc.evaluate(e.wb.sheets[0], row, col, f));
@@ -96,5 +97,33 @@ describe("conditional formatting", () => {
     const { cf } = await setup(rule("A1:A5", `<cfRule type="colorScale" priority="1"><colorScale><cfvo type="formula" val="0"/><cfvo type="formula" val="0.5"/><cfvo type="formula" val="1"/><color rgb="FFE67C73"/><color rgb="FFFFFFFF"/><color rgb="FF57BB8A"/></colorScale></cfRule>`));
     // Every value is above the top point: the top colour.
     expect(cf().at(1, 0)!.fill).toBe("#57BB8A");
+  });
+  it("draws icon sets: the icon for the highest threshold a value reaches, reversed or without the value", async () => {
+    const set = (attrs: string) => rule("A1:A5", `<cfRule type="iconSet" priority="1"><iconSet${attrs}><cfvo type="percent" val="0"/><cfvo type="num" val="2"/><cfvo type="num" val="4" gte="0"/></iconSet></cfRule>`);
+    let f = (await setup(set(` iconSet="3Arrows"`))).cf();
+    expect(f.at(0, 0)!.icon).toEqual({ glyph: "↓", color: "#D93025" });
+    expect(f.at(1, 0)!.icon!.glyph).toBe("→"); // 2 >= 2
+    expect(f.at(3, 0)!.icon!.glyph).toBe("→"); // 4 is not > 4
+    expect(f.at(4, 0)!.icon!.glyph).toBe("↑");
+    expect(f.at(4, 0)!.hideValue).toBeUndefined();
+    f = (await setup(set(` iconSet="3Arrows" reverse="1" showValue="0"`))).cf();
+    expect(f.at(4, 0)).toMatchObject({ icon: { glyph: "↓" }, hideValue: true });
+    // No iconSet attribute: Excel's default traffic lights.
+    f = (await setup(set(""))).cf();
+    expect(f.at(0, 0)!.icon).toEqual({ glyph: "●", color: "#D93025" });
+  });
+
+  it("matches dates in a time period relative to today", async () => {
+    const d = new Date();
+    const today = dateToSerial(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    const data = [today, today - 1, today + 1, today - 6, today - 40].map((v, i) => `<row r="${i + 1}">${num(`A${i + 1}`, v)}</row>`).join("");
+    const period = async (p: string) => {
+      const f = (await setup(rule("A1:A5", `<cfRule type="timePeriod" dxfId="0" priority="1" timePeriod="${p}"/>`), data)).cf();
+      return [0, 1, 2, 3, 4].map((r) => !!f.at(r, 0));
+    };
+    expect(await period("today")).toEqual([true, false, false, false, false]);
+    expect(await period("yesterday")).toEqual([false, true, false, false, false]);
+    expect(await period("tomorrow")).toEqual([false, false, true, false, false]);
+    expect(await period("last7Days")).toEqual([true, true, false, true, false]);
   });
 });

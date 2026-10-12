@@ -345,10 +345,24 @@ describe("layoutPages: columns", () => {
     expect(l.starts).toEqual([2]);
   });
 
+  it("balances forced columns by their tallest content rather than unused column capacity", () => {
+    const l = lay([block(50), inCols(block(100), 2, 1, { columnBreak: true }), inCols(block(200)), block(50)]);
+    expect(l.pages).toBe(1);
+    expect(l.fills).toEqual([200]);
+  });
+
+  it("a break at a filled column still advances, and a break in the last column starts a page", () => {
+    const l = lay([inCols(block(500), 2, 1, { columnBreak: true }), inCols(block(100), 2, 1, { columnBreak: true }), inCols(block(100))]);
+    expect(l.pages).toBe(2);
+    expect(l.starts).toEqual([2]);
+    expect(l.fills).toEqual([0,450]);
+  });
+
   it("starts a new set of columns after a page break inside them", () => {
     const l = lay([inCols(block(100), 2, 1, { breakAfter: true }), inCols(block(100))]);
     expect(l.starts).toEqual([1]);
-    expect(l.fills).toEqual([AVAIL - 50, AVAIL - 50]);
+    expect(l.fills).toEqual([0, AVAIL - 50]);
+    expect(l.columnPads).toEqual([{pos:0,height:900}]);
   });
 
   it("treats two column sections in a row separately", () => {
@@ -438,6 +452,18 @@ describe("page view in the editor", () => {
     return view;
   };
   const p = (lines: number, label = "") => schema.nodes.paragraph.create(null, schema.text(`n:${lines} ${label}`.padEnd(lines + 6, "x")));
+
+  it("starts a new column page for a manual page break without rebalancing the page it ends", async () => {
+    const first = schema.nodes.paragraph.create(null, [schema.text("n:5"), schema.nodes.page_break.create()]);
+    const cols = schema.nodes.columns.create({ count: 2, space: 720 }, [first, p(5)]);
+    const v = await mount([cols, p(5)]);
+    expect(pagesKey.getState(v.state)!.pages).toBe(2);
+    expect(v.dom.querySelector<HTMLElement>(".docx-column-pad")!.style.height).toBe("1628px");
+    const state = pagesKey.getState(v.state)!;
+    const gap = state.decorations.find().find(d => d.spec.key?.startsWith("gap-"))!;
+    const widget = (gap as unknown as {type:{toDOM:()=>HTMLElement}}).type.toDOM();
+    expect(widget.querySelector<HTMLElement>(".docx-page-fill")!.style.getPropertyValue("--docx-fill")).toBe("0px");
+  });
 
   it("puts a spacer with the page gap inside a paragraph that crosses the page bottom", async () => {
     const v = await mount([p(30, "a"), p(30, "b")]);
