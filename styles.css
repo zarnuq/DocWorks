@@ -2225,7 +2225,6 @@ textarea.pptx-notes {
   background: #ffffff;
   border: 1px solid #dadce0;
   box-sizing: border-box;
-  cursor: var(--cursor);
 }
 
 .xlsx-picture img {
@@ -2312,11 +2311,18 @@ textarea.pptx-notes {
   max-width: none;
 }
 
-/* SmartArt text dialog: one box per item, indented by its level. */
+/* SmartArt text dialog: one box per item, indented by its level, with add / remove buttons on top-level items. */
+.pptx-smartart-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-2-1);
+  margin-bottom: var(--size-2-2);
+}
+
 .pptx-smartart-item {
   display: block;
-  width: calc(100% - var(--pptx-depth, 0) * 24px);
-  margin: 0 0 var(--size-2-2) calc(var(--pptx-depth, 0) * 24px);
+  flex: 1;
+  margin-left: calc(var(--pptx-depth, 0) * 24px);
   resize: vertical;
   field-sizing: content;
 }
@@ -2363,8 +2369,8 @@ textarea.pptx-notes {
   width: 1px;
   height: 1px;
   padding: 0;
+  margin: -1px;
   overflow: hidden;
-  clip-path: inset(50%);
   white-space: nowrap;
 }
 .pptx-thumbs:focus-visible, .dw-btn:focus-visible, .xlsx-tab:focus-visible {

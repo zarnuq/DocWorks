@@ -48,10 +48,11 @@ export interface CfRule {
 const kids = (el: Element | null | undefined, tag: string) => (el ? Array.from(el.children).filter((c) => c.localName === tag) : []);
 const on = (el: Element, attr: string, dflt: boolean) => (el.hasAttribute(attr) ? ["1", "true"].includes(el.getAttribute(attr)!) : dflt);
 
+const X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+
 export function readRules(sheet: Sheet): CfRule[] {
   const out: CfRule[] = [];
-  for (const block of kids(sheet.doc.documentElement, "conditionalFormatting")) {
-    const ranges = (block.getAttribute("sqref") ?? "").split(/\s+/).map(parseRange).filter((r): r is Rect => !!r);
+  const read = (block: Element, ranges: Rect[]) => {
     for (const el of kids(block, "cfRule")) {
       const scale = kids(el, "colorScale")[0] ?? kids(el, "dataBar")[0] ?? kids(el, "iconSet")[0];
       out.push({
@@ -65,10 +66,21 @@ export function readRules(sheet: Sheet): CfRule[] {
         dxf: el.hasAttribute("dxfId") ? Number(el.getAttribute("dxfId")) : null,
         priority: Number(el.getAttribute("priority") ?? 0),
         stopIfTrue: on(el, "stopIfTrue", false),
-        points: kids(scale, "cfvo").map((p) => ({ type: p.getAttribute("type") ?? "min", val: p.getAttribute("val"), gte: on(p, "gte", true) })),
+        // Excel 2010 rules keep a point's value in an xm:f child.
+        points: kids(scale, "cfvo").map((p) => ({ type: p.getAttribute("type") ?? "min", val: p.getAttribute("val") ?? kids(p, "f")[0]?.textContent ?? null, gte: on(p, "gte", true) })),
         colors: kids(scale, "color").map((c) => sheet.wb.styles.color(c) ?? "#000000"),
       });
     }
+  };
+  const root = sheet.doc.documentElement;
+  for (const block of kids(root, "conditionalFormatting")) read(block, (block.getAttribute("sqref") ?? "").split(/\s+/).map(parseRange).filter((r): r is Rect => !!r));
+  // Excel 2010 rules in the extension list (custom icon sets); data bar extensions belong to a rule above.
+  const paired = new Set(out.flatMap((r) => Array.from(r.el.getElementsByTagNameNS(X14, "id")).map((i) => i.textContent ?? "")));
+  for (const block of Array.from(root.getElementsByTagNameNS(X14, "conditionalFormatting"))) {
+    const ranges = (kids(block, "sqref")[0]?.textContent ?? "").split(/\s+/).map(parseRange).filter((r): r is Rect => !!r);
+    const before = out.length;
+    read(block, ranges);
+    out.splice(before, out.length - before, ...out.slice(before).filter((r) => !paired.has(r.el.getAttribute("id") ?? "")));
   }
   return out.sort((a, b) => a.priority - b.priority);
 }
@@ -313,13 +325,17 @@ export class ConditionalFormats {
         if (typeof v !== "number" || !rule.points.length) return null;
         const set = rule.el.getElementsByTagNameNS(rule.el.namespaceURI, "iconSet")[0] ?? null;
         const glyphs = ICON_SETS[set?.getAttribute("iconSet") ?? "3TrafficLights1"] ?? ICON_SETS["3TrafficLights1"];
+        // Custom icons (Excel 2010): one per threshold, from any set, or none.
+        const custom = kids(set, "cfIcon").map((c) => (c.getAttribute("iconSet") === "NoIcons" ? null : ICON_SETS[c.getAttribute("iconSet") ?? ""]?.[Number(c.getAttribute("iconId") ?? 0)] ?? null));
         let i = 0;
         rule.points.forEach((p, k) => {
           const t = this.point(rule, p, row, col);
           if (k > 0 && (v > t || (p.gte && v === t))) i = k;
         });
         if (set && on(set, "reverse", false)) i = rule.points.length - 1 - i;
-        const out: CfStyle = { icon: glyphs[Math.min(i, glyphs.length - 1)] };
+        const icon = custom.length ? custom[i] : glyphs[Math.min(i, glyphs.length - 1)];
+        if (!icon) return null;
+        const out: CfStyle = { icon };
         if (set && !on(set, "showValue", true)) out.hideValue = true;
         return out;
       }
@@ -453,7 +469,15 @@ export function deleteRule(e: Edits, sheet: Sheet, rule: CfRule): void {
     const live = readRules(sheet).find((r) => r.priority === rule.priority && r.type === rule.type);
     if (!live) return;
     live.el.remove();
-    if (!kids(live.block, "cfRule").length) live.block.remove();
+    if (!kids(live.block, "cfRule").length) {
+      // An emptied Excel 2010 block takes its now empty wrappers with it (conditionalFormattings, ext, extLst).
+      let gone: Element | null = live.block;
+      while (gone && gone !== sheet.doc.documentElement) {
+        const parent: Element | null = gone.parentElement;
+        gone.remove();
+        gone = parent && parent !== sheet.doc.documentElement && !parent.children.length ? parent : null;
+      }
+    }
     sheet.wb.pkg.touch(sheet.ref.path);
   });
 }

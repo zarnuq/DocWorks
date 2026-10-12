@@ -37,6 +37,7 @@ export function child(sheet: Sheet, tag: string, create = false): Element | null
   return el;
 }
 
+const XM = "http://schemas.microsoft.com/office/excel/2006/main";
 const sheetEls = (e: Edits) => Array.from(e.wb.pkg.workbook.getElementsByTagNameNS(NS_S, "sheet"));
 const definedNames = (e: Edits) => Array.from(e.wb.pkg.workbook.getElementsByTagNameNS(NS_S, "definedName"));
 
@@ -47,6 +48,8 @@ function rewriteFormulas(e: Edits, fn: (text: string, sheet: Sheet | null) => st
     for (const tag of ["formula", "formula1", "formula2"]) {
       for (const f of Array.from(sheet.doc.getElementsByTagNameNS(NS_S, tag))) if (f.textContent) f.textContent = fn(f.textContent, sheet);
     }
+    // Excel 2010 extensions: sparkline sources and conditional format points.
+    for (const f of Array.from(sheet.doc.getElementsByTagNameNS(XM, "f"))) if (f.textContent) f.textContent = fn(f.textContent, sheet);
     sheet.touch();
   }
   for (const n of definedNames(e)) n.textContent = fn(n.textContent ?? "", null);
@@ -139,6 +142,17 @@ function shiftSheet(e: Edits, sheet: Sheet, axis: "row" | "col", at: number, cou
     else p?.setAttribute("count", String(sheet.all(p, tag).length));
   }
   for (const cf of sheet.all(root, "conditionalFormatting")) if (!shiftAttr(cf, "sqref", o)) cf.remove();
+  // Excel 2010 ranges (sparkline cells, conditional formats): what loses its range goes, with emptied wrappers.
+  for (const ref of Array.from(sheet.doc.getElementsByTagNameNS(XM, "sqref"))) {
+    const out = shiftSqref(ref.textContent ?? "", o);
+    if (out) ref.textContent = out;
+    else for (let gone: Element | null = ref.parentElement; gone && gone !== root; ) {
+      const parent: Element | null = gone.parentElement;
+      gone.remove();
+      // A sparkline group without sparklines goes too (its colours alone are not a group).
+      gone = parent && parent !== root && (!parent.children.length || gone.localName === "sparklines") ? parent : null;
+    }
+  }
   const filter = child(sheet, "autoFilter");
   if (filter && !shiftAttr(filter, "ref", o)) filter.remove();
   for (const sel of Array.from(sheet.doc.getElementsByTagNameNS(NS_S, "selection"))) {

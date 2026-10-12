@@ -1,3 +1,5 @@
+import { Pivot, pivotAt, refreshPivot } from "../../domain/xlsx/pivot";
+import { readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
 import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
 import { App, FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
@@ -21,7 +23,7 @@ import { Grid, Hit } from "./grid";
 import { Picture, sheetPictures } from "../../domain/xlsx/drawing";
 import { addRule, CfStyle, ConditionalFormats, deleteRule, readRules } from "../../domain/xlsx/conditional";
 import { checkValue, invalidateValidations, listItems, removeValidation, setValidation, Validation, validationAt } from "../../domain/xlsx/validation";
-import { conditionalForm, validationForm } from "./rule-forms";
+import { conditionalForm, pivotForm, validationForm } from "./rule-forms";
 import { chartModel, chartSource, deleteChart, formatChart, insertChart, moveChart, setChartSource, SheetChart, sheetCharts } from "../../domain/xlsx/charts";
 import type { ChartModel } from "../../domain/pptx/chart";
 import { renderChart } from "../pptx/chart-renderer";
@@ -78,6 +80,7 @@ export class XlsxView extends FileView {
   /** Object URLs of images by zip path ("" while loading). */
   private imageUrls = new Map<string, string>();
   private cfCache = new Map<string, ConditionalFormats>();
+  private sparkCache = new Map<string, Sparkline[]>();
   private invalidCache = new Map<string, boolean>();
   /** Charts per sheet path, with their models, until the next edit. */
   private chartCache = new Map<string, { chart: SheetChart; model: ChartModel }[]>();
@@ -204,6 +207,7 @@ export class XlsxView extends FileView {
       pictures: () => this.pictures(),
       imageUrl: (path) => this.imageUrl(path),
       conditional: (row, col) => this.conditional(this.sheet, row, col),
+      sparklines: () => this.sparklines(this.sheet),
       dropdown: (row, col) => validationAt(this.sheet, row, col)?.type === "list",
       moveChart: (key, box) => this.change(() => moveChart(this.edits!, key, box)),
       note: (row, col) => this.notes().get(cellName(row, col))?.text ?? null,
@@ -283,6 +287,7 @@ export class XlsxView extends FileView {
       return false;
     }
     this.cfCache.clear();
+    this.sparkCache.clear();
     this.notesCache = null;
     this.commentsCache = null;
     this.invalidCache.clear();
@@ -292,6 +297,13 @@ export class XlsxView extends FileView {
     this.syncSelection();
     this.markDirty();
     return true;
+  }
+
+  /** A sheet's sparklines, read once per sheet until the next edit. */
+  private sparklines(sheet: Sheet): Sparkline[] {
+    let out = this.sparkCache.get(sheet.ref.path);
+    if (!out) this.sparkCache.set(sheet.ref.path, (out = readSparklines(sheet)));
+    return out;
   }
 
   /** Conditional formatting of a cell, from rules worked out per sheet until the next edit. */
@@ -518,6 +530,7 @@ export class XlsxView extends FileView {
   private afterReload(): void {
     this.pictureCache.clear();
     this.cfCache.clear();
+    this.sparkCache.clear();
     this.notesCache = null;
     this.commentsCache = null;
     this.invalidCache.clear();
@@ -1008,6 +1021,20 @@ export class XlsxView extends FileView {
   // Menus and commands
   // ---------------------------------------------------------------------------
 
+  /** Google's pivot table editor, as a dialog; Done works the table out again with the new fields. */
+  private pivotDialog(p: Pivot): void {
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Pivot table editor");
+    pivotForm(modal.contentEl, {
+      fields: p.fields,
+      layout: { rows: p.rows, cols: p.cols, values: p.values },
+      apply: (layout) => {
+        if (this.change(() => refreshPivot(this.edits!, this.sheet, p, layout))) modal.close();
+      },
+    });
+    modal.open();
+  }
+
   private contextMenu(e: MouseEvent, hit: Hit): void {
     const ed = this.edits!;
     const r = this.sel;
@@ -1041,6 +1068,12 @@ export class XlsxView extends FileView {
       const note = this.notes().get(cellName(r.r1, r.c1));
       item(note ? "Edit note" : "Insert note", "sticky-note", () => void this.editNote(r.r1, r.c1));
       if (note) item("Delete note", "trash", () => this.setNoteText(r.r1, r.c1, null));
+    }
+    const pivot = hit.area === "cell" ? pivotAt(this.sheet, r.r1, r.c1) : null;
+    if (pivot) {
+      menu.addSeparator();
+      item("Edit pivot table", "table-2", () => this.pivotDialog(pivot));
+      item("Refresh pivot table", "refresh-cw", () => this.change(() => refreshPivot(ed, this.sheet, pivot)));
     }
     menu.addSeparator();
     if (hit.area === "rowHeader") {
@@ -1298,6 +1331,7 @@ export class XlsxView extends FileView {
         imageUrl: (path) => this.imageUrls.get(path) ?? null,
         charts: () => this.charts(sheet),
         conditional: (row, col) => this.conditional(sheet, row, col),
+        sparklines: () => this.sparklines(sheet),
         isStale: () => false,
         isCircular: () => false,
         commit: () => false,

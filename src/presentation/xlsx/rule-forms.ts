@@ -5,6 +5,7 @@
 import { CfRule, NewRule, NewRuleType } from "../../domain/xlsx/conditional";
 import { NewValidation, Validation } from "../../domain/xlsx/validation";
 import { parseRange, Rect, rangeName } from "../../domain/xlsx/references";
+import type { PivotFn, PivotLayout } from "../../domain/xlsx/pivot";
 
 /** "A1:B2 D4" or "A1:B2, D4" as ranges; null when any part isn't a range. */
 export function parseRanges(text: string): Rect[] | null {
@@ -258,5 +259,75 @@ export function validationForm(host: HTMLElement, o: ValidationFormOptions): voi
     const values = (operator.endsWith("etween") ? [value1.value, value2.value] : [value1.value]).map((x) => x.trim());
     if (values.some((x) => !Number.isFinite(Number(x)) || x === "")) return void error.setText("Enter numbers.");
     o.add(ranges, { type: "decimal", operator, formulas: values, reject: stop });
+  });
+}
+
+export interface PivotFormOptions {
+  fields: string[];
+  layout: PivotLayout;
+  apply(layout: PivotLayout): void;
+}
+
+const PIVOT_FNS: [string, PivotFn][] = [["SUM", "sum"], ["COUNTA", "count"], ["AVERAGE", "average"], ["MAX", "max"], ["MIN", "min"]];
+
+/** Google's pivot table editor: row fields, a column field and values (field and summary). */
+export function pivotForm(host: HTMLElement, o: PivotFormOptions): void {
+  host.addClass("xlsx-rules");
+  const rows = new Set(o.layout.rows);
+  let col: number | null = o.layout.cols[0] ?? null;
+  const values = o.layout.values.map((v) => ({ field: v.field, fn: v.fn }));
+  const rowBox = row(host, "Rows");
+  const boxes = o.fields.map((name, i) => {
+    const label = rowBox.createEl("label", { cls: "xlsx-pivot-field" });
+    const box = label.createEl("input", { type: "checkbox" });
+    box.checked = rows.has(i);
+    label.appendText(name);
+    box.addEventListener("change", () => {
+      if (box.checked) {
+        rows.add(i);
+        if (col === i) {
+          colSelect.value = "";
+          col = null;
+        }
+      } else rows.delete(i);
+    });
+    return box;
+  });
+  const colSelect = row(host, "Columns").createEl("select", { cls: "dropdown", attr: { "aria-label": "Column field" } });
+  colSelect.createEl("option", { text: "None", value: "" });
+  o.fields.forEach((name, i) => colSelect.createEl("option", { text: name, value: String(i) }));
+  colSelect.value = col === null ? "" : String(col);
+  colSelect.addEventListener("change", () => {
+    col = colSelect.value === "" ? null : Number(colSelect.value);
+    if (col !== null && rows.delete(col)) boxes[col].checked = false;
+  });
+  const valueBox = row(host, "Values").createDiv({ cls: "xlsx-pivot-values" });
+  const drawValues = () => {
+    valueBox.empty();
+    values.forEach((v, k) => {
+      const line = valueBox.createDiv({ cls: "xlsx-pivot-value" });
+      const field = line.createEl("select", { cls: "dropdown", attr: { "aria-label": "Value field" } });
+      o.fields.forEach((name, i) => field.createEl("option", { text: name, value: String(i) }));
+      field.value = String(v.field);
+      field.addEventListener("change", () => (v.field = Number(field.value)));
+      const fn = line.createEl("select", { cls: "dropdown", attr: { "aria-label": "Summarize by" } });
+      for (const [label, value] of PIVOT_FNS) fn.createEl("option", { text: label, value });
+      fn.value = v.fn;
+      fn.addEventListener("change", () => (v.fn = fn.value as PivotFn));
+      line.createEl("button", { text: "Remove", attr: { "aria-label": "Remove value" } }).addEventListener("click", () => {
+        values.splice(k, 1);
+        drawValues();
+      });
+    });
+    valueBox.createEl("button", { text: "Add value", cls: "xlsx-pivot-add" }).addEventListener("click", () => {
+      values.push({ field: 0, fn: "sum" });
+      drawValues();
+    });
+  };
+  drawValues();
+  const error = host.createDiv({ cls: "xlsx-rule-error" });
+  host.createDiv({ cls: "xlsx-rule-buttons" }).createEl("button", { text: "Done", cls: "mod-cta" }).addEventListener("click", () => {
+    if (!values.length) return void error.setText("Add at least one value.");
+    o.apply({ rows: o.fields.map((_, i) => i).filter((i) => rows.has(i)), cols: col === null ? [] : [col], values: values.map((v) => ({ ...v })) });
   });
 }

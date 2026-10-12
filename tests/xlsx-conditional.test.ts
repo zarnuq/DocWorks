@@ -126,4 +126,17 @@ describe("conditional formatting", () => {
     expect(await period("tomorrow")).toEqual([false, false, true, false, false]);
     expect(await period("last7Days")).toEqual([true, true, false, true, false]);
   });
+  it("reads Excel 2010 icon sets from the sheet's extension list, with custom icons per threshold", async () => {
+    const X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main", XM = "http://schemas.microsoft.com/office/excel/2006/main";
+    const cfvo = (v: number) => `<x14:cfvo type="num"><xm:f>${v}</xm:f></x14:cfvo>`;
+    const ext = `<extLst><ext uri="{78C0D931-6437-407d-A8EE-F0AAD7539E65}" xmlns:x14="${X14}"><x14:conditionalFormattings><x14:conditionalFormatting xmlns:xm="${XM}"><x14:cfRule type="iconSet" priority="1" id="{1}"><x14:iconSet iconSet="3Stars" custom="1">${cfvo(0)}${cfvo(2)}${cfvo(4)}<x14:cfIcon iconSet="3Flags" iconId="0"/><x14:cfIcon iconSet="NoIcons" iconId="0"/><x14:cfIcon iconSet="3Arrows" iconId="2"/></x14:iconSet></x14:cfRule><xm:sqref>A1:A5</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>`;
+    const { e, cf } = await setup(ext);
+    const f = cf();
+    expect(f.at(0, 0)!.icon).toEqual({ glyph: "⚑", color: "#D93025" });
+    expect(f.at(2, 0)).toBeNull(); // "no icon" for the middle band
+    expect(f.at(4, 0)!.icon).toEqual({ glyph: "↑", color: "#0F9D58" });
+    deleteRule(e, e.wb.sheets[0], readRules(e.wb.sheets[0])[0]);
+    expect(e.wb.sheets[0].doc.getElementsByTagNameNS(X14, "conditionalFormatting")).toHaveLength(0);
+    expect(e.wb.sheets[0].doc.getElementsByTagNameNS(S, "extLst")).toHaveLength(0);
+  });
 });

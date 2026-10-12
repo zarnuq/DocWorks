@@ -3,6 +3,7 @@
  * more in style and layout (against Obsidian's large stylesheet) than drawing them. The grid builds a list of
  * paint operations (plain data, which tests read), and `paint` draws them.
  */
+import type { Sparkline } from "../../domain/xlsx/sparklines";
 
 export type Op =
   | { kind: "rect"; x: number; y: number; w: number; h: number; color: string }
@@ -27,9 +28,77 @@ export type Op =
       /** Padding from the left / right edge (indent). */
       pad: number;
     }
-  | { kind: "corner"; x: number; y: number; color: string };
+  | { kind: "corner"; x: number; y: number; color: string }
+  /** A sparkline in the cell box. */
+  | { kind: "spark"; x: number; y: number; w: number; h: number; s: Sparkline };
 
 const PAD = 3;
+
+/** A sparkline: a line through the values, columns, or win/loss blocks (up for positive, down for negative). */
+function drawSpark(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "spark" }>): void {
+  const { s } = op;
+  const values = s.rtl ? [...s.values].reverse() : s.values;
+  const nums = values.filter((v): v is number => v !== null);
+  if (!nums.length) return;
+  const x0 = op.x + PAD, y0 = op.y + PAD, w = op.w - 2 * PAD, h = op.h - 2 * PAD;
+  const hi = Math.max(...nums), lo = Math.min(...nums);
+  // Columns grow from zero; a line spans its own range.
+  const min = s.min ?? (s.type === "column" ? Math.min(0, lo) : lo), max = s.max ?? (s.type === "column" ? Math.max(0, hi) : hi);
+  const y = (v: number) => (max === min ? y0 + h / 2 : y0 + h - ((Math.min(max, Math.max(min, v)) - min) / (max - min)) * h);
+  const firstAt = values.findIndex((v) => v !== null), lastAt = values.length - 1 - [...values].reverse().findIndex((v) => v !== null);
+  const pointColor = (v: number, i: number, base: string | undefined) =>
+    (v === hi && s.high) || (v === lo && s.low) || (i === firstAt && s.first) || (i === lastAt && s.last) || (v < 0 && s.negative) || base;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(op.x, op.y, op.w, op.h);
+  ctx.clip();
+  const n = values.length;
+  if (s.type === "line") {
+    const x = (i: number) => (n === 1 ? x0 + w / 2 : x0 + (i * w) / (n - 1));
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.weight;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    let pen = false;
+    values.forEach((v, i) => {
+      if (v === null) return void (pen = false); // blanks leave a gap
+      if (pen) ctx.lineTo(x(i), y(v));
+      else ctx.moveTo(x(i), y(v));
+      pen = true;
+    });
+    ctx.stroke();
+    values.forEach((v, i) => {
+      const c = v === null ? undefined : pointColor(v, i, s.markers);
+      if (v === null || !c) return;
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.arc(x(i), y(v), Math.max(1.5, s.weight), 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else {
+    const slot = w / n, bw = Math.max(1, slot * 0.75);
+    const base = s.type === "stacked" ? y0 + h / 2 : y(Math.min(max, Math.max(min, 0)));
+    values.forEach((v, i) => {
+      if (v === null || (s.type === "stacked" && v === 0)) return;
+      ctx.fillStyle = pointColor(v, i, s.color) ?? s.color;
+      const top = s.type === "stacked" ? (v > 0 ? y0 : base) : Math.min(base, y(v));
+      const height = s.type === "stacked" ? h / 2 : Math.max(1, Math.abs(base - y(v)));
+      ctx.fillRect(x0 + i * slot + (slot - bw) / 2, top, bw, height);
+    });
+  }
+  if (s.axis) {
+    const ay = s.type === "stacked" ? y0 + h / 2 : y(0);
+    if (min <= 0 && max >= 0) {
+      ctx.strokeStyle = s.axis;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x0, Math.round(ay) + 0.5);
+      ctx.lineTo(x0 + w, Math.round(ay) + 0.5);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
 
 /** Lines of `text` wrapped to `width` at spaces (long words break anywhere). */
 function wrapLines(ctx: CanvasRenderingContext2D, text: string, width: number): string[] {
@@ -129,6 +198,7 @@ export function paint(canvas: HTMLCanvasElement, w: number, h: number, ops: Op[]
       ctx.lineTo(op.x, op.y + 6);
       ctx.closePath();
       ctx.fill();
-    } else drawText(ctx, op);
+    } else if (op.kind === "spark") drawSpark(ctx, op);
+    else drawText(ctx, op);
   }
 }

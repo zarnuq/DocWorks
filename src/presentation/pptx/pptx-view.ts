@@ -35,7 +35,7 @@ import { pickImage } from "../common/images";
 import { findAll, Match, replaceAll, replaceMatch } from "../../domain/pptx/find";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
 import { FONTS, PaperTheme, showValue, Toolbar } from "../common/toolbar";
-import { setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
+import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
 import { loadEmbeddedFonts } from "./embedded-fonts";
 import { eotToTtf } from "../../infrastructure/fonts/eot";
@@ -1903,23 +1903,38 @@ export class PptxView extends FileView {
     const items = smartArtItems(data);
     const modal = new Modal(this.app);
     modal.titleEl.setText("Diagram text");
-    modal.contentEl.createDiv({ cls: "pptx-props-hint", text: "Edit each item's text. Adding or removing items needs PowerPoint, which lays the diagram out again." });
-    const fields = items.map((item) => {
-      const field = modal.contentEl.createEl("textarea", { cls: "pptx-smartart-item", attr: { rows: "1", "aria-label": `Item ${item.text}` } });
+    modal.contentEl.createDiv({ cls: "pptx-props-hint", text: "Edit each item's text, or add and remove top-level items." });
+    const fields: HTMLTextAreaElement[] = [];
+    // Typed text plus one structural change, as one undo step; the dialog then shows the new items.
+    const apply = (change?: (data: Document, drawing: Document | null) => void) => {
+      const changed = items.filter((item, i) => fields[i].value !== item.text);
+      if (!changed.length && !change) return modal.close();
+      // mutate rolls back and shows the message when a change is refused.
+      this.mutate((d) => {
+        const drawing = parts.drawing ? d.xml(parts.drawing) : null;
+        change?.(d.xml(parts.data)!, drawing);
+        for (const item of changed) setSmartArtText(d.xml(parts.data)!, drawing, item.id, fields[items.indexOf(item)].value);
+      });
+      modal.close();
+      if (change) this.editSmartArt(frame);
+    };
+    for (const item of items) {
+      const row = modal.contentEl.createDiv({ cls: "pptx-smartart-row" });
+      const field = row.createEl("textarea", { cls: "pptx-smartart-item", attr: { rows: "1", "aria-label": `Item ${item.text}` } });
       field.value = item.text;
       field.setCssProps({ "--pptx-depth": String(item.depth) });
-      return field;
-    });
+      fields.push(field);
+      if (item.depth) continue;
+      const btn = (icon: string, label: string, fn: () => void) => {
+        const b = row.createEl("button", { cls: "clickable-icon", attr: { "aria-label": label } });
+        setIcon(b, icon);
+        b.addEventListener("click", fn);
+      };
+      btn("plus", "Add item after", () => apply((d, dr) => void addSmartArtItem(d, dr, item.id, "Text")));
+      btn("trash-2", "Remove item", () => apply((d, dr) => removeSmartArtItem(d, dr, item.id)));
+    }
     new Setting(modal.contentEl)
-      .addButton((b) => b.setButtonText("Apply").setCta().onClick(() => {
-        const changed = items.filter((item, i) => fields[i].value !== item.text);
-        if (changed.length)
-          this.mutate((d) => {
-            const drawing = parts.drawing ? d.xml(parts.drawing) : null;
-            for (const item of changed) setSmartArtText(d.xml(parts.data)!, drawing, item.id, fields[items.indexOf(item)].value);
-          });
-        modal.close();
-      }))
+      .addButton((b) => b.setButtonText("Apply").setCta().onClick(() => apply()))
       .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
     modal.open();
   }

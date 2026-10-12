@@ -182,6 +182,16 @@ describe("XlsxView conditional formatting and dropdowns", () => {
     expect(texts.filter((t) => t === "5")).toHaveLength(1); // the row header only
   });
 
+  it("paints sparklines in their cells", async () => {
+    const X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main", XM = "http://schemas.microsoft.com/office/excel/2006/main";
+    const { ops } = await mountWith(
+      `<extLst><ext uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}" xmlns:x14="${X14}"><x14:sparklineGroups xmlns:xm="${XM}"><x14:sparklineGroup type="column"><x14:colorSeries rgb="FF376092"/><x14:sparklines><x14:sparkline><xm:f>Data!A1:A2</xm:f><xm:sqref>C1</xm:sqref></x14:sparkline></x14:sparklines></x14:sparklineGroup></x14:sparklineGroups></ext></extLst>`
+    );
+    const spark = ops().find((o) => o.kind === "spark") as unknown as { x: number; w: number; s: { values: number[] } };
+    expect(spark.s.values).toEqual([5, 1]);
+    expect(spark.w).toBeGreaterThan(0);
+  });
+
   it("adds a conditional format rule and a dropdown from the dialogs, and saves them", async () => {
     const { view, file, saved, ops } = await mountWith("");
     const v = view as any;

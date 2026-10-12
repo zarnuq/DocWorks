@@ -11,6 +11,7 @@ import { numText } from "../../domain/xlsx/formula-evaluator";
 import { Cell, Sheet } from "../../domain/xlsx/workbook-model";
 import { Picture } from "../../domain/xlsx/drawing";
 import type { CfStyle } from "../../domain/xlsx/conditional";
+import type { Sparkline } from "../../domain/xlsx/sparklines";
 import { fontStack } from "../../core/utils/fonts";
 import { Op, paint } from "./paint";
 
@@ -50,6 +51,8 @@ export interface GridHost {
   imageUrl?(path: string): string | null;
   /** Conditional formatting of a cell, if any rule applies. */
   conditional?(row: number, col: number): CfStyle | null;
+  /** Sparklines on the current sheet. */
+  sparklines?(): Sparkline[];
   /** Whether a cell has a dropdown (list validation). */
   dropdown?(row: number, col: number): boolean;
   /** A cell's note, if it has one (marked in its corner, shown on hover). */
@@ -623,7 +626,14 @@ export class Grid {
           const m = merges.find((x) => x.r1 === row && x.c1 === col);
           notes.push({ kind: "corner", x: s.colX((m?.c2 ?? col) + 1) + q.ox - 1, y: s.rowY(row) + q.oy, color: comment ? "#f9ab00" : this.dark ? "#e8eaed" : "#000000" });
         }
-    ops.push(...fills, ...borders, ...texts, ...notes);
+    const sparks: Op[] = [];
+    for (const sp of this.host.sparklines?.() ?? []) {
+      if (sp.row < view.r1 || sp.row > view.r2 || sp.col < view.c1 || sp.col > view.c2) continue;
+      const m = merges.find((x) => x.r1 === sp.row && x.c1 === sp.col);
+      const x = s.colX(sp.col) + q.ox, y = s.rowY(sp.row) + q.oy;
+      sparks.push({ kind: "spark", x, y, w: s.colX((m?.c2 ?? sp.col) + 1) - s.colX(sp.col) - 1, h: s.rowY((m?.r2 ?? sp.row) + 1) - s.rowY(sp.row) - 1, s: sp });
+    }
+    ops.push(...fills, ...borders, ...texts, ...sparks, ...notes);
     // Painted at the screen's resolution times the zoom, so zoomed text stays sharp.
     paint(q.canvas, q.w, q.h, ops, scale ?? (window.devicePixelRatio || 1) * this.zoom);
 
