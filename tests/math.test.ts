@@ -60,6 +60,15 @@ describe("ommlToLatex", () => {
 });
 
 describe("latexToOmml", () => {
+  it("attaches summand and function scripts to their operands", () => {
+    for (const latex of [String.raw`\sum_{i=1}^{n} x_i`, String.raw`\prod_{i=1}^{n} x_i^2`, String.raw`\sin x^2`]) {
+      const xml = new DOMParser().parseFromString(latexToOmml(latex), "application/xml");
+      const operator = xml.getElementsByTagNameNS(M, latex.includes("sin") ? "func" : "nary")[0];
+      const operand = Array.from(operator.children).find(e => e.localName === "e")!;
+      expect(Array.from(operand.children).some(e => ["sSub", "sSup", "sSubSup"].includes(e.localName))).toBe(true);
+      expect(operator.parentElement?.localName).toBe("oMath");
+    }
+  });
   const parse = (latex: string) => new DOMParser().parseFromString(latexToOmml(latex), "application/xml").documentElement;
 
   it("builds Office Math XML", () => {

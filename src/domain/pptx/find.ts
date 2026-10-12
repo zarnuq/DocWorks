@@ -4,9 +4,46 @@
  */
 import { NS } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
+import { textMatches, TextMatch } from "../../core/utils/text-matches";
+import { slideComments } from "./comments";
 
 export interface FindOptions {
   matchCase: boolean;
+  notes?: boolean;
+  comments?: boolean;
+}
+
+export type SlideSearchMatch = ({ kind: "text" } & Match) | (TextMatch & {
+  kind: "notes" | "comment";
+  slide: number;
+  text: string;
+  author?: string;
+  messageId?: string;
+  resolved?: boolean;
+});
+
+/** Visible slide text plus opt-in speaker notes and all comment messages, in slide order. */
+export function findSlideMatches(doc: PptxDocument, query: string, opts: FindOptions): SlideSearchMatch[] {
+  if (!query) return [];
+  const text = findAll(doc, query, opts);
+  const bySlide = new Map<number, Match[]>();
+  for (const match of text) {
+    const matches = bySlide.get(match.slide) ?? [];
+    matches.push(match);
+    bySlide.set(match.slide, matches);
+  }
+  const out: SlideSearchMatch[] = [];
+  doc.slides().forEach((ref, slide) => {
+    out.push(...(bySlide.get(slide) ?? []).map(m => ({ ...m, kind: "text" as const })));
+    if (opts.notes) {
+      const notes = doc.notesText(slide);
+      out.push(...textMatches(notes, query, opts.matchCase).map(m => ({ ...m, kind: "notes" as const, slide, text: notes })));
+    }
+    if (opts.comments) for (const thread of slideComments(doc, ref.path)) for (const message of thread.messages) {
+      out.push(...textMatches(message.text, query, opts.matchCase).map(m => ({ ...m, kind: "comment" as const, slide, text: message.text, author: message.author, messageId: message.id, resolved: thread.resolved })));
+    }
+  });
+  return out;
 }
 
 export interface Match {

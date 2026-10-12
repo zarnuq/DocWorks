@@ -1248,6 +1248,29 @@ textarea.pptx-notes {
   min-width: 60px;
 }
 
+.dw-find-preview {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  font-size: var(--font-ui-small);
+}
+
+.dw-find-preview:empty {
+  display: none;
+}
+
+.dw-find-source {
+  color: var(--text-muted);
+}
+
+.dw-find-snippet {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 ::highlight(dw-find) {
   background-color: rgba(255, 200, 0, 0.6);
 }

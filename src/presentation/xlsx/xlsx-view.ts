@@ -11,7 +11,8 @@ import { Rect, cellName, colName, parseRange, rangeName } from "../../domain/xls
 import { adjustDecimals, formatGeneral, parseInput } from "../../domain/xlsx/number-format";
 import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
 import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboard";
-import { CellMatch, findCells, replaceCells } from "../../domain/xlsx/find";
+import { SheetSearchMatch, findSheetMatches, replaceCells } from "../../domain/xlsx/find";
+import { showFindPreview } from "../common/find-preview";
 import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
 import { FONTS, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys } from "../common/toolbar";
@@ -698,7 +699,7 @@ export class XlsxView extends FileView {
   }
 
   /** Discussions stay attached to the cell while the user replies, edits or resolves a thread. */
-  private commentDialog(row: number, col: number): void {
+  private commentDialog(row: number, col: number, hit?: { messageId?: string; start: number; end: number }): void {
     if (!this.edits) return;
     const edits = this.edits, path = this.sheet.ref.path, ref = cellName(row, col);
     const sheet = () => edits.wb.sheets.find(s => s.ref.path === path)!;
@@ -727,7 +728,12 @@ export class XlsxView extends FileView {
           const item = box.createDiv({ cls: "xlsx-comment-message" });
           item.createEl("strong", { text: message.author });
           if (message.date) item.createEl("time", { text: new Date(message.date).toLocaleString(), attr: { datetime: message.date } });
-          item.createDiv({ cls: "xlsx-comment-text", text: message.text });
+          const textEl = item.createDiv({ cls: "xlsx-comment-text" });
+          if (hit?.messageId === message.id) {
+            textEl.appendText(message.text.slice(0, hit.start));
+            textEl.createEl("mark", { text: message.text.slice(hit.start, hit.end) });
+            textEl.appendText(message.text.slice(hit.end));
+          } else textEl.setText(message.text);
           button(item, "Edit", () => {
             item.empty(); compose(item, "Edit comment", text => change(() => editComment(edits, sheet(), message.id, text)), message.text);
             button(item, "Cancel", draw);
@@ -742,6 +748,7 @@ export class XlsxView extends FileView {
       button(modal.contentEl, "Close", () => modal.close());
     };
     draw(); modal.open();
+    modal.contentEl.querySelector("mark")?.scrollIntoView({ block: "nearest" });
   }
 
   private setNoteText(row: number, col: number, text: string | null): void {
@@ -1253,7 +1260,7 @@ export class XlsxView extends FileView {
     const replace = bar.createEl("input", { type: "text", attr: { placeholder: "Replace with", "aria-label": "Replace with" } });
     const check = (text: string, title: string) => {
       const label = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": title } });
-      const box = label.createEl("input", { type: "checkbox" });
+      const box = label.createEl("input", { type: "checkbox", attr: { "aria-label": title } });
       label.appendText(text);
       return box;
     };
@@ -1261,20 +1268,36 @@ export class XlsxView extends FileView {
     const entire = check("Whole cell", "Match entire cell contents");
     const formulas = check("Formulas", "Also search within formulas");
     const allSheets = check("All sheets", "Search all sheets");
+    const notes = check("Notes", "Search cell notes");
+    const comments = check("Comments", "Search comments");
+    notes.checked = comments.checked = true;
     const count = bar.createSpan({ cls: "pptx-find-count" });
-    let matches: CellMatch[] = [];
+    const preview = bar.createDiv({ cls: "dw-find-preview", attr: { "aria-live": "polite" } });
+    let matches: SheetSearchMatch[] = [];
     let index = -1;
-    const opts = () => ({ matchCase: matchCase.checked, entire: entire.checked, formulas: formulas.checked });
+    const opts = () => ({ matchCase: matchCase.checked, entire: entire.checked, formulas: formulas.checked, notes: notes.checked, comments: comments.checked });
     const refresh = () => {
-      matches = findCells(allSheets.checked ? this.wb.sheets : [this.sheet], input.value, opts());
+      matches = findSheetMatches(allSheets.checked ? this.wb.sheets : [this.sheet], input.value, opts());
       index = Math.min(index, matches.length - 1);
       count.setText(input.value ? (matches.length ? `${Math.max(index, 0) + 1} of ${matches.length}` : "No results") : "");
+      preview.empty();
+      replaceButton.disabled = matches[Math.max(index, 0)]?.kind !== "cell";
+      replaceAllButton.disabled = !matches.some(m => m.kind === "cell");
     };
-    const show = (m: CellMatch) => {
+    const show = (m: SheetSearchMatch) => {
       const i = this.wb.sheets.indexOf(m.sheet);
       if (i !== this.sheetIndex) this.showSheet(i);
       this.grid!.select({ row: m.row, col: m.col });
       this.grid!.reveal({ row: m.row, col: m.col });
+      input.focus({ preventScroll: true });
+      replaceButton.disabled = m.kind !== "cell";
+      if (m.kind !== "cell") showFindPreview(preview, `${m.sheet.name}!${cellName(m.row, m.col)} · ${m.kind === "note" ? "Note" : m.resolved ? "Resolved comment" : "Comment"} · ${m.author}`, m.text, m.start, m.end,
+        m.kind === "note" ? "Open note" : "Open comment", () => {
+          const sheetIndex = this.wb.sheets.indexOf(m.sheet);
+          if (sheetIndex !== this.sheetIndex) this.showSheet(sheetIndex);
+          if (m.kind === "note") void this.editNote(m.row, m.col);
+          else this.commentDialog(m.row, m.col, m);
+        });
     };
     const step = (dir: number) => {
       refresh();
@@ -1283,33 +1306,40 @@ export class XlsxView extends FileView {
       count.setText(`${index + 1} of ${matches.length}`);
       show(matches[index]);
     };
-    const button = (text: string, title: string, fn: () => void) => bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } }).addEventListener("click", fn);
+    const button = (text: string, title: string, fn: () => void) => {
+      const b = bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } });
+      b.addEventListener("click", fn);
+      return b;
+    };
     button("↑", "Previous match (Shift+Enter)", () => step(-1));
     button("↓", "Next match (Enter)", () => step(1));
-    button("Replace", "Replace this match", () => {
+    const replaceButton = button("Replace", "Replace this cell-content match", () => {
       refresh();
       const m = matches[index];
-      if (!m) return step(1);
+      if (!m || m.kind !== "cell") return;
       this.change(() => replaceCells(this.edits!, [m], input.value, replace.value, opts()));
       step(0);
     });
-    button("Replace all", "Replace every match", () => {
+    const replaceAllButton = button("Replace all", "Replace matching cell contents", () => {
       refresh();
       let n = 0;
-      this.change(() => (n = replaceCells(this.edits!, matches, input.value, replace.value, opts())));
+      this.change(() => (n = replaceCells(this.edits!, matches.filter(m => m.kind === "cell"), input.value, replace.value, opts())));
       new Notice(`Replaced ${n} ${n === 1 ? "cell" : "cells"}.`);
       refresh();
     });
     button("×", "Close (Esc)", () => this.closeFind());
+    bar.append(preview);
     input.addEventListener("input", () => {
       index = -1;
       refresh();
+      if (matches.length) { index = 0; show(matches[0]); }
     });
-    for (const box of [matchCase, entire, formulas, allSheets]) box.addEventListener("change", () => refresh());
+    for (const box of [matchCase, entire, formulas, allSheets, notes, comments]) box.addEventListener("change", () => { refresh(); if (matches.length) { index = Math.max(index, 0); show(matches[index]); } });
     bar.addEventListener("keydown", (e) => {
       if (e.key === "Escape") this.closeFind();
-      else if (e.key === "Enter" && e.target === input) step(e.shiftKey ? -1 : 1);
+      else if (e.key === "Enter" && e.target === input) { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
     });
+    refresh();
     input.focus();
   }
 

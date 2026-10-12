@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, DocxView, DocWorksSettings } from "../src/presentatio
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { readAnimations, readTransition } from "../src/domain/pptx/animation";
+import { addSlideComment } from "../src/domain/pptx/comments";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 import { fixture } from "./helpers";
@@ -339,6 +340,33 @@ describe("DocxView switching files", () => {
 });
 
 describe("DocxView find", () => {
+  it("finds comment replies, opens their review cards and leaves comments unchanged by replace", async () => {
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "comments.docx");
+    const v = view as any;
+    const id = v.docx.addComment('needle root', 'Author');
+    const reply = v.docx.replyToComment(id, 'reply needle', 'Reply author');
+    v.openFind();
+    const bar = view.contentEl.querySelector<HTMLElement>('.pptx-find')!;
+    const input = bar.querySelector<HTMLInputElement>('input[type=search]')!;
+    input.value = 'needle'; input.dispatchEvent(new Event('input'));
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('1 of 2');
+    expect(bar.querySelector('.dw-find-preview mark')!.textContent).toBe('needle');
+    const buttons = () => Array.from(bar.querySelectorAll<HTMLButtonElement>('button'));
+    expect(buttons().find(b => b.textContent === 'Replace')!.disabled).toBe(true);
+    expect(buttons().find(b => b.textContent === 'Replace all')!.disabled).toBe(true);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Reply author');
+    buttons().find(b => b.textContent === 'Open comment')!.click();
+    const area = view.contentEl.querySelector<HTMLTextAreaElement>(`[data-comment-id="${reply}"] textarea`)!;
+    expect(document.activeElement).toBe(area);
+    expect(area.value.slice(area.selectionStart, area.selectionEnd)).toBe('needle');
+    expect(v.docx.comments().filter((c: any) => c.id === id || c.id === reply).map((c: any) => c.text)).toEqual(['needle root', 'reply needle']);
+    bar.querySelector<HTMLInputElement>('[aria-label="Search comments"]')!.click();
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('No results');
+    expect(bar.querySelector('.dw-find-preview')!.textContent).toBe('');
+    await view.onUnloadFile(file);
+  });
   it("opens the find bar above the document (Ctrl+F / Ctrl+H)", async () => {
     const view = mount(DocxView, "sample.docx");
     await open(view, "a.docx");
@@ -346,6 +374,57 @@ describe("DocxView find", () => {
     const bar = view.contentEl.querySelector(".pptx-find");
     expect(bar?.isConnected).toBe(true);
     expect(document.activeElement).toBe(bar!.querySelector("input"));
+  });
+});
+
+describe("PptxView annotation find", () => {
+  it("searches speaker-note edits before their delayed save", async () => {
+    const view = mount(PptxView, 'sample.pptx');
+    const file = await open(view, 'notes.pptx');
+    const v = view as any;
+    v.notesEl.value = 'pending needle';
+    v.notesEl.dispatchEvent(new Event('input'));
+    v.openFind();
+    const input = view.contentEl.querySelector<HTMLInputElement>('.pptx-find input[type=search]')!;
+    input.value = 'needle'; input.dispatchEvent(new Event('input'));
+    expect(view.contentEl.querySelector('.dw-find-preview mark')!.textContent).toBe('needle');
+    expect(v.doc.notesText(0)).toBe('pending needle');
+    await view.onUnloadFile(file);
+  });
+  it("includes notes and replies by default and keeps keyboard navigation in the find box", async () => {
+    const view = mount(PptxView, 'sample.pptx');
+    const file = await open(view, 'annotations.pptx');
+    const v = view as any;
+    v.doc.setNotes(0, 'speaker needle');
+    v.doc.setNotes(1, 'second needle');
+    const path = v.doc.slides()[0].path;
+    const id = addSlideComment(v.doc, path, 'comment needle', 'Author');
+    addSlideComment(v.doc, path, 'reply needle', 'Reply author', id);
+    v.renderCurrent();
+    v.openFind();
+    const bar = view.contentEl.querySelector<HTMLElement>('.pptx-find')!;
+    const input = bar.querySelector<HTMLInputElement>('input[type=search]')!;
+    input.value = 'needle'; input.dispatchEvent(new Event('input'));
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('1 of 4');
+    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Speaker notes');
+    expect(Array.from(bar.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Replace')!.disabled).toBe(true);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Comment');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Reply author');
+    Array.from(bar.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Open comment')!.click();
+    expect(document.querySelector('.xlsx-comment-text mark')!.textContent).toBe('needle');
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.test-modal button')).find(b => b.textContent === 'Close')!.click();
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(v.index).toBe(1);
+    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Slide 2');
+    expect(document.activeElement).toBe(input);
+    bar.querySelector<HTMLInputElement>('[aria-label="Search speaker notes"]')!.click();
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('1 of 2');
+    bar.querySelector<HTMLInputElement>('[aria-label="Search comments"]')!.click();
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('No results');
+    await view.onUnloadFile(file);
   });
 });
 

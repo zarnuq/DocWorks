@@ -334,6 +334,21 @@ export class DocxDocument extends OoxmlPackage {
     return path ? this.xml(path) : null;
   }
 
+  /** Nonprinting document variables survive native Word edits and carry note properties back to Markdown. */
+  documentVariable(name: string): string | null {
+    const variable = Array.from(this.partOf("settings")?.getElementsByTagNameNS(NS.w, "docVar") ?? []).find(e => wVal(e, "name") === name);
+    return wVal(variable);
+  }
+
+  setDocumentVariable(name: string, value: string): void {
+    this.ensurePart("settings", "settings", `<w:settings xmlns:w="${NS.w}"/>`);
+    this.ensureSetting("docVars", "<w:docVars/>");
+    const vars = this.partOf("settings")!.getElementsByTagNameNS(NS.w, "docVars")[0];
+    const variable = Array.from(vars.children).find(e => wVal(e, "name") === name) ?? vars.appendChild(vars.ownerDocument.createElementNS(NS.w, "w:docVar"));
+    variable.setAttributeNS(NS.w, "w:name", name);
+    variable.setAttributeNS(NS.w, "w:val", value);
+  }
+
   /** A part related from the main document, created from `rootXml` if missing. */
   private ensurePart(type: string, file: string, rootXml: string): Document {
     const existing = this.partOf(type);

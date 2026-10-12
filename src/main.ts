@@ -1,4 +1,5 @@
-import { exportNoteToDocx } from "./presentation/common/export-note";
+import { addExportToMenu, addNoteExportToMenu, exportNoteToDocx } from "./presentation/common/export-note";
+import { exportDocxToMarkdown } from "./presentation/common/export-markdown";
 import { registerEmbeds } from "./presentation/common/embeds";
 import { canExportPdf } from "./presentation/common/pdf";
 import { App, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
@@ -15,6 +16,14 @@ const NEW_FILES = [
 
 export default class DocWorksPlugin extends Plugin {
   settings: DocWorksSettings = { ...DEFAULT_SETTINGS };
+
+  private async exportWordNote(file: TFile): Promise<void> {
+    const active = this.app.workspace.getActiveViewOfType(DocxView);
+    const open = active?.file?.path === file.path ? active : this.app.workspace.getLeavesOfType(VIEW_TYPE_DOCX)
+      .map(leaf => leaf.view).find((view): view is DocxView => view instanceof DocxView && view.file?.path === file.path);
+    if (open) await open.exportMarkdown();
+    else await exportDocxToMarkdown(this.app, file);
+  }
 
   /**
    * Background tabs restored after the plugin (re)loads keep the placeholder title and icon Obsidian gave them while
@@ -74,11 +83,24 @@ export default class DocWorksPlugin extends Plugin {
       },
     });
     this.registerEvent(
-      this.app.workspace.on("file-menu", (menu, file) => {
+      this.app.workspace.on("file-menu", (menu, file, source) => {
         if (file instanceof TFile && file.extension === "md")
-          menu.addItem((i) => i.setTitle("Export to .docx").setIcon("file-output").onClick(() => void exportNoteToDocx(this.app, file)));
+          addNoteExportToMenu(menu, this.app, file);
+        if (file instanceof TFile && file.extension === "docx" && source !== "more-options")
+          addExportToMenu(menu, "Export to Markdown", () => void this.exportWordNote(file));
       })
     );
+
+    this.addCommand({
+      id: "export-docx-markdown",
+      name: "Export current document to Markdown",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (file?.extension !== "docx") return false;
+        if (!checking) void this.exportWordNote(file);
+        return true;
+      },
+    });
 
     this.addCommand({
       id: "export-pdf",

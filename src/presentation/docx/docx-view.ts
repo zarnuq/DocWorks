@@ -20,8 +20,10 @@ import { pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidth
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
 import { latexToOmml, mathSpec } from "../../domain/docx/math";
 import { canExportPdf, exportPdf } from "../common/pdf";
+import { exportDocxToMarkdown } from "../common/export-markdown";
 import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
-import { countWords, findKey, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
+import { countWords, findRanges, findCommentMatches, CommentMatch, Range, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
+import { showFindPreview } from "../common/find-preview";
 import { pageSetup, PageSetup, sectionSetups } from "../../domain/docx/pages";
 import { attrsOf, ImageAttrs, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView } from "./docx-image-view";
@@ -151,6 +153,11 @@ export class DocxView extends FileView {
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
     if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
+    menu.addItem((i) => i.setTitle("Export to Markdown").setIcon("file-output").setSection("action").onClick(() => void this.exportMarkdown()));
+  }
+
+  async exportMarkdown(): Promise<void> {
+    if (this.file) await exportDocxToMarkdown(this.app, this.file, this.docx && this.editor ? { document: this.docx, content: this.editor.state.doc } : undefined);
   }
 
   getViewType(): string {
@@ -796,6 +803,7 @@ export class DocxView extends FileView {
       });
       const row = c.createDiv({ cls: "docx-review-actions" });
       for (const [label, fn] of actions) row.createEl("button", { text: label }).addEventListener("click", fn);
+      return c;
     };
 
     // Comments
@@ -833,7 +841,7 @@ export class DocxView extends FileView {
             this.renderReview();
           },
         ],
-      ]);
+      ]).dataset.commentId = c.id;
       for (const reply of comments.filter(r => r.parentId === c.id)) {
         const replies = thread.createDiv({ cls: "docx-comment-reply" });
         card(replies, `${reply.author}${reply.date ? ` · ${new Date(reply.date).toLocaleDateString()}` : ""}`, reply.text,
@@ -841,7 +849,7 @@ export class DocxView extends FileView {
             docx.deleteComment(reply.id);
             this.markDirty();
             this.renderReview();
-          }]]);
+          }]]).dataset.commentId = reply.id;
       }
     }
 
@@ -932,38 +940,67 @@ export class DocxView extends FileView {
     const caseLabel = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": "Match case" } });
     const matchCase = caseLabel.createEl("input", { type: "checkbox" });
     caseLabel.appendText("Aa");
+    const commentsLabel = bar.createEl("label", { cls: "pptx-find-case" });
+    const comments = commentsLabel.createEl("input", { type: "checkbox", attr: { "aria-label": "Search comments" } });
+    comments.checked = true;
+    commentsLabel.appendText("Comments");
     const count = bar.createSpan({ cls: "pptx-find-count" });
-    const state = () => findKey.getState(editor.state)!;
+    const preview = bar.createDiv({ cls: "dw-find-preview", attr: { "aria-live": "polite" } });
+    type Result = ({ kind: "text" } & Range) | ({ kind: "comment" } & CommentMatch);
+    let matches: Result[] = [], index = -1;
+    const refresh = () => {
+      matches = [...findRanges(editor.state.doc, input.value, matchCase.checked).map(r => ({ ...r, kind: "text" as const })),
+        ...(comments.checked && this.docx ? findCommentMatches(this.docx, input.value, matchCase.checked).map(r => ({ ...r, kind: "comment" as const })) : [])];
+    };
     const show = (current: number) => {
-      editor.dispatch(setFind(editor.state.tr, input.value, matchCase.checked, current));
-      const f = state();
-      count.setText(input.value ? (f.matches.length ? `${f.current + 1} of ${f.matches.length}` : "No results") : "");
-      editor.dom.querySelector(".docx-find-hit.is-current")?.scrollIntoView({ block: "center" });
+      refresh();
+      index = matches.length ? Math.min(Math.max(current, 0), matches.length - 1) : -1;
+      const hit = matches[index];
+      editor.dispatch(setFind(editor.state.tr, input.value, matchCase.checked, hit?.kind === "text" ? index : -1));
+      count.setText(input.value ? (matches.length ? `${index + 1} of ${matches.length}` : "No results") : "");
+      replaceButton.disabled = hit?.kind !== "text";
+      replaceAllButton.disabled = !matches.some(m => m.kind === "text");
+      preview.empty();
+      if (hit?.kind === "text") editor.dom.querySelector(".docx-find-hit.is-current")?.scrollIntoView({ block: "center" });
+      else if (hit?.kind === "comment") showFindPreview(preview, `${hit.comment.resolved ? "Resolved comment" : "Comment"} · ${hit.comment.author}`, hit.comment.text, hit.start, hit.end, "Open comment", () => {
+        this.setReview(true);
+        const card = Array.from(this.reviewEl?.querySelectorAll<HTMLElement>("[data-comment-id]") ?? []).find(c => c.dataset.commentId === hit.comment.id);
+        const area = card?.querySelector("textarea");
+        card?.scrollIntoView({ block: "nearest" });
+        area?.focus();
+        area?.setSelectionRange(hit.start, hit.end);
+      });
     };
     const step = (dir: number) => {
-      const n = state().matches.length;
-      if (n) show((state().current + dir + n) % n);
+      refresh();
+      const n = matches.length;
+      if (n) show((index + dir + n) % n);
     };
-    const button = (text: string, title: string, fn: () => void) =>
-      bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } }).addEventListener("click", fn);
+    const button = (text: string, title: string, fn: () => void) => {
+      const b = bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } });
+      b.addEventListener("click", fn);
+      return b;
+    };
     button("↑", "Previous match (Shift+Enter)", () => step(-1));
     button("↓", "Next match (Enter)", () => step(1));
-    button("Replace", "Replace this match", () => {
-      const f = state();
-      const hit = f.matches[f.current];
-      if (!hit) return;
+    const replaceButton = button("Replace", "Replace this document-text match", () => {
+      refresh();
+      const hit = matches[index];
+      if (!hit || hit.kind !== "text") return;
       replaceRangeCmd(hit, replace.value)(editor.state, editor.dispatch);
-      show(f.current);
+      show(index);
     });
-    button("Replace all", "Replace every match", () => {
-      const n = state().matches.length;
+    const replaceAllButton = button("Replace all", "Replace matching document text", () => {
+      const n = findRanges(editor.state.doc, input.value, matchCase.checked).length;
       replaceAllCmd(input.value, replace.value, matchCase.checked)(editor.state, editor.dispatch);
       new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
       show(0);
     });
     button("×", "Close (Esc)", () => this.closeFind());
+    bar.append(preview);
     input.addEventListener("input", () => show(0));
     matchCase.addEventListener("change", () => show(0));
+    comments.addEventListener("change", () => show(0));
     bar.addEventListener("keydown", (e) => {
       if (e.key === "Escape") this.closeFind();
       else if (e.key === "Enter" && e.target === input) {
@@ -971,6 +1008,7 @@ export class DocxView extends FileView {
         step(e.shiftKey ? -1 : 1);
       }
     });
+    show(0);
     input.focus();
   }
 

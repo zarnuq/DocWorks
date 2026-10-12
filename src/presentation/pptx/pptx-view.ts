@@ -32,7 +32,8 @@ import { alignRects, Alignment, Clip, copyItems, distributeRects, groupItems, it
 import { History } from "../../core/utils/history";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { pickImage } from "../common/images";
-import { findAll, Match, replaceAll, replaceMatch } from "../../domain/pptx/find";
+import { findSlideMatches, SlideSearchMatch, replaceAll, replaceMatch } from "../../domain/pptx/find";
+import { showFindPreview } from "../common/find-preview";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
 import { EDITING_KEYS, FONTS, PaperTheme, promptText, shieldEditingKeys, showValue, Toolbar } from "../common/toolbar";
 import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
@@ -1904,7 +1905,7 @@ export class PptxView extends FileView {
   }
 
   /** The current slide's comment threads (Google Slides' comments): post, reply, edit, resolve, delete. */
-  private commentsDialog(): void {
+  private commentsDialog(hit?: { messageId?: string; start: number; end: number }): void {
     const doc = this.doc;
     if (!doc) return;
     const slide = doc.slides()[this.index]?.path;
@@ -1938,7 +1939,12 @@ export class PptxView extends FileView {
           const item = box.createDiv({ cls: "xlsx-comment-message" });
           item.createEl("strong", { text: message.author || "Unknown author" });
           if (message.date) item.createEl("time", { text: new Date(message.date).toLocaleString(), attr: { datetime: message.date } });
-          item.createDiv({ cls: "xlsx-comment-text", text: message.text });
+          const textEl = item.createDiv({ cls: "xlsx-comment-text" });
+          if (hit?.messageId === message.id) {
+            textEl.appendText(message.text.slice(0, hit.start));
+            textEl.createEl("mark", { text: message.text.slice(hit.start, hit.end) });
+            textEl.appendText(message.text.slice(hit.end));
+          } else textEl.setText(message.text);
           if (thread.legacy) continue;
           button(item, "Edit", () => {
             item.empty();
@@ -1956,6 +1962,7 @@ export class PptxView extends FileView {
     };
     draw();
     modal.open();
+    modal.contentEl.querySelector("mark")?.scrollIntoView({ block: "nearest" });
   }
 
   /** Edit the text of a SmartArt's items (in its data and the drawing shown). */
@@ -2185,7 +2192,7 @@ export class PptxView extends FileView {
   private findEl: HTMLElement | null = null;
   private zoomSelect: HTMLSelectElement | null = null;
   private findInput!: HTMLInputElement;
-  private findMatches: Match[] = [];
+  private findMatches: SlideSearchMatch[] = [];
   private findIndex = -1;
   private zoom = 1;
 
@@ -2203,46 +2210,75 @@ export class PptxView extends FileView {
     const caseLabel = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": "Match case" } });
     const matchCase = caseLabel.createEl("input", { type: "checkbox" });
     caseLabel.appendText("Aa");
+    const check = (text: string, title: string) => {
+      const label = bar.createEl("label", { cls: "pptx-find-case" });
+      const box = label.createEl("input", { type: "checkbox", attr: { "aria-label": title } });
+      box.checked = true;
+      label.appendText(text);
+      return box;
+    };
+    const notes = check("Notes", "Search speaker notes");
+    const comments = check("Comments", "Search comments");
     const count = bar.createSpan({ cls: "pptx-find-count" });
-    const opts = () => ({ matchCase: matchCase.checked });
+    const preview = bar.createDiv({ cls: "dw-find-preview", attr: { "aria-live": "polite" } });
+    const opts = () => ({ matchCase: matchCase.checked, notes: notes.checked, comments: comments.checked });
     const refresh = (keep = false) => {
-      this.findMatches = findAll(this.doc!, this.findInput.value, opts());
+      this.findMatches = findSlideMatches(this.doc!, this.findInput.value, opts());
       if (!keep) this.findIndex = this.findMatches.findIndex((m) => m.slide >= this.index);
+      if (this.findMatches.length && this.findIndex < 0) this.findIndex = 0;
       this.findIndex = Math.min(this.findIndex, this.findMatches.length - 1);
       count.setText(this.findInput.value ? (this.findMatches.length ? `${this.findIndex + 1} of ${this.findMatches.length}` : "No results") : "");
+      preview.empty();
+      replaceButton.disabled = this.findMatches[this.findIndex]?.kind !== "text";
+      replaceAllButton.disabled = !this.findMatches.some(m => m.kind === "text");
     };
     const step = (dir: number) => {
       refresh(true);
       if (!this.findMatches.length) return;
       this.findIndex = (this.findIndex + dir + this.findMatches.length) % this.findMatches.length;
       count.setText(`${this.findIndex + 1} of ${this.findMatches.length}`);
-      this.showMatch(this.findMatches[this.findIndex]);
+      show(this.findMatches[this.findIndex]);
     };
-    const button = (text: string, title: string, fn: () => void) =>
-      bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } }).addEventListener("click", fn);
+    const show = (m: SlideSearchMatch) => {
+      this.showMatch(m);
+      replaceButton.disabled = m.kind !== "text";
+      if (m.kind === "text") { preview.empty(); return; }
+      showFindPreview(preview, `Slide ${m.slide + 1} · ${m.kind === "notes" ? "Speaker notes" : `${m.resolved ? "Resolved comment" : "Comment"}${m.author ? ` · ${m.author}` : ""}`}`, m.text, m.start, m.end,
+        m.kind === "notes" ? "Open notes" : "Open comment", () => {
+          if (this.index !== m.slide) this.goTo(m.slide);
+          if (m.kind === "notes") { this.notesEl.focus(); this.notesEl.setSelectionRange(m.start, m.end); }
+          else this.commentsDialog(m);
+        });
+    };
+    const button = (text: string, title: string, fn: () => void) => {
+      const b = bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } });
+      b.addEventListener("click", fn);
+      return b;
+    };
     button("↑", "Previous match (Shift+Enter)", () => step(-1));
     button("↓", "Next match (Enter)", () => step(1));
-    button("Replace", "Replace this match", () => {
+    const replaceButton = button("Replace", "Replace this slide-text match", () => {
       refresh(true);
       const m = this.findMatches[this.findIndex];
-      if (!m) return step(1);
+      if (!m || m.kind !== "text") return;
       this.mutate(() => replaceMatch(m, replace.value), "slide");
       refresh(true);
       this.findIndex--;
       step(1);
     });
-    button("Replace all", "Replace every match", () => {
+    const replaceAllButton = button("Replace all", "Replace matching slide text", () => {
       let n = 0;
       this.mutate((d) => (n = replaceAll(d, this.findInput.value, replace.value, opts())));
       new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
       refresh();
     });
     button("×", "Close (Esc)", () => this.closeFind());
+    bar.append(preview);
     this.findInput.addEventListener("input", () => {
       refresh();
-      if (this.findMatches[this.findIndex]) this.showMatch(this.findMatches[this.findIndex]);
+      if (this.findMatches[this.findIndex]) show(this.findMatches[this.findIndex]);
     });
-    matchCase.addEventListener("change", () => refresh());
+    for (const box of [matchCase, notes, comments]) box.addEventListener("change", () => { refresh(); if (this.findMatches[this.findIndex]) show(this.findMatches[this.findIndex]); });
     bar.addEventListener("keydown", (e) => {
       if (e.key === "Escape") this.closeFind();
       else if (e.key === "Enter" && e.target === this.findInput) {
@@ -2250,6 +2286,8 @@ export class PptxView extends FileView {
         step(e.shiftKey ? -1 : 1);
       }
     });
+    this.flushNotes();
+    refresh();
     this.findInput.focus();
   }
 
@@ -2262,8 +2300,14 @@ export class PptxView extends FileView {
   }
 
   /** Go to a match's slide and highlight it (without taking focus from the find box). */
-  private showMatch(m: Match): void {
+  private showMatch(m: SlideSearchMatch): void {
     if (m.slide !== this.index) this.goTo(m.slide);
+    this.findInput.focus({ preventScroll: true });
+    if ("highlights" in CSS) highlights().delete("dw-find");
+    if (m.kind !== "text") {
+      if (m.kind === "notes") this.notesEl.setSelectionRange(m.start, m.end);
+      return;
+    }
     const rs = this.rendered.find((r) => r.shape.el === m.owner && r.textEl);
     const body = Array.from(m.owner.getElementsByTagNameNS("*", "txBody"))[0];
     const paraIndex = Array.from(body?.children ?? []).filter((c) => c.localName === "p").indexOf(m.para);

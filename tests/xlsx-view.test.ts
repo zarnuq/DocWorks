@@ -5,6 +5,8 @@ import { App, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { XlsxView } from "../src/presentation/xlsx/xlsx-view";
 import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
+import { addComment } from "../src/domain/xlsx/comments";
+import { setNote } from "../src/domain/xlsx/notes";
 import { xlsx } from "./xlsx-fixtures";
 
 afterEach(() => {
@@ -37,6 +39,36 @@ async function mount() {
 const reopen = async (data: ArrayBuffer) => Workbook.open(await XlsxWorkbook.load(new Uint8Array(data)));
 
 describe("XlsxView", () => {
+  it("finds notes and replies in empty cells, opens the matching message and excludes annotations from replace", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    const [a, b] = v.wb.sheets;
+    setNote(v.wb.pkg, a.ref.path, 'Z99', 'needle note', 'Author');
+    const id = addComment(v.edits, b, 'Y98', 'needle root', 'Author');
+    addComment(v.edits, b, 'Y98', 'reply needle', 'Reply author', id);
+    v.openFind();
+    const bar = view.contentEl.querySelector<HTMLElement>('.xlsx-find')!;
+    bar.querySelector<HTMLInputElement>('[aria-label="Search all sheets"]')!.click();
+    const input = bar.querySelector<HTMLInputElement>('input[type=search]')!;
+    input.value = 'needle'; input.dispatchEvent(new Event('input'));
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('1 of 3');
+    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Data!Z99 · Note');
+    const buttons = () => Array.from(bar.querySelectorAll<HTMLButtonElement>('button'));
+    expect(buttons().find(b => b.textContent === 'Replace')!.disabled).toBe(true);
+    expect(buttons().find(b => b.textContent === 'Replace all')!.disabled).toBe(true);
+    for (let i = 0; i < 2; i++) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(view.contentEl.querySelector('.xlsx-tab.is-active')!.textContent).toBe('Totals');
+    expect(bar.querySelector('.dw-find-source')!.textContent).toContain('Reply author');
+    expect(document.activeElement).toBe(input);
+    buttons().find(b => b.textContent === 'Open comment')!.click();
+    expect(document.querySelector('.xlsx-comment-text mark')!.textContent).toBe('needle');
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.test-modal button')).find(b => b.textContent === 'Close')!.click();
+    bar.querySelector<HTMLInputElement>('[aria-label="Search comments"]')!.click();
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('1 of 1');
+    bar.querySelector<HTMLInputElement>('[aria-label="Search cell notes"]')!.click();
+    expect(bar.querySelector('.pptx-find-count')!.textContent).toBe('No results');
+    await view.onUnloadFile(file);
+  });
   it("opens a workbook: cells, sheet tabs and the formula bar for the first cell below frozen rows", async () => {
     const { view } = await mount();
     const el = view.contentEl;
@@ -114,10 +146,13 @@ describe("XlsxView", () => {
     bar.querySelectorAll<HTMLInputElement>("input[type=checkbox]")[3].click(); // all sheets
     input.value = "SUM";
     bar.querySelectorAll<HTMLInputElement>("input[type=checkbox]")[2].click(); // formulas
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(view.contentEl.querySelector<HTMLInputElement>(".xlsx-name-box")!.value).toBe("A5");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(view.contentEl.querySelector(".xlsx-tab.is-active")!.textContent).toBe("Totals");
     expect(view.contentEl.querySelector<HTMLInputElement>(".xlsx-name-box")!.value).toBe("B1");
+    expect(document.activeElement).toBe(input);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(view.contentEl.querySelector(".xlsx-tab.is-active")!.textContent).toBe("Data");
   });
 });
 

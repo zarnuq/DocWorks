@@ -343,6 +343,13 @@ class LatexParser {
     return xmlOf([this.atom()]);
   }
 
+  /** Operators consume a complete operand, including its scripts (unlike a TeX macro argument). */
+  private operand(): string {
+    const base = this.arg();
+    this.skipSpace();
+    return this.peek() === "_" || this.peek() === "^" ? this.scripts(base) : base;
+  }
+
   private group(): Item[] {
     this.i++; // {
     const items = this.seq();
@@ -402,7 +409,7 @@ class LatexParser {
     if (name in NARY) {
       const { sub, sup } = this.limits();
       const pr = tag("naryPr", prop("chr", NARY[name]), sub === null ? prop("subHide", "1") : "", sup === null ? prop("supHide", "1") : "");
-      return { xml: tag("nary", pr, tag("sub", sub ?? ""), tag("sup", sup ?? ""), tag("e", this.arg())) };
+      return { xml: tag("nary", pr, tag("sub", sub ?? ""), tag("sup", sup ?? ""), tag("e", this.operand())) };
     }
     if (name === "left") {
       const beg = this.delimiter();
@@ -436,7 +443,7 @@ class LatexParser {
       this.i++;
       fName = tag("limLow", tag("e", fName), tag("lim", this.arg()));
     }
-    return tag("func", tag("fName", fName), tag("e", this.arg()));
+    return tag("func", tag("fName", fName), tag("e", this.operand()));
   }
 
   private environment(env: string): string {
@@ -479,6 +486,21 @@ export function latexToOmml(latex: string, display = false): string {
   const ns = `xmlns:m="${M}" xmlns:w="${W}"`;
   const one = (src: string) => xmlOf(new LatexParser(src).seq());
   if (!display) return `<m:oMath ${ns}>${one(latex)}</m:oMath>`;
-  const lines = latex.split(/\\\\(?![^{]*\})/);
+  const lines: string[] = [];
+  let start = 0, braces = 0, environments = 0;
+  for (let i = 0; i < latex.length; i++) {
+    if (latex[i] === "\\") {
+      const environment = /^\\(begin|end)\{[^}]*\}/.exec(latex.slice(i));
+      if (environment) {
+        environments = Math.max(0, environments + (environment[1] === "begin" ? 1 : -1));
+        i += environment[0].length - 1;
+      } else if (latex[i + 1] === "\\") {
+        if (!braces && !environments) { lines.push(latex.slice(start, i)); start = i + 2; }
+        i++;
+      } else i++; // Escaped braces are delimiters, not groups.
+    } else if (latex[i] === "{") braces++;
+    else if (latex[i] === "}") braces = Math.max(0, braces - 1);
+  }
+  lines.push(latex.slice(start));
   return `<m:oMathPara ${ns}>${lines.map((l) => tag("oMath", one(l))).join("")}</m:oMathPara>`;
 }

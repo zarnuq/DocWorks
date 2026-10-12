@@ -2,6 +2,10 @@
 import { Change } from "./calculation";
 import { Edits } from "./commands";
 import { Sheet } from "./workbook-model";
+import { notesOf } from "./notes";
+import { commentsOf } from "./comments";
+import { parseRange } from "./references";
+import { textMatches, TextMatch } from "../../core/utils/text-matches";
 
 export interface FindOptions {
   matchCase?: boolean;
@@ -9,6 +13,35 @@ export interface FindOptions {
   entire?: boolean;
   /** Search formula text instead of results. */
   formulas?: boolean;
+  notes?: boolean;
+  comments?: boolean;
+}
+
+export type SheetSearchMatch = ({ kind: "cell" } & CellMatch) | (CellMatch & TextMatch & {
+  kind: "note" | "comment";
+  text: string;
+  author: string;
+  messageId?: string;
+  resolved?: boolean;
+});
+
+/** Annotation-only cells are included even when they have no stored value. */
+export function findSheetMatches(sheets: Sheet[], query: string, o: FindOptions = {}): SheetSearchMatch[] {
+  if (!query) return [];
+  const out: SheetSearchMatch[] = [];
+  for (const sheet of sheets) {
+    const hits: SheetSearchMatch[] = findCells([sheet], query, o).map(m => ({ ...m, kind: "cell" }));
+    const add = (ref: string, text: string, author: string, kind: "note" | "comment", messageId?: string, resolved?: boolean) => {
+      const range = parseRange(ref);
+      if (!range) return;
+      hits.push(...textMatches(text, query, o.matchCase, o.entire).map(m => ({ ...m, sheet, row: range.r1, col: range.c1, kind, text, author, messageId, resolved })));
+    };
+    if (o.notes) for (const [ref, note] of notesOf(sheet.wb.pkg, sheet.ref.path)) add(ref, note.text, note.author, "note");
+    if (o.comments) for (const [ref, threads] of commentsOf(sheet.wb.pkg, sheet.ref.path)) for (const thread of threads) for (const message of thread.messages) add(ref, message.text, message.author, "comment", message.id, thread.resolved);
+    hits.sort((a, b) => a.row - b.row || a.col - b.col);
+    out.push(...hits);
+  }
+  return out;
 }
 
 export interface CellMatch {

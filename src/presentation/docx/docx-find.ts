@@ -5,6 +5,14 @@
 import { Node as PMNode } from "prosemirror-model";
 import { Command, Plugin, PluginKey, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { DocxDocument, DocxComment } from "../../infrastructure/docx/docx-document";
+import { textMatches, TextMatch } from "../../core/utils/text-matches";
+
+export type CommentMatch = TextMatch & { comment: DocxComment };
+export function findCommentMatches(doc: DocxDocument, query: string, matchCase: boolean): CommentMatch[] {
+  if (!query) return [];
+  return doc.comments().flatMap(comment => textMatches(comment.text, query, matchCase).map(match => ({ ...match, comment })));
+}
 
 export interface Range {
   from: number;
@@ -88,7 +96,7 @@ export function setFind(tr: Transaction, query: string, matchCase: boolean, curr
 
 function build(doc: PMNode, query: string, matchCase: boolean, current: number): FindState {
   const matches = findRanges(doc, query, matchCase);
-  const cur = matches.length ? Math.min(Math.max(current, 0), matches.length - 1) : -1;
+  const cur = matches.length && current >= 0 ? Math.min(current, matches.length - 1) : -1;
   const decos = matches.map((r, i) =>
     Decoration.inline(r.from, r.to, { class: i === cur ? "docx-find-hit is-current" : "docx-find-hit" }, { current: i === cur })
   );

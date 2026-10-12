@@ -59,15 +59,17 @@ export class FileView {
     this.app = leaf.app;
   }
   registerEvent(_ref: unknown) {}
+  onPaneMenu(_menu: Menu, _source: string) {}
 }
 
 export class Notice {
-  constructor(public message: string) {}
+  constructor(public message: string, _duration?: number) {}
+  hide() {}
 }
 
 export class Menu {
   addItem(cb: Fn) {
-    const item: any = { setTitle: () => item, setIcon: () => item, onClick: () => item, setChecked: () => item, setDisabled: () => item };
+    const item: any = { setTitle: () => item, setIcon: () => item, setSection: () => item, onClick: () => item, setChecked: () => item, setDisabled: () => item };
     cb(item);
     return this;
   }
@@ -98,13 +100,22 @@ export class Setting {
   setName(name: string) { this.settingEl.createDiv({ cls: "setting-item-name", text: name }); return this; }
   setDesc() { return this; }
   setHeading() { return this; }
-  private control(cb: Fn) {
-    const c: any = { setValue: () => c, onChange: () => c, addOptions: () => c, setPlaceholder: () => c, setLimits: () => c, inputEl: this.settingEl.createEl("input") };
+  private control(cb: Fn, kind = "text") {
+    const input = kind === "select" ? this.settingEl.createEl("select") : this.settingEl.createEl("input", { type: kind });
+    const c: any = {
+      setValue: (value: any) => { if (kind === "checkbox") (input as HTMLInputElement).checked = value; else input.value = String(value); return c; },
+      onChange: (fn: Fn) => { input.addEventListener("change", () => fn(kind === "checkbox" ? (input as HTMLInputElement).checked : kind === "range" ? Number(input.value) : input.value)); return c; },
+      addOptions: (options: Record<string, string>) => { for (const [value, text] of Object.entries(options)) input.createEl("option", { value, text }); return c; },
+      setPlaceholder: () => c,
+      setLimits: (min: number, max: number, step: number) => { Object.assign(input, { min: String(min), max: String(max), step: String(step) }); return c; },
+      setDynamicTooltip: () => c, inputEl: input,
+    };
     cb(c);
     return this;
   }
-  addToggle(cb: Fn) { return this.control(cb); }
-  addDropdown(cb: Fn) { return this.control(cb); }
+  addToggle(cb: Fn) { return this.control(cb, "checkbox"); }
+  addDropdown(cb: Fn) { return this.control(cb, "select"); }
+  addSlider(cb: Fn) { return this.control(cb, "range"); }
   addText(cb: Fn) { return this.control(cb); }
   addButton(cb: Fn) {
     const el = this.settingEl.createEl("button");
@@ -124,3 +135,13 @@ export class Component {
   onunload() {}
   register(_cb: () => unknown) {}
 }
+
+export const MarkdownRenderer = {
+  async render(_app: App, _markdown: string, _el: HTMLElement, _source: string, _component: Component) {},
+};
+export async function finishRenderMath() {}
+export function parseLinktext(link: string) {
+  const hash = link.indexOf("#");
+  return hash < 0 ? { path: link, subpath: "" } : { path: link.slice(0, hash), subpath: link.slice(hash) };
+}
+export function resolveSubpath(_cache: unknown, _subpath: string): any { return null; }

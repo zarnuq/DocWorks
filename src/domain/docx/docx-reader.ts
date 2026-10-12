@@ -248,7 +248,9 @@ class Reader {
   private sdt(el: Element): PMNode {
     const gallery = wVal(w(el, "sdtPr")?.getElementsByTagNameNS(NS.w, "docPartGallery")[0]);
     const kind = gallery?.includes("Table of Contents") ? "toc" : "other";
-    return this.keyed(el, (key) => schema.nodes.sdt.create({ key, kind }, this.blocks(w(el, "sdtContent")!)));
+    const shell = el.cloneNode(true) as Element;
+    w(shell, "sdtContent")?.remove();
+    return this.keyed(el, (key) => schema.nodes.sdt.create({ key, kind, xml: xmlOf(shell) }, this.blocks(w(el, "sdtContent")!)));
   }
 
   private raw(el: Element): PMNode {
