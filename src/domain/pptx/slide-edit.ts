@@ -10,8 +10,10 @@ import { fitTable } from "./table";
 export type ParaInput = Pick<Para, "runs" | "align" | "lvl" | "bullet"> & Partial<Pick<Para, "lnSpc" | "spcBef" | "spcAft">>;
 
 const RUN_TAGS = new Set(["r", "br", "fld"]);
-const RUN_KEYS: (keyof Run)[] = ["text", "b", "i", "u", "strike", "sz", "color", "font", "spc", "cap", "link", "field"];
-const sameRun = (a: Run, b: Run) => RUN_KEYS.every((k) => String(a[k] ?? "").toUpperCase() === String(b[k] ?? "").toUpperCase());
+const RUN_KEYS: (keyof Run)[] = ["text", "b", "i", "u", "strike", "sz", "color", "font", "spc", "cap", "link", "field", "highlight"];
+const sameRun = (a: Run, b: Run) => RUN_KEYS.every((k) => String(a[k] ?? "").toUpperCase() === String(b[k] ?? "").toUpperCase()) && (a.baseline ?? 0) === (b.baseline ?? 0);
+/** Children of a:rPr that come after a:highlight. */
+const AFTER_HIGHLIGHT = new Set(["uLnTx", "uLn", "uFillTx", "uFill", "latin", "ea", "cs", "sym", "hlinkClick", "hlinkMouseOver", "rtl", "extLst"]);
 const BULLET_TAGS = new Set(["buNone", "buAutoNum", "buChar", "buBlip"]);
 /** a:pPr children in schema order (bullet color/size/font and the bullet itself share slots). */
 const PPR_ORDER = ["lnSpc", "spcBef", "spcAft", "buClrTx", "buClr", "buSzTx", "buSzPct", "buSzPts", "buFontTx", "buFont", "bullet", "tabLst", "defRPr", "extLst"];
@@ -53,6 +55,18 @@ function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>
     else rPr.removeAttribute("spc");
   }
   if (run.cap !== base.cap) rPr.setAttribute("cap", run.cap);
+  if ((run.baseline ?? 0) !== (base.baseline ?? 0)) {
+    if (run.baseline) rPr.setAttribute("baseline", String(Math.round(run.baseline * 1000)));
+    else rPr.removeAttribute("baseline");
+  }
+  if ((run.highlight ?? null)?.toUpperCase() !== (base.highlight ?? null)?.toUpperCase()) {
+    childNS(rPr, NS.a, "highlight")?.remove();
+    if (run.highlight) {
+      const mark = el(doc, "highlight");
+      mark.appendChild(el(doc, "srgbClr")).setAttribute("val", run.highlight.replace("#", "").toUpperCase());
+      insertBeforeFirst(rPr, mark, AFTER_HIGHLIGHT);
+    }
+  }
   if (run.link !== base.link) {
     childNS(rPr, NS.a, "hlinkClick")?.remove();
     if (run.link && style.links) {

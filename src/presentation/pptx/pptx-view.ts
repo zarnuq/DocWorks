@@ -41,6 +41,7 @@ import { pickImage } from "../common/images";
 import { findSlideMatches, SlideSearchMatch, replaceAll, replaceMatch } from "../../domain/pptx/find";
 import { showFindPreview } from "../common/find-preview";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
+import { runEditCommand } from "../common/spelling";
 import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { SaveStatus } from "../common/save-status";
@@ -1801,6 +1802,14 @@ export class PptxView extends FileView {
     });
   }
 
+  /** Superscript (30% up) / subscript (25% down), as PowerPoint and Google Slides set them; again turns it off. */
+  private toggleBaseline(shift: number): void {
+    this.withText((rs, el) => {
+      const current = selectionRunProps(el, rs.pxPerPt, this.defaultsFor(rs))?.baseline ?? 0;
+      applyRunStyle(el, { baseline: current === shift ? 0 : shift }, rs.pxPerPt);
+    });
+  }
+
   private setRunStyle(patch: Partial<RunProps>): void {
     this.withText((rs, el) => applyRunStyle(el, patch, rs.pxPerPt));
   }
@@ -2619,6 +2628,7 @@ export class PptxView extends FileView {
     tb.icon("image", "Insert image from file", () => pickImage((file) => void this.insertImageFile(file)));
     const shapesBtn = btn("Shapes ▾", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
     tb.icon("table", "Insert table", () => void this.insertTable());
+    tb.icon("link", "Insert link (Ctrl+K)", () => void this.editLink());
     tb.icon("message-square", "Comments on this slide", () => this.commentsDialog());
     sep();
     this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => this.setRunStyle({ font }));
@@ -2629,6 +2639,7 @@ export class PptxView extends FileView {
     btn("I", "Italic (Ctrl+I)", () => this.toggle("i"), "italic");
     btn("U", "Underline (Ctrl+U)", () => this.toggle("u"), "underline");
     tb.color("A", "Text color", "#000000", (color) => this.setRunStyle({ color }));
+    tb.color("HL", "Highlight color", "#FFFF00", (highlight) => this.setRunStyle({ highlight }));
     sep();
     tb.iconSelect("align-left", "Align", ALIGNS.map(([label, a]) => [label, a]), (v) => align(v as Align));
     tb.iconSelect("unfold-vertical", "Line spacing", LINE_SPACINGS.map((v) => [v, v]), lineSpacing);
@@ -2667,6 +2678,9 @@ export class PptxView extends FileView {
       menuItem(mn, "Cut", () => void this.cutSelection(), { disabled: !has });
       menuItem(mn, "Copy", () => void this.copySelection(), { disabled: !has });
       menuItem(mn, "Paste", () => this.paste(), { disabled: !clipboard });
+      // In a text box: the clipboard's plain text; otherwise as Paste.
+      menuItem(mn, "Paste without formatting", () => (activeDocument.activeElement?.closest(".pptx-text") ? void runEditCommand("pasteAndMatchStyle") : this.paste()));
+      menuItem(mn, "Select all", () => this.setSelection(this.slideItems()));
       menuItem(mn, "Delete", () => this.deleteSelected(), { disabled: !has });
       mn.addSeparator();
       menuItem(mn, "Find and replace", () => this.openFind());
@@ -2703,6 +2717,9 @@ export class PptxView extends FileView {
         menuItem(s, "Italic", () => this.toggle("i"));
         menuItem(s, "Underline", () => this.toggle("u"));
         menuItem(s, "Strikethrough", () => this.toggle("strike"));
+        menuItem(s, "Superscript", () => this.toggleBaseline(30));
+        menuItem(s, "Subscript", () => this.toggleBaseline(-25));
+        menuItem(s, "Remove highlight", () => this.setRunStyle({ highlight: null }));
       });
       subMenu(mn, "Align", (s) => {
         for (const [label, a] of ALIGNS) menuItem(s, label, () => align(a));
@@ -2738,6 +2755,10 @@ export class PptxView extends FileView {
       });
       menuItem(mn, "Group", () => this.groupSelection(), { disabled: this.items.length < 2 });
       menuItem(mn, "Ungroup", () => this.ungroupSelection(), { disabled: !this.items.some((i) => i.localName === "grpSp") });
+    });
+    tb.menu("Tools", (mn) => {
+      menuItem(mn, "Paint format", () => this.startPainting(false));
+      menuItem(mn, "Find and replace", () => this.openFind());
     });
 
     const end = tb.end();

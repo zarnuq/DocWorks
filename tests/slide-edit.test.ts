@@ -216,3 +216,24 @@ describe("shape geometry and insertion", () => {
     expect(pic.rect).toEqual({ x: 5, y: 6, w: 7, h: 8 });
   });
 });
+
+describe("superscript, subscript and highlight", () => {
+  it("writes a:rPr baseline and a:highlight (in schema order) and reads them back", async () => {
+    const { shape, reparse } = await shapeOn(2, "TextBox 1");
+    edit(shape, (p) => {
+      p[0].runs[0] = { ...p[0].runs[0], baseline: 30, highlight: "#FFFF00", color: "#FF0000" };
+    });
+    const rPr = rPrs(shape)[0];
+    expect(rPr.getAttribute("baseline")).toBe("30000");
+    const names = Array.from(rPr.children).map((c) => c.localName);
+    expect(names.indexOf("highlight")).toBeGreaterThan(names.indexOf("solidFill"));
+    if (names.includes("latin")) expect(names.indexOf("highlight")).toBeLessThan(names.indexOf("latin"));
+    expect(rPr.getElementsByTagNameNS(A, "highlight")[0].firstElementChild!.getAttribute("val")).toBe("FFFF00");
+    expect(reparse().text!.paras[0].runs[0]).toMatchObject({ baseline: 30, highlight: "#FFFF00" });
+    edit(reparse(), (p) => {
+      p[0].runs[0] = { ...p[0].runs[0], baseline: 0, highlight: null };
+    });
+    expect(rPrs(reparse())[0].hasAttribute("baseline")).toBe(false);
+    expect(rPrs(reparse())[0].getElementsByTagNameNS(A, "highlight")).toHaveLength(0);
+  });
+});

@@ -290,6 +290,22 @@ export class Edits {
     });
   }
 
+  /** Set each cell's style: paint format tiles the copied styles over the range, clear formatting sets the default (0). */
+  restyle(sheet: Sheet, r: Rect, styleAt: (row: number, col: number) => number): void {
+    assertAction(sheet, "formatCells");
+    const area = this.formatArea(sheet, r);
+    if (!area) return;
+    this.run(() => {
+      for (let row = area.r1; row <= area.r2; row++) {
+        for (let col = area.c1; col <= area.c2; col++) {
+          const to = styleAt(row, col);
+          if ((sheet.at(row, col)?.style ?? 0) !== to) sheet.setCell(row, col, { style: to });
+        }
+      }
+      return [];
+    });
+  }
+
   /** The value a toggle (bold, italic, ...) should get: the opposite of the range's first cell. */
   toggled(sheet: Sheet, r: Rect, key: "bold" | "italic" | "underline" | "strike" | "wrap"): boolean {
     return !this.wb.styles.format(sheet.at(r.r1, r.c1)?.style ?? 0)[key];

@@ -174,3 +174,21 @@ describe("saving", () => {
     expect(wb.pkg.workbook.getElementsByTagNameNS(S, "calcPr")[0].getAttribute("fullCalcOnLoad")).toBeNull();
   });
 });
+
+describe("restyle (paint format, clear formatting)", () => {
+  it("tiles copied styles over a range and clears formatting back to the default, undoably", async () => {
+    const e = await setup();
+    const s = e.wb.sheets[0];
+    e.format(s, rect(1, 0), { bold: true });
+    e.format(s, rect(2, 0), { italic: true });
+    const [bold, italic] = [s.at(1, 0)!.style, s.at(2, 0)!.style];
+    // Paint A2:A3 onto D1:D4: bold, italic, bold, italic.
+    e.restyle(s, rect(0, 3, 3, 3), (row) => (row % 2 === 0 ? bold : italic));
+    expect([0, 1, 2, 3].map((r) => s.at(r, 3)?.style)).toEqual([bold, italic, bold, italic]);
+    e.undo();
+    expect([0, 1, 2, 3].map((r) => s.at(r, 3)?.style ?? 0)).toEqual([0, 0, 0, 0]);
+    e.restyle(s, rect(1, 0, 2, 0), () => 0);
+    expect([s.at(1, 0)!.style, s.at(2, 0)!.style]).toEqual([0, 0]);
+    expect(s.at(1, 0)!.value).toBe(10);
+  });
+});

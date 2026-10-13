@@ -185,6 +185,9 @@ export class XlsxView extends FileView {
   // Lifecycle
   // ---------------------------------------------------------------------------
 
+  private painter: { styles: number[][]; sticky: boolean } | null = null;
+  private brushBtn: HTMLButtonElement | null = null;
+
   async onLoadFile(file: TFile): Promise<void> {
     this.stopFocusReturn?.();
     this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(XlsxView) === this, () => this.grid?.focusGrid());
@@ -246,6 +249,11 @@ export class XlsxView extends FileView {
     input.addEventListener("copy", (e) => this.onCopy(e, false));
     input.addEventListener("cut", (e) => this.onCopy(e, true));
     input.addEventListener("paste", (e) => this.onPaste(e));
+    // Paint format lands on the range selected next, when the mouse is released (as in Google Sheets).
+    this.grid.el.addEventListener("mouseup", () => this.paintSelection());
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.painter) this.stopPainting();
+    });
     this.setTheme(this.theme);
     this.renderTabs();
     const frozen = this.sheet.frozen;
@@ -303,6 +311,30 @@ export class XlsxView extends FileView {
   // ---------------------------------------------------------------------------
 
   /** Run an edit; report errors (like a malformed formula) instead of throwing; redraw and save. */
+  /** Tools › Paint format: copy the selected cells' formatting (double-click: keep painting until Escape). */
+  private startPainting(sticky: boolean): void {
+    if (!this.grid) return;
+    const sel = this.grid.selection(), used = this.sheet.used();
+    const r2 = Math.min(sel.r2, Math.max(sel.r1, used?.r2 ?? sel.r1)), c2 = Math.min(sel.c2, Math.max(sel.c1, used?.c2 ?? sel.c1));
+    const styles = Array.from({ length: r2 - sel.r1 + 1 }, (_, i) => Array.from({ length: c2 - sel.c1 + 1 }, (_, j) => this.sheet.at(sel.r1 + i, sel.c1 + j)?.style ?? 0));
+    this.painter = { styles, sticky };
+    this.brushBtn?.addClass("is-active");
+    this.grid.focusGrid();
+  }
+
+  private stopPainting(): void {
+    this.painter = null;
+    this.brushBtn?.removeClass("is-active");
+  }
+
+  private paintSelection(): void {
+    const painter = this.painter;
+    if (!painter || !this.grid) return;
+    const t = this.grid.selection(), h = painter.styles.length, w = painter.styles[0].length;
+    this.change(() => this.edits!.restyle(this.sheet, t, (row, col) => painter.styles[(row - t.r1) % h][(col - t.c1) % w]));
+    if (!painter.sticky) this.stopPainting();
+  }
+
   private change(fn: () => void): boolean {
     if (!this.edits) return false;
     try {
@@ -978,6 +1010,8 @@ export class XlsxView extends FileView {
     // --- The row: everyday controls, as Google Sheets' toolbar ---
     tb.icon("undo-2", "Undo (Ctrl+Z)", () => this.undo());
     tb.icon("redo-2", "Redo (Ctrl+Y)", () => this.redo());
+    const brush = (this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false)));
+    brush.addEventListener("dblclick", () => this.startPainting(true));
     tb.pin();
     tb.gap();
     const zoom = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [`${Math.round(Number(z) * 100)}%`, z]), zoomTo);
@@ -1033,6 +1067,8 @@ export class XlsxView extends FileView {
       menuItem(m, "Copy", () => this.editCommand("copy"));
       menuItem(m, "Paste", () => this.editCommand("paste"));
       menuItem(m, "Paste values only", () => this.editCommand("paste", true));
+      menuItem(m, "Select all", () => this.grid?.selectAll());
+      menuItem(m, "Delete", () => this.grid && this.change(() => this.edits!.clear(this.sheet, this.grid!.selection())));
       m.addSeparator();
       menuItem(m, "Find and replace", () => this.openFind());
     });
@@ -1078,6 +1114,8 @@ export class XlsxView extends FileView {
       menuItem(m, "Merge cells", () => this.mergeToggle());
       m.addSeparator();
       menuItem(m, "Conditional formatting", () => this.conditionalDialog());
+      m.addSeparator();
+      menuItem(m, "Clear formatting", () => this.grid && this.change(() => this.edits!.restyle(this.sheet, this.grid!.selection(), () => 0)));
     });
     menu("Data", (m) => {
       const r = this.sel;
@@ -1094,6 +1132,10 @@ export class XlsxView extends FileView {
       this.groupItems(m, "col", r.c1, r.c2);
       m.addSeparator();
       menuItem(m, "Import CSV as new sheet…", () => this.pickCsv());
+    });
+    menu("Tools", (m) => {
+      menuItem(m, "Paint format", () => this.startPainting(false));
+      menuItem(m, "Find and replace", () => this.openFind());
     });
 
     this.saveStatus = tb.end().status;

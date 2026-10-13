@@ -687,6 +687,41 @@ describe("File menu (⋮ More options)", () => {
   });
 });
 
+describe("Slides text: superscript, subscript, highlight", () => {
+  it("toggles superscript / subscript from Format › Text and highlights from the toolbar", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "sup.pptx");
+    const v = view as any;
+    const shape = v.rendered.find((r: any) => r.textEl && !r.shape.inherited && r.textEl.textContent.trim());
+    v.setSelection([shape.shape.el], shape.shape.el);
+    const textEl = () => v.rendered.find((r: any) => r.shape.el === shape.shape.el).textEl as HTMLElement;
+    expect(menuTitles(view, "Format")).toContain("Text");
+    runMenu(view, "Format", "Text", "Superscript");
+    expect(textEl().querySelector('[data-baseline="30"]')).not.toBeNull();
+    runMenu(view, "Format", "Text", "Subscript");
+    expect(textEl().querySelector('[data-baseline="-25"]')).not.toBeNull();
+    runMenu(view, "Format", "Text", "Subscript");
+    expect(textEl().querySelector('[data-baseline="-25"]')).toBeNull();
+    const highlight = view.contentEl.querySelector<HTMLInputElement>('input[aria-label="Highlight color"]')!;
+    highlight.value = "#ffff00";
+    highlight.dispatchEvent(new Event("change"));
+    expect(textEl().querySelector('[data-highlight="#FFFF00"]')).not.toBeNull();
+    await view.onUnloadFile(file);
+  });
+});
+
+describe("Edit › Select all", () => {
+  it("selects every object on the slide", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "select-all.pptx");
+    const v = view as any;
+    runMenu(view, "Edit", "Select all");
+    expect(v.items.length).toBe(v.slideItems().length);
+    expect(v.items.length).toBeGreaterThan(0);
+    await view.onUnloadFile(file);
+  });
+});
+
 describe("DocxView zoom and panels", () => {
   it("zooms the page from View › Zoom and the toolbar, as Slides and Sheets do; Fit fits the page to the pane", async () => {
     const view = mount(DocxView, "sample.docx");
@@ -1018,8 +1053,8 @@ describe("editor accessibility", () => {
     expect(pm.getAttribute("aria-label")).toBeNull();
     expect(document.getElementById(pm.getAttribute("aria-labelledby")!)?.textContent).toBe("Document content");
     for (const input of Array.from(view.contentEl.querySelectorAll('input[type="color"]'))) expect(input.getAttribute("aria-label")).toBeTruthy();
-    expect(menuTitles(view, "View")).toContain("Light paper");
-    expect(Menu.last!.items.find((i) => i.title === "Light paper")!.checked).toBe(true);
+    expect(menuTitles(view, "View")).toContain("Light");
+    expect(Menu.last!.items.find((i) => i.title === "Light")!.checked).toBe(true);
     await view.onUnloadFile(file);
   });
 });
@@ -1050,7 +1085,10 @@ describe("PptxView menus", () => {
   it("has Google's menus with every command", async () => {
     const view = mount(PptxView, "sample.pptx");
     const file = await open(view, "menus.pptx");
-    expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Slide", "Arrange"]);
+    expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Slide", "Arrange", "Tools"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
+    expect(view.contentEl.querySelector('.dw-toolbar [aria-label^="Insert link"]')).not.toBeNull();
     expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "Grid view", "Format panel", "Zoom", "Light", "Dark"]);
     expect(menuTitles(view, "Insert")).toEqual(["Text box", "Image", "Audio or video", "Shape", "Table", "Chart", "Link", "Field", "Comment", "New slide"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Align", "Line spacing", "Character spacing", "Bullets", "Numbering", "Clear formatting"]);
@@ -1384,8 +1422,8 @@ describe("DocxView menus", () => {
     const file = await open(view, "menus.docx");
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Tools"]);
     expect(menuTitles(view, "File")).toEqual(["Export…"]);
-    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Select all", "Find and replace"]);
-    expect(menuTitles(view, "View")).toEqual(["Editing", "Suggesting", "Page view", "Ruler", "Outline", "Review panel", "Zoom", "Light paper", "Dark paper"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "View")).toEqual(["Editing", "Suggesting", "Page view", "Ruler", "Outline", "Review panel", "Zoom", "Light", "Dark"]);
     expect(menuTitles(view, "Insert")).toEqual(["Image", "Table", "Drawing", "Equation", "Horizontal line", "Break", "Footnote", "Comment", "Link", "Table of contents", "Header & footer", "Watermark"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Paragraph style", "Align", "Line spacing", "Paragraph…", "Columns…", "Bulleted list", "Numbered list", "Clear formatting"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Word count", "Find and replace"]);
@@ -1401,11 +1439,11 @@ describe("DocxView menus", () => {
     runMenu(view, "Format", "Text", "Bold");
     expect(editor.state.doc.rangeHasMark(1, 4, editor.state.schema.marks.bold)).toBe(true);
     menuTitles(view, "View");
-    expect(Menu.last!.items.find((i) => i.title === "Light paper")!.checked).toBe(true);
-    runMenu(view, "View", "Dark paper");
+    expect(Menu.last!.items.find((i) => i.title === "Light")!.checked).toBe(true);
+    runMenu(view, "View", "Dark");
     expect(view.contentEl.hasClass("docx-theme-dark")).toBe(true);
     menuTitles(view, "View");
-    expect(Menu.last!.items.find((i) => i.title === "Dark paper")!.checked).toBe(true);
+    expect(Menu.last!.items.find((i) => i.title === "Dark")!.checked).toBe(true);
     await view.onUnloadFile(file);
   });
 

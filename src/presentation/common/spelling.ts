@@ -33,8 +33,8 @@ export function electronSpeller(): Speller | null {
 }
 
 /** Cut / copy / paste as the app's Edit menu does it (Electron runs the real clipboard command). */
-export function runEditCommand(command: "cut" | "copy" | "paste"): boolean {
-  if (!Platform.isDesktopApp) return command !== "paste" && activeDocument.execCommand(command);
+export function runEditCommand(command: "cut" | "copy" | "paste" | "pasteAndMatchStyle"): boolean {
+  if (!Platform.isDesktopApp) return command !== "paste" && command !== "pasteAndMatchStyle" && activeDocument.execCommand(command);
   const contents = (window.require("electron") as { remote: { getCurrentWebContents(): Record<typeof command, () => void> } }).remote.getCurrentWebContents();
   contents[command]();
   return true;

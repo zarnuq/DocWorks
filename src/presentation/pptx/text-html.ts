@@ -18,7 +18,9 @@ const CSS_ALIGN: Record<Align, string> = { l: "left", ctr: "center", r: "right",
 const FROM_CSS_ALIGN: Record<string, Align> = { left: "l", start: "l", center: "ctr", right: "r", end: "r", justify: "just" };
 const BLOCK = new Set(["P", "DIV", "LI", "H1", "H2", "H3", "H4", "H5", "H6"]);
 const EMU_PER_PT = 12700;
-const PROP_KEYS: (keyof RunProps)[] = ["b", "i", "u", "strike", "sz", "color", "font", "spc", "cap", "link"];
+const PROP_KEYS: (keyof RunProps)[] = ["b", "i", "u", "strike", "sz", "color", "font", "spc", "cap", "link", "baseline", "highlight"];
+/** A run property as compared: superscript and highlight are absent when off. */
+const propValue = (r: Partial<RunProps>, k: keyof RunProps) => (k === "baseline" ? (r.baseline ?? 0) : k === "highlight" ? (r.highlight ?? null) : r[k]);
 
 export type DefaultsFor = (lvl: number) => RunProps;
 
@@ -47,12 +49,21 @@ function styleRun(el: HTMLElement, props: Partial<RunProps>, pxPerPt: number, de
     el.dataset.link = props.link ?? "";
     el.classList.toggle("pptx-link", !!props.link);
   }
+  if (props.baseline !== undefined) {
+    el.dataset.baseline = String(props.baseline);
+    // Raised / lowered only: the run's size stays its own (an inline font-size here would replace it on reading back).
+    el.style.verticalAlign = props.baseline > 0 ? "super" : props.baseline < 0 ? "sub" : "baseline";
+  }
+  if (props.highlight !== undefined) {
+    el.dataset.highlight = props.highlight ?? "";
+    el.style.backgroundColor = props.highlight ?? "";
+  }
 }
 
 function diff(run: RunProps, base: RunProps): Partial<RunProps> {
   const out: Partial<RunProps> = {};
   for (const k of PROP_KEYS) {
-    if (String(run[k]).toUpperCase() !== String(base[k]).toUpperCase()) (out as Record<string, unknown>)[k] = run[k];
+    if (String(propValue(run, k)).toUpperCase() !== String(propValue(base, k)).toUpperCase()) (out as Record<string, unknown>)[k] = propValue(run, k);
   }
   if (out.u !== undefined || out.strike !== undefined) Object.assign(out, { u: run.u, strike: run.strike });
   return out;
@@ -210,11 +221,16 @@ function explicitProps(el: Element | null, stop: Element, pxPerPt: number): Part
       if (data.spc !== undefined) set("spc", Number(data.spc));
       if (data.cap === "none" || data.cap === "all" || data.cap === "small") set("cap", data.cap);
       if (data.link !== undefined && !("link" in out)) out.link = data.link || null;
+      if (data.baseline !== undefined && !("baseline" in out)) out.baseline = Number(data.baseline);
+      if (data.highlight !== undefined && !("highlight" in out)) out.highlight = data.highlight || null;
     }
     const size = style.fontSize;
     if (size.endsWith("px")) set("sz", Math.round((parseFloat(size) / pxPerPt) * 100) / 100);
     else if (size.endsWith("pt")) set("sz", parseFloat(size));
   }
+  // Off (0 / none) only needed to stop an outer span's; a run without them is plain.
+  if (!out.baseline) delete out.baseline;
+  if (!out.highlight) delete out.highlight;
   return out;
 }
 

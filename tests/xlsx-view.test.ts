@@ -483,10 +483,10 @@ describe("XlsxView keyboard", () => {
 describe("XlsxView menus", () => {
   it("has Google's menus; the data tools live in Data, not the row", async () => {
     const { view, file } = await mount();
-    expect(Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent)).toEqual(["File", "Edit", "View", "Insert", "Format", "Data"]);
+    expect(Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent)).toEqual(["File", "Edit", "View", "Insert", "Format", "Data", "Tools"]);
     expect(menuTitles(view, "File")).toEqual(["Export…", "Download sheet as CSV…"]);
     expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Chart", "Pivot table", "Function", "Comment", "Note", "Dropdown"]);
-    expect(menuTitles(view, "Format")).toEqual(["Number", "Text", "Alignment", "Wrap text", "Merge cells", "Conditional formatting"]);
+    expect(menuTitles(view, "Format")).toEqual(["Number", "Text", "Alignment", "Wrap text", "Merge cells", "Conditional formatting", "Clear formatting"]);
     expect(menuTitles(view, "Data")).toEqual(["Sort A → Z", "Sort Z → A", "Create a filter", "Data validation", "Remove duplicates…", "Split text to columns…", "Named ranges…", "Group rows 2 - 2", "Group columns A - A", "Import CSV as new sheet…"]);
     for (const l of ["Data", "Freeze", "Insert pivot table", "Conditional formatting", "Find and replace (Ctrl+F)"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).toBeNull();
     for (const l of ["Undo (Ctrl+Z)", "Number format", "Font", "Bold (Ctrl+B)", "Fill color", "Borders", "Horizontal align", "Wrap text", "Insert comment", "Insert chart", "Create or remove a filter", "Functions"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).not.toBeNull();
@@ -503,6 +503,37 @@ describe("XlsxView menus", () => {
     expect(view.contentEl.classList.contains("xlsx-theme-dark")).toBe(true);
     menuTitles(view, "View");
     expect(Menu.last!.items.find((i) => i.title === "Dark")!.checked).toBe(true);
+    await view.onUnloadFile(file);
+  });
+
+  it("has Select all, Delete and a Tools menu like the other editors", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste values only", "Select all", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
+    runMenu(view, "Edit", "Select all");
+    expect(v.grid.selection()).toMatchObject({ r1: 0, c1: 0, r2: 1048575, c2: 16383 });
+    v.grid.select({ row: 0, col: 0 });
+    runMenu(view, "Edit", "Delete");
+    expect(v.sheet.cell(0, 0)?.value ?? null).toBeNull();
+    await view.onUnloadFile(file);
+  });
+
+  it("paints format from Tools › Paint format onto the next range selected, and clears formatting", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 1, col: 0 });
+    v.toggle("bold");
+    const bold = v.sheet.at(1, 0).style;
+    runMenu(view, "Tools", "Paint format");
+    expect(view.contentEl.querySelector('[aria-label^="Paint format"]')!.classList.contains("is-active")).toBe(true);
+    v.grid.select({ row: 5, col: 3 }, { row: 6, col: 3 });
+    v.grid.el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect([v.sheet.at(5, 3)?.style, v.sheet.at(6, 3)?.style]).toEqual([bold, bold]);
+    expect(view.contentEl.querySelector('[aria-label^="Paint format"]')!.classList.contains("is-active")).toBe(false);
+    v.grid.select({ row: 1, col: 0 });
+    runMenu(view, "Format", "Clear formatting");
+    expect(v.sheet.at(1, 0).style).toBe(0);
     await view.onUnloadFile(file);
   });
 

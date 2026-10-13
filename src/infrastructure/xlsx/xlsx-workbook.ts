@@ -267,6 +267,16 @@ export class XlsxWorkbook extends OoxmlPackage {
   }
 
   /** Remove the sheet's comments part, its VML drawing and the sheet's link to it. */
+  /** A sheet's relationship to a web address (a cell hyperlink); returns its id. */
+  addLinkRel(sheetPath: string, url: string): string {
+    return this.addRel(sheetPath, "hyperlink", url, true);
+  }
+
+  /** Drop one of a sheet's relationships (a hyperlink no longer used). */
+  dropRel(sheetPath: string, rId: string): void {
+    this.removeRel(sheetPath, rId);
+  }
+
   removeComments(sheetPath: string): void {
     const comments = this.rels(sheetPath).find((r) => r.type === "comments");
     if (comments) {

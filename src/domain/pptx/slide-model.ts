@@ -33,6 +33,10 @@ export interface RunProps {
   link: string | null;
   /** Smallest size (pt) PowerPoint kerns at (a:rPr kern); absent or 0: no kerning. */
   kern?: number;
+  /** Superscript / subscript: the baseline shift in percent of the font size (a:rPr baseline / 1000); absent = 0. */
+  baseline?: number;
+  /** Text highlight (a:highlight), as #RRGGBB; absent = none. */
+  highlight?: string | null;
 }
 
 export interface Run extends RunProps {
@@ -186,6 +190,14 @@ function mergeRunProps(props: Partial<RunProps>, rPr: Element | null, style: Tex
   if (props.sz === undefined && rPr.hasAttribute("sz")) props.sz = Number(rPr.getAttribute("sz")) / 100;
   if (props.spc === undefined && rPr.hasAttribute("spc")) props.spc = Number(rPr.getAttribute("spc")) / 100;
   if (props.kern === undefined && rPr.hasAttribute("kern")) props.kern = Number(rPr.getAttribute("kern")) / 100;
+  if (props.baseline === undefined && rPr.hasAttribute("baseline")) {
+    const shift = Number(rPr.getAttribute("baseline")) / 1000;
+    if (shift) props.baseline = shift;
+  }
+  if (props.highlight === undefined) {
+    const mark = resolveColor(kid(rPr, NS.a, "highlight"), style.colors);
+    if (mark) props.highlight = mark;
+  }
   if (props.cap === undefined && rPr.hasAttribute("cap")) props.cap = (["all", "small"] as const).find((c) => c === rPr.getAttribute("cap")) ?? "none";
   const h = kid(rPr, NS.a, "hlinkClick");
   const links = style.links;

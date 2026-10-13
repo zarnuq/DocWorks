@@ -5,7 +5,7 @@ import { App, FileView, Menu, Modal, Notice, Scope, Setting, setIcon, TFile, Wor
 import { Command, EditorState, NodeSelection, Plugin, TextSelection } from "prosemirror-state";
 import { DOMSerializer, Node as PMNode } from "prosemirror-model";
 import { EditorView } from "prosemirror-view";
-import { selectAll, toggleMark } from "prosemirror-commands";
+import { deleteSelection, selectAll, toggleMark } from "prosemirror-commands";
 import { closeHistory, redo, undo } from "prosemirror-history";
 import { DocxDocument, HFType } from "../../infrastructure/docx/docx-document";
 import { Origins, readDocx, startsWordPage } from "../../domain/docx/docx-reader";
@@ -615,13 +615,14 @@ export class DocxView extends FileView {
       menuItem(mn, "Undo", () => run(undo));
       menuItem(mn, "Redo", () => run(redo));
       mn.addSeparator();
-      for (const [title, c] of [["Cut", "cut"], ["Copy", "copy"], ["Paste", "paste"]] as const) {
+      for (const [title, c] of [["Cut", "cut"], ["Copy", "copy"], ["Paste", "paste"], ["Paste without formatting", "pasteAndMatchStyle"]] as const) {
         menuItem(mn, title, () => {
           this.editor?.focus();
           if (!runEditCommand(c)) new Notice("Paste with your keyboard.");
         });
       }
       menuItem(mn, "Select all", () => run(selectAll));
+      menuItem(mn, "Delete", () => run(deleteSelection));
       mn.addSeparator();
       menuItem(mn, "Find and replace", () => this.openFind());
     });
@@ -637,8 +638,8 @@ export class DocxView extends FileView {
         for (const value of ZOOMS) menuItem(z, zoomLabel(value), () => this.setZoom(value), { checked: this.zoom === value });
       });
       mn.addSeparator();
-      menuItem(mn, "Light paper", () => this.setPaperTheme("light"), { checked: this.paperTheme === "light" });
-      menuItem(mn, "Dark paper", () => this.setPaperTheme("dark"), { checked: this.paperTheme === "dark" });
+      menuItem(mn, "Light", () => this.setPaperTheme("light"), { checked: this.paperTheme === "light" });
+      menuItem(mn, "Dark", () => this.setPaperTheme("dark"), { checked: this.paperTheme === "dark" });
     });
     tb.menu("Insert", (mn) => {
       menuItem(mn, "Image", () => pickImage((f) => void this.insertImage(f)));

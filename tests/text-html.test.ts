@@ -233,3 +233,21 @@ describe("insertPlainText", () => {
     expect(caret.startContainer.textContent).toBe("day");
   });
 });
+
+describe("superscript, subscript and highlight", () => {
+  it("draws and reads back a run's baseline and highlight, and sets them on a selection", () => {
+    renderParagraphs(host, [para([run("E=mc"), run("2", { baseline: 30 }), run(" H"), run("2", { baseline: -25 }), run("O", { highlight: "#FFFF00" })])], PX_PER_PT);
+    const spans = host.querySelectorAll("span");
+    expect((spans[1] as HTMLElement).style.verticalAlign).toBe("super");
+    expect((spans[3] as HTMLElement).style.verticalAlign).toBe("sub");
+    expect((spans[4] as HTMLElement).style.backgroundColor).not.toBe("");
+    expect(read()[0].runs).toEqual([run("E=mc"), run("2", { baseline: 30 }), run(" H"), run("2", { baseline: -25 }), run("O", { highlight: "#FFFF00" })]);
+    const t = spans[0].firstChild!;
+    select(t, 0, t, 1);
+    applyRunStyle(host, { baseline: 30, highlight: "#00FF00" }, PX_PER_PT);
+    expect(read()[0].runs[0]).toEqual(run("E", { baseline: 30, highlight: "#00FF00" }));
+    select(host.querySelector("span")!.firstChild!, 0, host.querySelector("span")!.firstChild!, 1);
+    applyRunStyle(host, { baseline: 0, highlight: null }, PX_PER_PT);
+    expect(read()[0].runs[0]).toEqual(run("E=mc"));
+  });
+});

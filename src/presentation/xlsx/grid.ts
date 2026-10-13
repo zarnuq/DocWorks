@@ -313,6 +313,11 @@ export class Grid {
     return p.row >= r.r1 && p.row <= r.r2 && p.col >= r.c1 && p.col <= r.c2;
   }
 
+  /** Ctrl+A / Edit › Select all: the whole sheet, the cursor staying where it is. */
+  selectAll(): void {
+    this.select({ row: 0, col: 0 }, { row: 1048575, col: 16383 }, this.active);
+  }
+
   select(anchor: Pos, focus: Pos = anchor, active: Pos = anchor): void {
     const clamp = (p: Pos) => ({ row: Math.max(0, Math.min(1048575, p.row)), col: Math.max(0, Math.min(16383, p.col)) });
     this.anchor = clamp(anchor);
@@ -1172,6 +1177,11 @@ export class Grid {
       return;
     }
 
+    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      this.selectAll();
+      return;
+    }
     const arrows: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
     if (arrows[e.key]) {
       e.preventDefault();
