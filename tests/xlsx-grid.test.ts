@@ -219,8 +219,8 @@ describe("grid pictures", () => {
   it("draws visible pictures over the cells with their image URL", async () => {
     const { grid, host } = await mount();
     host.pictures = () => [
-      { name: "logo", alt: "", image: "xl/media/a.png", x: 70, y: 30, w: 40, h: 20 },
-      { name: "far", alt: "", image: "xl/media/b.png", x: 90000, y: 90000, w: 40, h: 20 },
+      { key: "d#1", name: "logo", alt: "", image: "xl/media/a.png", x: 70, y: 30, w: 40, h: 20 },
+      { key: "d#2", name: "far", alt: "", image: "xl/media/b.png", x: 90000, y: 90000, w: 40, h: 20 },
     ];
     host.imageUrl = (p) => `blob:${p}`;
     grid.render();

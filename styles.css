@@ -2401,13 +2401,19 @@ textarea.pptx-notes {
   --xlsx-frozen: #5f6368;
 }
 
+/* A picture over the cells: click selects it (outlined; Delete removes it), drag moves it, the corner resizes it. */
 .xlsx-picture {
   position: absolute;
   left: var(--x);
   top: var(--y);
   width: var(--w);
   height: var(--h);
-  pointer-events: none;
+  cursor: move;
+}
+
+.xlsx-picture.is-selected {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
 }
 
 /* Drag a chart's bottom right corner to resize it. */
@@ -2595,6 +2601,7 @@ textarea.pptx-notes {
 .pptx-handle,
 .docx-image-handle,
 .xlsx-chart,
+.xlsx-picture,
 .xlsx-chart-handle {
   touch-action: none;
 }

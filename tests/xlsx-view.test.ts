@@ -485,7 +485,7 @@ describe("XlsxView menus", () => {
     const { view, file } = await mount();
     expect(Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent)).toEqual(["File", "Edit", "View", "Insert", "Format", "Data", "Tools"]);
     expect(menuTitles(view, "File")).toEqual(["Export…", "Download sheet as CSV…"]);
-    expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Chart", "Pivot table", "Function", "Comment", "Note", "Dropdown"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Image", "Chart", "Pivot table", "Function", "Link", "Comment", "Note", "Dropdown"]);
     expect(menuTitles(view, "Format")).toEqual(["Number", "Text", "Alignment", "Wrap text", "Merge cells", "Conditional formatting", "Clear formatting"]);
     expect(menuTitles(view, "Data")).toEqual(["Sort A → Z", "Sort Z → A", "Create a filter", "Data validation", "Remove duplicates…", "Split text to columns…", "Named ranges…", "Group rows 2 - 2", "Group columns A - A", "Import CSV as new sheet…"]);
     for (const l of ["Data", "Freeze", "Insert pivot table", "Conditional formatting", "Find and replace (Ctrl+F)"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).toBeNull();
@@ -534,6 +534,77 @@ describe("XlsxView menus", () => {
     v.grid.select({ row: 1, col: 0 });
     runMenu(view, "Format", "Clear formatting");
     expect(v.sheet.at(1, 0).style).toBe(0);
+    await view.onUnloadFile(file);
+  });
+
+  it("links a cell from Insert › Link: drawn as a link, Ctrl+click opens it, an empty address removes it", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    const opened = vi.spyOn(window, "open").mockImplementation(() => null);
+    v.grid.select({ row: 1, col: 1 });
+    const fill = async (value: string) => {
+      await new Promise((r) => setTimeout(r, 0));
+      const input = document.querySelector<HTMLInputElement>(".test-modal input")!;
+      input.value = value;
+      input.dispatchEvent(new Event("change"));
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".test-modal button")).find((b) => b.textContent === "Save")!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    };
+    runMenu(view, "Insert", "Link");
+    await fill("https://example.com/");
+    expect(v.links().get("B2")).toBe("https://example.com/");
+    expect(v.grid.host.conditional(1, 1)).toMatchObject({ underline: true });
+    expect(v.grid.host.openLink(1, 1)).toBe(true);
+    expect(opened).toHaveBeenCalledWith("https://example.com/");
+    expect(view.contentEl.querySelector('.dw-toolbar [aria-label="Insert link (Ctrl+K)"]')).not.toBeNull();
+    runMenu(view, "Insert", "Link");
+    await fill("");
+    expect(v.links().size).toBe(0);
+    await view.onUnloadFile(file);
+  });
+
+  it("inserts an image over the cells at the active cell (Insert › Image)", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 3, col: 2 });
+    const png = new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])], "Logo.png", { type: "image/png" });
+    await v.insertImageFile(png);
+    const pics = v.pictures();
+    expect(pics).toHaveLength(1);
+    expect(pics[0]).toMatchObject({ name: "Logo", x: v.sheet.colX(2), y: v.sheet.rowY(3) });
+    v.undo();
+    expect(v.pictures()).toHaveLength(0);
+    await view.onUnloadFile(file);
+  });
+
+  it("pastes a clipboard image (Ctrl+V of a screenshot) as a picture at the active cell", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 2, col: 1 });
+    const shot = new File([new Uint8Array([137, 80, 78, 71])], "image", { type: "image/png" });
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { getData: () => "", files: [shot] } });
+    v.grid.input.dispatchEvent(paste);
+    expect(paste.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(v.pictures()).toHaveLength(1));
+    expect(v.pictures()[0]).toMatchObject({ x: v.sheet.colX(1), y: v.sheet.rowY(2) });
+    await view.onUnloadFile(file);
+  });
+
+  it("picks a picture with a click: it shows selected, drags to move, and Delete removes it", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 1, col: 1 });
+    await v.insertImageFile(new File([new Uint8Array([137, 80, 78, 71])], "Pic.png", { type: "image/png" }));
+    v.grid.render();
+    const picEl = () => v.grid.el.querySelector(".xlsx-picture") as HTMLElement;
+    expect(picEl().querySelector(".xlsx-chart-handle")).not.toBeNull();
+    picEl().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+    window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 10 }));
+    v.grid.render();
+    expect(picEl().classList.contains("is-selected")).toBe(true);
+    v.grid.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    expect(v.pictures()).toHaveLength(0);
     await view.onUnloadFile(file);
   });
 

@@ -310,6 +310,13 @@ export class XlsxWorkbook extends OoxmlPackage {
   }
 
   /** Add a chart part linked from `drawingPath`; returns its path and the drawing's relationship id. */
+  /** A picture's image in xl/media, related from a drawing part. */
+  addImagePart(drawingPath: string, bytes: Uint8Array, ext: string): { path: string; rId: string } {
+    const path = this.uniquePath("xl/media/image", `.${ext}`);
+    this.putBinary(path, bytes, ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext === "svg" ? "svg+xml" : ext}`);
+    return { path, rId: this.addRel(drawingPath, "image", path) };
+  }
+
   addChartPart(drawingPath: string, xml: Document): { path: string; rId: string } {
     const path = this.uniquePath("xl/charts/chart", ".xml");
     this.putXml(path, xml, CHART_CT);

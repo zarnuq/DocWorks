@@ -11,7 +11,8 @@ import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { Edits } from "../../domain/xlsx/commands";
 import { FormulaSyntaxError } from "../../domain/xlsx/formula";
-import { Rect, cellName, colName, parseRange, quoteSheet as quoteSheetName, rangeName } from "../../domain/xlsx/references";
+import { Rect, cellName, colName, parseCellRef, parseRange, quoteSheet as quoteSheetName, rangeName } from "../../domain/xlsx/references";
+import { linksOf, setLink } from "../../domain/xlsx/links";
 import { adjustDecimals, formatGeneral, parseInput } from "../../domain/xlsx/number-format";
 import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
 import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboard";
@@ -30,7 +31,8 @@ import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings
 import { canExportPdf, renderPdf } from "../common/pdf";
 import { ExportFormat, exportDialog, writeExport } from "../common/export-dialog";
 import { Grid, Hit } from "./grid";
-import { Picture, sheetPictures } from "../../domain/xlsx/drawing";
+import { deletePicture, insertPicture, movePicture, Picture, sheetPictures } from "../../domain/xlsx/drawing";
+import { pickImage } from "../common/images";
 import { addRule, CfStyle, ConditionalFormats, deleteRule, readRules } from "../../domain/xlsx/conditional";
 import { checkValue, invalidateValidations, listItems, removeValidation, setValidation, Validation, validationAt } from "../../domain/xlsx/validation";
 import { conditionalForm, pivotForm, validationForm } from "./rule-forms";
@@ -228,7 +230,9 @@ export class XlsxView extends FileView {
       filterMenu: (col, anchor) => this.filterMenu(col, anchor),
       pictures: () => this.pictures(),
       imageUrl: (path) => this.imageUrl(path),
-      conditional: (row, col) => this.conditional(this.sheet, row, col),
+      conditional: (row, col) => this.withLink(row, col, this.conditional(this.sheet, row, col)),
+      openLink: (row, col) => this.openLink(row, col),
+      editLink: () => void this.editLink(),
       sparklines: () => this.sparklines(this.sheet),
       dropdown: (row, col) => validationAt(this.sheet, row, col)?.type === "list",
       moveChart: (key, box) => this.change(() => moveChart(this.edits!, key, box)),
@@ -238,6 +242,9 @@ export class XlsxView extends FileView {
       openDropdown: (row, col, at) => this.openDropdown(row, col, at),
       charts: () => this.charts(),
       chartMenu: (key, e) => this.chartMenu(key, e),
+      movePicture: (key, box) => this.change(() => movePicture(this.edits!, this.sheet, key, box)),
+      pictureMenu: (key, e) => this.pictureMenu(key, e),
+      deletePicture: (key) => this.change(() => deletePicture(this.edits!, this.sheet, key)),
       toggleGroup: (axis, g) => this.change(() => setGroupCollapsed(this.edits!, this.sheet, axis, g, !g.collapsed)),
     });
     if (this.savedZoom() !== "1") this.grid.setZoom(Number(this.savedZoom()));
@@ -347,6 +354,7 @@ export class XlsxView extends FileView {
     this.sparkCache.clear();
     this.notesCache = null;
     this.commentsCache = null;
+    this.linksCache = null;
     this.invalidCache.clear();
     this.chartCache.clear();
     for (const sheet of this.wb.sheets) invalidateValidations(sheet);
@@ -368,6 +376,52 @@ export class XlsxView extends FileView {
   }
 
   /** Conditional formatting of a cell, from rules worked out per sheet until the next edit. */
+  private linksCache: { sheet: string; links: Map<string, string> } | null = null;
+  /** The current sheet's cell links by reference (see domain/xlsx/links). */
+  private links(): Map<string, string> {
+    const path = this.sheet.ref.path;
+    if (!this.linksCache || this.linksCache.sheet !== path) this.linksCache = { sheet: path, links: linksOf(this.edits!.wb.pkg, path) };
+    return this.linksCache.links;
+  }
+
+  /** A linked cell is drawn as Google Sheets draws links: blue and underlined. */
+  private withLink(row: number, col: number, cf: CfStyle | null): CfStyle | null {
+    if (!this.links().has(cellName(row, col))) return cf;
+    return { ...(cf ?? {}), color: this.theme === "dark" ? "#8AB4F8" : "#1155CC", underline: true };
+  }
+
+  /** Ctrl+click: a web address opens in the browser, a place in the workbook is shown. */
+  private openLink(row: number, col: number): boolean {
+    const link = this.links().get(cellName(row, col));
+    if (!link) return false;
+    if (!link.startsWith("#")) {
+      window.open(link);
+      return true;
+    }
+    const at = link.lastIndexOf("!");
+    const name = at < 0 ? null : link.slice(1, at).replace(/^'|'$/g, "").replace(/''/g, "'");
+    const index = name === null ? this.sheetIndex : this.wb.sheets.findIndex((s) => s.name === name);
+    const target = parseCellRef(link.slice(at + 1).split(":")[0].replace(/\$/g, ""));
+    if (index < 0 || !target) return true;
+    if (index !== this.sheetIndex) this.showSheet(index);
+    this.grid?.select({ row: target.row, col: target.col });
+    return true;
+  }
+
+  /** Insert › Link (Ctrl+K): the active cell's link; an empty address removes it. An empty cell shows the address. */
+  private async editLink(): Promise<void> {
+    if (!this.grid || !this.edits) return;
+    const { row, col } = this.grid.active;
+    const ref = cellName(row, col);
+    const url = await promptText(this.app, "Link address (empty removes the link)", this.links().get(ref) ?? "https://");
+    if (url === null || !this.edits) return;
+    const href = url.trim() && url.trim() !== "https://" ? url.trim() : null;
+    const cell = this.sheet.at(row, col);
+    if (href && (!cell || cell.value === null || cell.value === "")) this.change(() => this.edits!.input(this.sheet, row, col, href));
+    this.change(() => this.edits!.structural(() => setLink(this.edits!.wb.pkg, this.sheet.ref.path, ref, href)));
+    this.grid.render();
+  }
+
   private conditional(sheet: Sheet, row: number, col: number): CfStyle | null {
     let cf = this.cfCache.get(sheet.ref.path);
     if (!cf) {
@@ -468,6 +522,13 @@ export class XlsxView extends FileView {
         for (const child of Array.from(cached.el.children)) el.appendChild(child.cloneNode(true));
       },
     }));
+  }
+
+  private pictureMenu(key: string, e: MouseEvent): void {
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle("Delete image").setIcon("trash").onClick(() => this.change(() => deletePicture(this.edits!, this.sheet, key))));
+    this.refocusAfter(menu);
+    menu.showAtMouseEvent(e);
   }
 
   private chartMenu(path: string, e: MouseEvent): void {
@@ -731,6 +792,26 @@ export class XlsxView extends FileView {
     modal.open();
   }
 
+  /** Insert › Image: the picture at its own size (at most 400 px wide), over the cells at the active cell. */
+  private async insertImageFile(file: File): Promise<void> {
+    if (!this.grid || !this.edits) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const ext = (/\.([a-z0-9]+)$/i.exec(file.name)?.[1] ?? /^image\/([a-z]+)/.exec(file.type)?.[1] ?? "png").toLowerCase();
+    let size = { w: 300, h: 200 };
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 400 / bitmap.width);
+      size = { w: Math.round(bitmap.width * scale), h: Math.round(bitmap.height * scale) };
+      bitmap.close();
+    } catch {
+      // Not decodable here (or no createImageBitmap): Google's default box.
+    }
+    const at = this.grid.active;
+    this.change(() => insertPicture(this.edits!, this.sheet, bytes, ext, at, size, file.name.replace(/\.[^.]+$/, "")));
+    this.pictureCache.clear();
+    this.grid.render();
+  }
+
   private pictures(s = this.sheet): Picture[] {
     let pics = this.pictureCache.get(s.ref.path);
     if (!pics) {
@@ -864,7 +945,11 @@ export class XlsxView extends FileView {
     e.preventDefault();
     const valuesOnly = this.valuesOnly;
     this.valuesOnly = false;
-    this.pasteFrom(e.clipboardData.getData("text/plain"), valuesOnly);
+    const text = e.clipboardData.getData("text/plain");
+    // A copied picture or screenshot: Google places it over the cells at the active cell.
+    const image = Array.from(e.clipboardData.files ?? []).find((f) => f.type.startsWith("image/"));
+    if (image && !text.trim()) void this.insertImageFile(image);
+    else this.pasteFrom(text, valuesOnly);
   }
 
   private pasteFrom(text: string, valuesOnly = false): void {
@@ -1044,6 +1129,7 @@ export class XlsxView extends FileView {
     tb.iconSelect("align-vertical-justify-center", "Vertical align", V_ALIGNS, (v) => this.format({ vAlign: v as "top" }));
     this.toggles.set("wrap", tb.icon("wrap-text", "Wrap text", () => this.toggle("wrap")));
     tb.gap();
+    tb.icon("link", "Insert link (Ctrl+K)", () => void this.editLink());
     tb.icon("message-square-plus", "Insert comment", () => this.commentDialog(this.sel.r1, this.sel.c1));
     tb.icon("chart-column", "Insert chart", () => this.insertChart());
     tb.icon("filter", "Create or remove a filter", () => this.toggleFilter());
@@ -1088,12 +1174,14 @@ export class XlsxView extends FileView {
         this.change(() => ops.addSheet(this.edits!, this.sheetIndex));
         this.showSheet(this.sheetIndex + 1);
       });
+      menuItem(m, "Image", () => pickImage((f) => void this.insertImageFile(f)));
       menuItem(m, "Chart", () => this.insertChart());
       menuItem(m, "Pivot table", () => this.insertPivotTable());
       subMenu(m, "Function", (s) => {
         for (const f of FUNCTIONS) menuItem(s, f, () => this.insertFunction(f));
       });
       m.addSeparator();
+      menuItem(m, "Link", () => void this.editLink());
       menuItem(m, "Comment", () => this.commentDialog(this.sel.r1, this.sel.c1));
       menuItem(m, "Note", () => void this.editNote(this.sel.r1, this.sel.c1));
       menuItem(m, "Dropdown", () => this.validationDialog());

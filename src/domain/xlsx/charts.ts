@@ -9,7 +9,7 @@ import { chartData, ChartData, ChartModel } from "../pptx/chart";
 import { axesXml, chartPalette, ChartFormat, readChartFormat, setChartFormat } from "../pptx/chart-format";
 import { ColorContext } from "../pptx/color";
 import { Edits } from "./commands";
-import { anchorBox } from "./drawing";
+import { anchorBox, marker, placeAnchor } from "./drawing";
 import { cellName, colName, parseRange, quoteSheet, Rect } from "./references";
 import { child as sheetChild } from "./sheet-edit";
 import { Sheet, Workbook } from "./workbook-model";
@@ -18,7 +18,6 @@ const XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const EMU_PER_PX = 9525;
 
 export interface SheetChart {
   /** The chart part. */
@@ -165,11 +164,6 @@ function chartXml(sheet: Sheet, r: Rect): string {
 }
 
 /** A drawing marker at sheet pixel (x, y). */
-function marker(sheet: Sheet, tag: string, x: number, y: number): string {
-  const col = sheet.colAt(x), row = sheet.rowAt(y);
-  const off = (v: number) => Math.max(0, Math.round(v * EMU_PER_PX));
-  return `<xdr:${tag}><xdr:col>${col}</xdr:col><xdr:colOff>${off(x - sheet.colX(col))}</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>${off(y - sheet.rowY(row))}</xdr:rowOff></xdr:${tag}>`;
-}
 
 /** Insert a chart of the selection beside it (600 × 371 px, Google's default size); returns the chart part's path. */
 export function insertChart(e: Edits, sheet: Sheet, r: Rect, format?: (f: ChartFormat) => void): string {
@@ -264,25 +258,7 @@ export function moveChart(e: Edits, path: string, box: { x: number; y: number; w
     const s = e.wb.sheets.find((x) => x.ref.path === sheet.ref.path)!;
     const anchor = Array.from(live?.documentElement.children ?? []).find((a) => Array.from(a.getElementsByTagNameNS(C, "chart")).some((c) => c.getAttributeNS(R, "id") === chart.rId));
     if (!anchor) return;
-    const swap = (tag: string, px: number, py: number) => {
-      const old = Array.from(anchor.children).find((c) => c.namespaceURI === XDR && c.localName === tag);
-      const next = live!.importNode(parseXml(marker(s, tag, px, py).replace(`<xdr:${tag}>`, `<xdr:${tag} xmlns:xdr="${XDR}">`))!.documentElement, true);
-      if (old) old.replaceWith(next);
-      return !!old;
-    };
-    const ext = (el: Element | undefined) => {
-      el?.setAttribute("cx", String(Math.round(w * EMU_PER_PX)));
-      el?.setAttribute("cy", String(Math.round(h * EMU_PER_PX)));
-    };
-    const kid = (name: string) => Array.from(anchor.children).find((c) => c.namespaceURI === XDR && c.localName === name);
-    if (anchor.localName === "absoluteAnchor") {
-      kid("pos")?.setAttribute("x", String(Math.round(x * EMU_PER_PX)));
-      kid("pos")?.setAttribute("y", String(Math.round(y * EMU_PER_PX)));
-      ext(kid("ext"));
-    } else {
-      swap("from", x, y);
-      if (!swap("to", x + w, y + h)) ext(kid("ext"));
-    }
+    placeAnchor(s, anchor, { x, y, w, h });
     e.wb.pkg.touch(chart.drawing);
   });
 }

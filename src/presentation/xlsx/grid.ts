@@ -70,10 +70,20 @@ export interface GridHost {
   /** Charts on the current sheet: where each sits, and how to draw it into its box. */
   charts?(): { key: string; x: number; y: number; w: number; h: number; draw(el: HTMLElement): void }[];
   chartMenu?(key: string, e: MouseEvent): void;
+  /** A picture dragged / resized on the grid (key: Picture.key). */
+  movePicture?(key: string, box: { x: number; y: number; w: number; h: number }): void;
+  /** A picture's right-click menu. */
+  pictureMenu?(key: string, e: MouseEvent): void;
+  /** Delete on a selected picture. */
+  deletePicture?(key: string): void;
   /** A chart dragged (or resized from its corner) to `box`, in sheet pixels. */
   moveChart?(key: string, box: { x: number; y: number; w: number; h: number }): void;
   /** The +/- of a row / column group was clicked. */
   toggleGroup?(axis: OutlineAxis, group: OutlineGroup): void;
+  /** Ctrl+click on a cell: follow its link; false when it has none. */
+  openLink?(row: number, col: number): boolean;
+  /** Ctrl+K: Insert › Link. */
+  editLink?(): void;
 }
 
 /** Text to edit for a cell: "=formula", or the value written so that typing it back gives the same value. */
@@ -204,6 +214,12 @@ export class Grid {
     });
     this.canvas.addEventListener("pointerleave", () => this.showNote(null));
     this.canvas.addEventListener("contextmenu", (e) => {
+      const picture = (e.target as HTMLElement).closest<HTMLElement>(".xlsx-picture")?.dataset.picture;
+      if (picture && this.host.pictureMenu) {
+        e.preventDefault();
+        this.host.pictureMenu(picture, e);
+        return;
+      }
       const chart = (e.target as HTMLElement).closest<HTMLElement>(".xlsx-chart")?.dataset.chart;
       if (chart && this.host.chartMenu) {
         e.preventDefault();
@@ -736,7 +752,10 @@ export class Grid {
       if (px > x1 || px + p.w < x0 || py > y1 || py + p.h < y0) continue;
       const url = this.host.imageUrl?.(p.image);
       const el = make("xlsx-picture", px, py, p.w, p.h);
+      el.dataset.picture = p.key;
+      el.toggleClass("is-selected", p.key === this.picked);
       if (url) el.createEl("img", { attr: { src: url, alt: p.alt || p.name, draggable: "false" } });
+      if (this.host.movePicture) el.createDiv({ cls: "xlsx-chart-handle", attr: { "aria-label": "Resize image" } });
     }
     for (const ch of this.host.charts?.() ?? []) {
       const px = ch.x + q.ox, py = ch.y + q.oy;
@@ -842,6 +861,8 @@ export class Grid {
 
   /** Set while a chart drag ends, so the click that follows doesn't open its menu. */
   private chartDragged = false;
+  /** The selected picture's key (a click on it), if any. */
+  private picked: string | null = null;
 
   /** Zoom (1 = 100%): the grid is drawn larger or smaller; pointer positions are scaled back. */
   zoom = 1;
@@ -918,16 +939,31 @@ export class Grid {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target === this.input && this.edit) return;
+    if ((e.ctrlKey || e.metaKey) && !this.edit) {
+      const hit = this.hit(e.clientX, e.clientY);
+      if (hit?.area === "cell" && this.host.openLink?.(hit.row, hit.col)) {
+        e.preventDefault();
+        return;
+      }
+    }
     // A chart's menu opens on click (see the constructor): opened on press, the release would close it. Dragging
     // moves the chart; dragging its corner handle resizes it.
-    const chartEl = target.closest<HTMLElement>(".xlsx-chart");
-    if (chartEl?.dataset.chart) {
+    const chartEl = target.closest<HTMLElement>(".xlsx-chart, .xlsx-picture");
+    const picture = chartEl?.dataset.picture ?? null;
+    // Pressing a picture selects it (Delete removes it); anywhere else unselects.
+    if (picture !== this.picked) {
+      this.picked = picture;
+      this.render();
+    }
+    if (chartEl?.dataset.chart || picture) {
       e.preventDefault();
-      const key = chartEl.dataset.chart;
-      const ch = this.host.charts?.().find((c) => c.key === key);
-      if (!ch || !this.host.moveChart) return;
+      if (picture) this.focusGrid();
+      const key = chartEl!.dataset.chart ?? picture!;
+      const ch = picture ? this.host.pictures?.().find((p) => p.key === key) : this.host.charts?.().find((c) => c.key === key);
+      const canMove = picture ? !!this.host.movePicture : !!this.host.moveChart;
+      if (!ch || !canMove) return;
       const resize = !!target.closest(".xlsx-chart-handle");
-      const left = Number.parseFloat(chartEl.style.getPropertyValue("--x")) || 0, top = Number.parseFloat(chartEl.style.getPropertyValue("--y")) || 0;
+      const left = Number.parseFloat(chartEl!.style.getPropertyValue("--x")) || 0, top = Number.parseFloat(chartEl!.style.getPropertyValue("--y")) || 0;
       let box = { x: ch.x, y: ch.y, w: ch.w, h: ch.h };
       let moved = false;
       this.chartDragged = false;
@@ -936,11 +972,12 @@ export class Grid {
         if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;
         moved = true;
         box = resize ? { ...box, w: Math.max(60, ch.w + dx), h: Math.max(40, ch.h + dy) } : { ...box, x: Math.max(0, ch.x + dx), y: Math.max(0, ch.y + dy) };
-        chartEl.setCssProps({ "--x": `${left + box.x - ch.x}px`, "--y": `${top + box.y - ch.y}px`, "--w": `${box.w}px`, "--h": `${box.h}px` });
+        chartEl!.setCssProps({ "--x": `${left + box.x - ch.x}px`, "--y": `${top + box.y - ch.y}px`, "--w": `${box.w}px`, "--h": `${box.h}px` });
       }, () => {
         if (!moved) return;
         this.chartDragged = true;
-        this.host.moveChart?.(key, box);
+        if (picture) this.host.movePicture?.(key, box);
+        else this.host.moveChart?.(key, box);
       }, e);
       return;
     }
@@ -1177,6 +1214,18 @@ export class Grid {
       return;
     }
 
+    if (this.picked && (e.key === "Delete" || e.key === "Backspace" || e.key === "Escape")) {
+      e.preventDefault();
+      if (e.key !== "Escape") this.host.deletePicture?.(this.picked);
+      this.picked = null;
+      this.render();
+      return;
+    }
+    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k" && this.host.editLink) {
+      e.preventDefault();
+      this.host.editLink();
+      return;
+    }
     if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       e.preventDefault();
       this.selectAll();
