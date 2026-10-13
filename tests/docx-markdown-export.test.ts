@@ -9,9 +9,9 @@ import { docxSchema as s } from "../src/domain/docx/schema";
 
 const file = (path: string) => Object.assign(new TFile(), { path });
 
-it("offers Markdown immediately after PDF in the document pane menu", () => {
+it("offers one Export… item in the document pane menu", () => {
   const view = new DocxView(new TestLeaf(new TestApp()) as unknown as WorkspaceLeaf);
-  const run = vi.spyOn(view, "exportMarkdown").mockResolvedValue();
+  const run = vi.spyOn(view, "exportAs").mockResolvedValue();
   const menu = new Menu();
   const titles: string[] = [], callbacks: (() => void)[] = [];
   vi.spyOn(menu, "addItem").mockImplementation(cb => {
@@ -19,8 +19,8 @@ it("offers Markdown immediately after PDF in the document pane menu", () => {
     cb(item as never); return menu;
   });
   view.onPaneMenu(menu, "more-options");
-  expect(titles).toEqual(["Export to PDF", "Export to Markdown"]);
-  callbacks[1]();
+  expect(titles).toEqual(["Export…"]);
+  callbacks[0]();
   expect(run).toHaveBeenCalledOnce();
 });
 function vaultApp(existing: string[] = []) {

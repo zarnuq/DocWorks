@@ -1,38 +1,45 @@
 import { readDrawing, newDrawing, writeDrawing } from "../../domain/docx/drawings";
 import { DrawingView } from "./docx-drawing-view";
 import { drawingEditor } from "./drawing-editor";
-import { App, FileView, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
-import { Command, EditorState, Plugin, TextSelection } from "prosemirror-state";
+import { App, FileView, Menu, Modal, Notice, Scope, Setting, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { Command, EditorState, NodeSelection, Plugin, TextSelection } from "prosemirror-state";
 import { DOMSerializer, Node as PMNode } from "prosemirror-model";
 import { EditorView } from "prosemirror-view";
-import { toggleMark } from "prosemirror-commands";
-import { redo, undo } from "prosemirror-history";
+import { selectAll, toggleMark } from "prosemirror-commands";
+import { closeHistory, redo, undo } from "prosemirror-history";
 import { DocxDocument, HFType } from "../../infrastructure/docx/docx-document";
 import { Origins, readDocx, startsWordPage } from "../../domain/docx/docx-reader";
 import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
-import { FONTS, PaperTheme, promptText, showValue, Toolbar, shieldEditingKeys } from "../common/toolbar";
+import { SaveStatus } from "../common/save-status";
+import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
+
+import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems } from "../common/toolbar";
+import { openDrawer, watchNarrow } from "../common/narrow";
 import { pickImage } from "../common/images";
+import { electronSpeller, runEditCommand, Speller } from "../common/spelling";
+import { recrop, Wrap } from "../../domain/docx/drawing";
 import { readWatermark, setWatermark, TextWatermark, Watermark } from "../../domain/docx/watermark";
 import { directFormat, updateStyleToMatch } from "../../domain/docx/style-edit";
 import { fontStack } from "../../core/utils/fonts";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { cmd, commentRanges, docxPlugins, EditorContext, PaintFormat, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
-import { pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
+import { pageAt, pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
 import { latexToOmml, mathSpec } from "../../domain/docx/math";
-import { canExportPdf, exportPdf } from "../common/pdf";
-import { exportDocxToMarkdown } from "../common/export-markdown";
-import { acceptRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
+import { canExportPdf, renderPdf } from "../common/pdf";
+import { ExportFormat, exportDialog, writeExport } from "../common/export-dialog";
+import { exportDocxToMarkdown, MARKDOWN_FORMAT } from "../common/export-markdown";
+import { acceptRevisions, groupRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findRanges, findCommentMatches, CommentMatch, Range, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
 import { showFindPreview } from "../common/find-preview";
 import { pageSetup, PageSetup, sectionSetups } from "../../domain/docx/pages";
 import { attrsOf, ImageAttrs, ParagraphAttrs } from "../../domain/docx/schema";
-import { DocxImageView } from "./docx-image-view";
+import { DocxImageView, WRAPS } from "./docx-image-view";
 import { TextBoxView } from "./docx-textbox-view";
-import { suggestTransaction } from "../../domain/docx/suggestions";
+import { retainOrigins, suggestTransaction } from "../../domain/docx/suggestions";
 import { DocxRuler, outlineEntries } from "./docx-ruler";
 
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
@@ -42,6 +49,10 @@ export type { DocWorksSettings };
 export const VIEW_TYPE_DOCX = "doc-works-docx-view";
 
 const SAVE_DELAY_MS = 800;
+const WORD_COUNT_KEY = "doc-works-word-count";
+const SHADES: [string, string][] = [["Blue", "#EBF3FB"], ["Gray", "#F2F2F2"], ["Yellow", "#FFF8E1"], ["Green", "#E8F5E9"]];
+const ALIGNS: [string, Align][] = [["Left", "left"], ["Center", "center"], ["Right", "right"], ["Justify", "justify"]];
+const LINE_SPACINGS: [string, string][] = [["1.0", "1"], ["1.15", "1.15"], ["1.5", "1.5"], ["2.0", "2"]];
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
 const STYLES: [string, string][] = [
   ["Normal", "Normal"],
@@ -53,12 +64,6 @@ const STYLES: [string, string][] = [
   ["Quote", "Quote"],
 ];
 
-/** Open a toolbar menu under its button. */
-const showBelow = (menu: Menu, button: HTMLElement) => {
-  const r = button.getBoundingClientRect();
-  menu.showAtPosition({ x: r.left, y: r.bottom });
-};
-
 /** Equation palette rows: label, LaTeX to insert. */
 const EQUATION_PALETTE: [string, string][][] = [
   [["a/b", "\\frac{}{}"], ["√", "\\sqrt{}"], ["ⁿ√", "\\sqrt[]{}"], ["xⁿ", "^{}"], ["xₙ", "_{}"], ["∑", "\\sum_{}^{}{}"], ["∫", "\\int_{}^{}{}"], ["lim", "\\lim_{}{}"], ["( )", "\\left(\\right)"], ["[ ]", "\\left[\\right]"], ["x̂", "\\hat{}"], ["x̄", "\\overline{}"], ["vec", "\\vec{}"], ["▦", "\\begin{matrix}{}&\\\\&\\end{matrix}"]],
@@ -67,6 +72,9 @@ const EQUATION_PALETTE: [string, string][][] = [
 ];
 
 const PAGE_VIEW_KEY = "doc-works-page-view";
+const ZOOM_KEY = "doc-works-docx-zoom";
+const ZOOMS = ["fit", "0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
+const zoomLabel = (z: string) => (z === "fit" ? "Fit" : `${Math.round(Number(z) * 100)}%`);
 const REVIEW_KEY = "doc-works-review-panel";
 type HF = "header" | "footer";
 /** A header or footer part: "header:default", "footer:first"... */
@@ -91,6 +99,8 @@ const naturalSize = (src: string) =>
   });
 
 export class DocxView extends FileView {
+  /** Stops giving focus back to the document after dialogs close. */
+  private stopFocusReturn: (() => void) | null = null;
   allowNoFile = false;
   paperTheme: "light" | "dark" = "light";
 
@@ -101,16 +111,24 @@ export class DocxView extends FileView {
   private dirty = false;
   private saveTimer: number | null = null;
   private saving: Promise<void> = Promise.resolve();
-  private saveEl: HTMLElement | null = null;
-  private syncTheme: ((t: PaperTheme) => void) | null = null;
+  private saveStatus: SaveStatus | null = null;
+  private toolbar: Toolbar | null = null;
+  private wrapSelect: HTMLSelectElement | null = null;
+  /** The last cell colour picked, where the custom picker starts. */
+  private lastShade = SHADES[0][1];
+  private narrowWatch: ReturnType<typeof watchNarrow> | null = null;
+  private closeDrawer: (() => void) | null = null;
   private ctx: EditorContext | null = null;
   private setup: PageSetup | null = null;
   /** The body's own page setup (`setup` is as wide as the widest section's page). */
   private finalSetup: PageSetup | null = null;
   private pageView = this.app.loadLocalStorage(PAGE_VIEW_KEY) !== "off";
+  private zoom: string = ZOOMS.includes(this.app.loadLocalStorage(ZOOM_KEY) as string) ? (this.app.loadLocalStorage(ZOOM_KEY) as string) : "fit";
+  private zoomSelect: HTMLSelectElement | null = null;
   private hostEl: HTMLElement | null = null;
   private wordsEl: HTMLElement | null = null;
   private wordsTimer: number | null = null;
+  private rulerFrame = 0;
   private findEl: HTMLElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   /** Header and footer content, for drawing them in the page view. */
@@ -141,6 +159,7 @@ export class DocxView extends FileView {
   ) {
     super(leaf);
     this.scope = new Scope(this.app.scope);
+    focusRegions(this.scope, this.contentEl, () => [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.editor?.dom, this.outlineEl, this.reviewEl, this.findEl]);
     this.scope.register(["Mod"], "f", () => {
       this.openFind();
       return false;
@@ -156,12 +175,25 @@ export class DocxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
-    menu.addItem((i) => i.setTitle("Export to Markdown").setIcon("file-output").setSection("action").onClick(() => void this.exportMarkdown()));
+    addFileItems(this, menu, source);
+    menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
   }
 
-  async exportMarkdown(): Promise<void> {
-    if (this.file) await exportDocxToMarkdown(this.app, this.file, this.docx && this.editor ? { document: this.docx, content: this.editor.state.doc } : undefined);
+  /** File › Download, as Google Docs: PDF or Markdown, through the shared export dialog. */
+  async exportAs(initial?: "pdf" | "md"): Promise<void> {
+    const file = this.file;
+    if (!file) return;
+    const formats: ExportFormat[] = [];
+    if (canExportPdf()) formats.push({ id: "pdf", label: "PDF document (.pdf)", ext: "pdf", outside: true });
+    formats.push(MARKDOWN_FORMAT);
+    const choice = await exportDialog(this.app, file, formats, initial);
+    if (!choice) return;
+    if (choice.format === "pdf") {
+      const data = await this.pdfBytes();
+      if (data) await writeExport(this.app, choice.target, data, choice.open);
+    } else if ("vault" in choice.target) {
+      await exportDocxToMarkdown(this.app, file, this.docx && this.editor ? { document: this.docx, content: this.editor.state.doc } : undefined, choice.target.vault, choice.open);
+    }
   }
 
   getViewType(): string {
@@ -181,6 +213,8 @@ export class DocxView extends FileView {
   }
 
   async onLoadFile(file: TFile): Promise<void> {
+    this.stopFocusReturn?.();
+    this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(DocxView) === this, () => this.editor?.focus());
     this.contentEl.empty();
     this.contentEl.addClass("dw-root");
     const status = this.contentEl.createDiv({ cls: "dw-loading", text: "Loading document..." });
@@ -233,6 +267,7 @@ export class DocxView extends FileView {
     this.ruler = new DocxRuler(rulerViewport, () => this.editor, () => { this.applyPageSize(); if (this.editor) repaginate(this.editor); });
     host.addEventListener("scroll", () => this.ruler?.align());
     this.reviewEl = body.createDiv({ cls: "docx-review" });
+    for (const panel of [this.outlineEl, this.reviewEl]) escapeToEditor(panel, () => this.editor?.focus());
     this.reviewEl.toggle(this.reviewOpen);
     this.applyPageSize();
     host.toggleClass("is-paged", this.pageView);
@@ -283,7 +318,7 @@ export class DocxView extends FileView {
         if (changed || tr.selectionSet) {
           this.scheduleWordCount();
           this.updateFormatControls();
-          this.ruler?.update();
+          this.scheduleRuler();
           this.renderOutline();
         }
         if (changed) this.scheduleReview();
@@ -325,6 +360,8 @@ export class DocxView extends FileView {
         return this.takeImage(files);
       },
     });
+    // On the editor's element (not a ProseMirror handler): picture node views would stop the event from reaching one.
+    this.editor.dom.addEventListener("contextmenu", (e) => this.contextMenu(e));
 
     this.buildToolbar(toolbar, ctx);
     this.setPaperTheme(paperFor(this.settings, "light"));
@@ -333,6 +370,11 @@ export class DocxView extends FileView {
       this.fitDocument();
     });
     this.resizeObserver.observe(host);
+    this.narrowWatch = watchNarrow(this.contentEl, (narrow) => {
+      if (!narrow) this.closeDrawer?.();
+      this.toolbar?.fit();
+      this.fitDocument();
+    });
     this.updateWordCount();
     this.renderReview();
     this.ruler.update();
@@ -362,10 +404,16 @@ export class DocxView extends FileView {
     this.unloadFonts = null;
     window.removeEventListener("blur", this.onWindowBlur);
     this.resizeObserver?.disconnect();
+    this.narrowWatch?.();
+    this.closeDrawer?.();
     this.closeFind();
     for (const t of [this.wordsTimer, this.reviewTimer]) if (t) window.clearTimeout(t);
     await this.requestSave();
     await this.saving;
+    // A closed file stops retrying (the save above was its last attempt).
+    this.saveStatus?.destroy();
+    this.stopFocusReturn?.();
+    this.stopFocusReturn = null;
     this.editor?.destroy();
     this.ruler?.destroy();
     this.ruler = null;
@@ -399,12 +447,21 @@ export class DocxView extends FileView {
     this.fitDocument();
   }
 
+  /** View › Zoom: "fit" shrinks a page wider than the pane to fit it, as before; a number is that zoom, remembered. */
+  private setZoom(zoom: string): void {
+    this.zoom = ZOOMS.includes(zoom) ? zoom : "fit";
+    this.app.saveLocalStorage(ZOOM_KEY, this.zoom);
+    if (this.zoomSelect) this.zoomSelect.value = this.zoom;
+    this.fitDocument();
+  }
+
   private fitDocument(): void {
     const editor = this.editor, host = this.hostEl, setup = this.setup;
     if (!editor || !host || !setup) return;
     const padding = getComputedStyle(host);
     const available = host.clientWidth - (Number.parseFloat(padding.paddingLeft) || 0) - (Number.parseFloat(padding.paddingRight) || 0);
-    const zoom = this.pageView && available > 0 ? Math.min(1, available / setup.width) : 1;
+    const fit = this.pageView && available > 0 ? Math.min(1, available / setup.width) : 1;
+    const zoom = this.zoom === "fit" ? fit : Number(this.zoom);
     const value = String(zoom);
     const changed = editor.dom.style.zoom !== value;
     editor.dom.style.zoom = value;
@@ -428,7 +485,6 @@ export class DocxView extends FileView {
     this.paperTheme = theme;
     this.contentEl.toggleClass("docx-theme-light", theme === "light");
     this.contentEl.toggleClass("docx-theme-dark", theme === "dark");
-    this.syncTheme?.(theme);
   }
 
   // ---------------------------------------------------------------------------
@@ -481,33 +537,23 @@ export class DocxView extends FileView {
       command(this.editor.state, this.editor.dispatch);
       this.editor.focus();
     };
-    const tb = new Toolbar(bar);
+    const tb = (this.toolbar = new Toolbar(bar));
     const action = (label: string, title: string, onClick: () => void, cls = "") => tb.button(label, title, onClick, cls);
     const btn = (label: string, title: string, command: Command, cls = "") => action(label, title, () => run(command), cls);
     const sep = () => tb.gap();
     const m = schema.marks;
+    const image = (fn: (pos: number) => void) => () => {
+      const pos = this.selectedImage();
+      if (pos !== null) fn(pos);
+    };
 
-    const mode = tb.select("Editing mode", "Mode", [["Editing", "editing"], ["Suggesting", "suggesting"]], value => void (async () => {
-      if (value === "suggesting" && !await this.author()) { mode.value = "editing"; return; }
-      this.suggesting = value === "suggesting";
-      this.contentEl.toggleClass("is-suggesting", this.suggesting);
-      if (this.suggesting) this.setReview(true);
-      this.editor?.focus();
-    })());
-    mode.value = this.suggesting ? "suggesting" : "editing";
-    const ruler = tb.icon("ruler", "Show ruler", () => {
-      if (!this.ruler) return;
-      const shown = this.rulerViewport?.style.display !== "none";
-      this.rulerViewport?.toggle(!shown);
-      ruler.toggleClass("is-active", !shown);
-      this.app.saveLocalStorage("doc-works-ruler", shown ? "off" : "on");
-    });
-    const showRuler = this.app.loadLocalStorage("doc-works-ruler") !== "off";
-    this.rulerViewport?.toggle(showRuler);
-    ruler.toggleClass("is-active", showRuler);
-
+    // --- The row: everyday controls, as Google Docs' toolbar ---
     btn("↶", "Undo (Ctrl+Z)", undo);
     btn("↷", "Redo (Ctrl+Y)", redo);
+    tb.pin();
+    sep();
+    this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [zoomLabel(z), z]), (z) => this.setZoom(z));
+    this.zoomSelect.value = this.zoom;
     sep();
     this.styleSelect = tb.select("Paragraph style", "Style", [...STYLES, ["Update style to match", "update"]], (v) => {
       if (v === "update") return this.updateStyle();
@@ -515,90 +561,234 @@ export class DocxView extends FileView {
     });
     this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => run(cmd.setMark(m.font, { font })));
     this.sizeSelect = tb.select("Font size", "Size", FONT_SIZES.map((s) => [`${s} pt`, String(s)]), (v) => run(cmd.setMark(m.size, { pt: Number(v) })));
+    tb.pin();
     sep();
     btn("B", "Bold (Ctrl+B)", toggleMark(m.bold), "bold");
     btn("I", "Italic (Ctrl+I)", toggleMark(m.italic), "italic");
     btn("U", "Underline (Ctrl+U)", toggleMark(m.underline), "underline");
-    btn("S", "Strikethrough (Ctrl+Shift+X)", toggleMark(m.strike), "strike");
-    btn("x₂", "Subscript", toggleMark(m.subscript));
-    btn("x²", "Superscript", toggleMark(m.superscript));
-    btn("</>", "Code font or code box (Ctrl+`)", cmd.toggleCode);
     tb.color("A", "Text color", "#000000", (color) => run(cmd.setMark(m.color, { color })));
     tb.color("HL", "Highlight color", "#FFFF00", (color) => run(cmd.setMark(m.highlight, { color })));
-    btn("Tx", "Clear formatting", cmd.clearFormatting);
     sep();
-    for (const [icon, align] of [["align-left", "left"], ["align-center", "center"], ["align-right", "right"], ["align-justify", "justify"]] as [string, Align][]) {
-      tb.icon(icon, `Align ${align}`, () => run(cmd.setAlign(align)));
-    }
-    tb.iconSelect("unfold-vertical", "Line spacing", [["1.0", "1"], ["1.15", "1.15"], ["1.5", "1.5"], ["2.0", "2"]], (v) => run(cmd.setLineSpacing(v)));
+    tb.icon("link", "Add, change or remove a link (Ctrl+K; Ctrl+click follows it)", () => void this.editLink());
+    tb.icon("message-square-plus", "Comment on the selected text", () => void this.addComment());
+    tb.icon("image", "Insert image", () => pickImage((f) => void this.insertImage(f)));
+    sep();
+    tb.iconSelect("align-left", "Align", ALIGNS.map(([label, a]) => [label, a]), (v) => run(cmd.setAlign(v as Align)));
+    tb.iconSelect("unfold-vertical", "Line spacing", LINE_SPACINGS, (v) => run(cmd.setLineSpacing(v)));
+    sep();
     tb.icon("list", "Bulleted list", () => run(cmd.toggleList(ctx, "bullet")));
     tb.icon("list-ordered", "Numbered list", () => run(cmd.toggleList(ctx, "ordered")));
     tb.icon("outdent", "Decrease indent / list level (Shift+Tab)", () => run(cmd.shiftLevel(-1)));
     tb.icon("indent", "Increase indent / list level (Tab)", () => run(cmd.shiftLevel(1)));
-    action("Paragraph…", "Spacing and indents", () => this.paragraphDialog());
-    tb.icon("link", "Add, change or remove a link (Ctrl+K; Ctrl+click follows it)", () => void this.editLink());
     sep();
-    const tableBtn = action("Table ▾", "Table", () => this.tableMenu(tableBtn));
-    action("Image", "Insert image", () => pickImage((f) => void this.insertImage(f)));
-    const breakBtn = action("Break ▾", "Page, column and section breaks", () => {
-      // As Google Docs' Insert › Break.
-      const menu = new Menu();
-      const entry = (title: string, command: Command) => menu.addItem((i) => i.setTitle(title).onClick(() => run(command)));
-      entry("Page break", cmd.insertPageBreak);
-      entry("Column break", cmd.insertColumnBreak);
-      entry("Section break (next page)", cmd.insertSectionBreak("nextPage"));
-      entry("Section break (continuous)", cmd.insertSectionBreak("continuous"));
-      showBelow(menu, breakBtn);
-    });
-    action("Columns…", "Columns for this section or the selection", () => this.columnsDialog());
-    btn("Line", "Insert horizontal line", cmd.insertRule);
-    action("Drawing", "Insert a drawing", () => this.drawingDialog(null));
-    action("Equation", "Insert an equation", () => this.equationDialog(null));
-    sep();
-    action("Header & footer", "Edit the header and footer", () => this.headerFooterDialog());
-    action("Watermark", "Add, change or remove a watermark", () => this.watermarkDialog());
-    const pagesBtn = tb.icon("book-open", "Page view: show page breaks, headers and footers", () => {
-      this.setPageView(!this.pageView);
-      this.app.saveLocalStorage(PAGE_VIEW_KEY, this.pageView ? "on" : "off");
-    });
-    pagesBtn.toggleClass("is-active", this.pageView);
     this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
     this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
-    tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
-    const tocBtn = action("Contents ▾", "Table of contents", () => {
-      const menu = new Menu();
-      menu.addItem((i) => i.setTitle("Insert table of contents").onClick(() => {
-        this.docx?.prepareToc();
-        run(cmd.insertToc);
-      }));
-      menu.addItem((i) => i.setTitle("Update table of contents").onClick(() => {
-        if (this.editor && !cmd.updateToc(this.editor.state, this.editor.dispatch)) new Notice("This document has no table of contents.");
-      }));
-      showBelow(menu, tocBtn);
-    });
-    action("Comment", "Comment on the selected text", () => void this.addComment());
-    action("Footnote", "Insert a footnote at the cursor", () => void this.addFootnote());
-    // The side panels' toggles sit together: outline (left panel), then review (right panel).
-    const outline = tb.icon("list-tree", "Document outline", () => {
-      this.outlineOpen = !this.outlineOpen;
-      this.app.saveLocalStorage("doc-works-outline", this.outlineOpen ? "on" : "off");
-      this.outlineEl?.toggle(this.outlineOpen);
-      outline.toggleClass("is-active", this.outlineOpen);
-      this.renderOutline();
-      this.fitDocument();
-    });
-    outline.toggleClass("is-active", this.outlineOpen);
-    const reviewBtn = tb.icon("message-square", "Review panel: comments, footnotes and tracked changes", () => {
-      this.setReview(!this.reviewOpen);
-      reviewBtn.toggleClass("is-active", this.reviewOpen);
-    });
-    reviewBtn.toggleClass("is-active", this.reviewOpen);
+    btn("Tx", "Clear formatting", cmd.clearFormatting);
+    // Picture tools, while a picture is selected (Google's image options).
+    sep();
+    this.wrapSelect = tb.select("Text wrapping", "Wrap", WRAPS.map(([w, label]) => [label, w]), (v) => image((pos) => this.setWrap(pos, v as Wrap))());
+    action("Crop", "Crop image", image((pos) => this.cropImage(pos)));
+    action("Alt text", "Image description (alt text)", image((pos) => this.altText(pos)));
+    tb.context(() => this.selectedImage() !== null);
+    // Table tools, in a table.
+    sep();
+    tb.color("▇", "Cell fill", SHADES[0][1], (color) => run(cmd.setCellBackground((this.lastShade = color))));
+    tb.iconSelect("square-dashed", "Table borders", [["All borders", "all"], ["Outside only", "outer"], ["No borders", "none"]], (v) => run(cmd.setTableBorders(v as "all" | "outer" | "none")));
+    tb.context(() => this.selectedImage() === null && this.inTable());
+    sep();
+    const setMode = (value: string) => void (async () => {
+      if (value === "suggesting" && !await this.author()) { mode.value = "editing"; return; }
+      this.suggesting = value === "suggesting";
+      mode.value = value;
+      this.contentEl.toggleClass("is-suggesting", this.suggesting);
+      if (this.suggesting) this.setReview(true);
+      this.editor?.focus();
+    })();
+    const mode = tb.select("Editing mode", "Mode", [["Editing", "editing"], ["Suggesting", "suggesting"]], setMode);
+    mode.value = this.suggesting ? "suggesting" : "editing";
+    const showRuler = this.app.loadLocalStorage("doc-works-ruler") !== "off";
+    this.rulerViewport?.toggle(showRuler);
 
-    const end = tb.end(this.paperTheme, (t) => this.setPaperTheme(t), "paper");
-    this.syncTheme = end.syncTheme;
-    this.saveEl = end.status;
+    // --- The menus: every command ---
+    tb.fileMenu(this, (mn) => menuItem(mn, "Export…", () => void this.exportAs()));
+    tb.menu("Edit", (mn) => {
+      menuItem(mn, "Undo", () => run(undo));
+      menuItem(mn, "Redo", () => run(redo));
+      mn.addSeparator();
+      for (const [title, c] of [["Cut", "cut"], ["Copy", "copy"], ["Paste", "paste"]] as const) {
+        menuItem(mn, title, () => {
+          this.editor?.focus();
+          if (!runEditCommand(c)) new Notice("Paste with your keyboard.");
+        });
+      }
+      menuItem(mn, "Select all", () => run(selectAll));
+      mn.addSeparator();
+      menuItem(mn, "Find and replace", () => this.openFind());
+    });
+    tb.menu("View", (mn) => {
+      menuItem(mn, "Editing", () => setMode("editing"), { checked: !this.suggesting });
+      menuItem(mn, "Suggesting", () => setMode("suggesting"), { checked: this.suggesting });
+      mn.addSeparator();
+      menuItem(mn, "Page view", () => this.togglePageView(), { checked: this.pageView });
+      menuItem(mn, "Ruler", () => this.toggleRuler(), { checked: this.rulerViewport?.style.display !== "none" });
+      menuItem(mn, "Outline", () => this.toggleOutline(), { checked: this.outlineOpen });
+      menuItem(mn, "Review panel", () => this.toggleReview(), { checked: this.reviewOpen });
+      subMenu(mn, "Zoom", (z) => {
+        for (const value of ZOOMS) menuItem(z, zoomLabel(value), () => this.setZoom(value), { checked: this.zoom === value });
+      });
+      mn.addSeparator();
+      menuItem(mn, "Light paper", () => this.setPaperTheme("light"), { checked: this.paperTheme === "light" });
+      menuItem(mn, "Dark paper", () => this.setPaperTheme("dark"), { checked: this.paperTheme === "dark" });
+    });
+    tb.menu("Insert", (mn) => {
+      menuItem(mn, "Image", () => pickImage((f) => void this.insertImage(f)));
+      subMenu(mn, "Table", (s) => this.fillTableMenu(s));
+      menuItem(mn, "Drawing", () => this.drawingDialog(null));
+      menuItem(mn, "Equation", () => this.equationDialog(null));
+      menuItem(mn, "Horizontal line", () => run(cmd.insertRule));
+      // As Google Docs' Insert › Break.
+      subMenu(mn, "Break", (s) => {
+        menuItem(s, "Page break", () => run(cmd.insertPageBreak));
+        menuItem(s, "Column break", () => run(cmd.insertColumnBreak));
+        menuItem(s, "Section break (next page)", () => run(cmd.insertSectionBreak("nextPage")));
+        menuItem(s, "Section break (continuous)", () => run(cmd.insertSectionBreak("continuous")));
+      });
+      menuItem(mn, "Footnote", () => void this.addFootnote());
+      menuItem(mn, "Comment", () => void this.addComment());
+      menuItem(mn, "Link", () => void this.editLink());
+      subMenu(mn, "Table of contents", (s) => {
+        menuItem(s, "Insert table of contents", () => {
+          this.docx?.prepareToc();
+          run(cmd.insertToc);
+        });
+        menuItem(s, "Update table of contents", () => {
+          if (this.editor && !cmd.updateToc(this.editor.state, this.editor.dispatch)) new Notice("This document has no table of contents.");
+        });
+      });
+      mn.addSeparator();
+      menuItem(mn, "Header & footer", () => this.headerFooterDialog());
+      menuItem(mn, "Watermark", () => this.watermarkDialog());
+    });
+    tb.menu("Format", (mn) => {
+      subMenu(mn, "Text", (s) => {
+        for (const [title, mark] of [["Bold", m.bold], ["Italic", m.italic], ["Underline", m.underline], ["Strikethrough", m.strike], ["Subscript", m.subscript], ["Superscript", m.superscript]] as const) {
+          menuItem(s, title, () => run(toggleMark(mark)));
+        }
+        menuItem(s, "Code", () => run(cmd.toggleCode));
+      });
+      subMenu(mn, "Paragraph style", (s) => {
+        for (const [label, id] of STYLES) menuItem(s, label, () => run(cmd.setStyle(id === "Normal" ? null : id)));
+        s.addSeparator();
+        menuItem(s, "Update style to match", () => this.updateStyle());
+      });
+      subMenu(mn, "Align", (s) => {
+        for (const [label, a] of ALIGNS) menuItem(s, label, () => run(cmd.setAlign(a)));
+      });
+      subMenu(mn, "Line spacing", (s) => {
+        for (const [label, v] of LINE_SPACINGS) menuItem(s, label, () => run(cmd.setLineSpacing(v)));
+      });
+      menuItem(mn, "Paragraph…", () => this.paragraphDialog());
+      menuItem(mn, "Columns…", () => this.columnsDialog());
+      mn.addSeparator();
+      menuItem(mn, "Bulleted list", () => run(cmd.toggleList(ctx, "bullet")));
+      menuItem(mn, "Numbered list", () => run(cmd.toggleList(ctx, "ordered")));
+      mn.addSeparator();
+      menuItem(mn, "Clear formatting", () => run(cmd.clearFormatting));
+    });
+    tb.menu("Tools", (mn) => {
+      menuItem(mn, "Paint format", () => this.startPainting(false));
+      menuItem(mn, "Word count", () => this.wordCountDialog());
+      menuItem(mn, "Find and replace", () => this.openFind());
+    });
+
+    mode.parentElement?.addClass("dw-push");
+    const end = tb.end();
+    this.saveStatus = end.status;
     this.wordsEl = createSpan({ cls: "dw-status docx-words" });
-    end.status.parentElement?.insertBefore(this.wordsEl, end.status);
+    this.wordsEl.hidden = this.app.loadLocalStorage(WORD_COUNT_KEY) === "off";
+    end.el.prepend(this.wordsEl);
+    tb.sync();
+  }
+
+  /** The selected picture's position (a node selection on an image), else null. */
+  private selectedImage(): number | null {
+    const sel = this.editor?.state.selection;
+    return sel instanceof NodeSelection && sel.node.type === schema.nodes.image ? sel.from : null;
+  }
+
+  private inTable(): boolean {
+    const $from = this.editor?.state.selection.$from;
+    if (!$from) return false;
+    for (let d = $from.depth; d > 0; d--) if ($from.node(d).type === schema.nodes.table_cell) return true;
+    return false;
+  }
+
+  private setWrap(pos: number, wrap: Wrap): void {
+    const editor = this.editor, node = editor?.state.doc.nodeAt(pos);
+    if (!editor || node?.type !== schema.nodes.image) return;
+    editor.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, wrap, ...(wrap === "inline" ? { x: 0, y: 0, align: null } : {}) }));
+  }
+
+  private cropImage(pos: number): void {
+    const editor = this.editor, node = editor?.state.doc.nodeAt(pos);
+    if (!editor || node?.type !== schema.nodes.image) return;
+    void cropDialog(this.app, attrsOf<ImageAttrs>(node).crop).then((crop) => {
+      const now = editor.state.doc.nodeAt(pos);
+      if (crop === undefined || now?.type !== schema.nodes.image) return;
+      editor.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...now.attrs, ...recrop(attrsOf<ImageAttrs>(now), crop) }));
+    });
+  }
+
+  private altText(pos: number): void {
+    const editor = this.editor, node = editor?.state.doc.nodeAt(pos);
+    if (!editor || node?.type !== schema.nodes.image) return;
+    void promptText(this.app, "Image description (alt text)", attrsOf<ImageAttrs>(node).alt).then((alt) => {
+      const now = alt === null ? null : editor.state.doc.nodeAt(pos);
+      if (now) editor.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...now.attrs, alt }));
+    });
+  }
+
+  private togglePageView(): void {
+    this.setPageView(!this.pageView);
+    this.app.saveLocalStorage(PAGE_VIEW_KEY, this.pageView ? "on" : "off");
+  }
+
+  private toggleRuler(): void {
+    if (!this.ruler) return;
+    const shown = this.rulerViewport?.style.display !== "none";
+    this.rulerViewport?.toggle(!shown);
+    this.app.saveLocalStorage("doc-works-ruler", shown ? "off" : "on");
+  }
+
+  private toggleOutline(): void {
+    if (this.contentEl.hasClass("is-narrow") && this.outlineEl) return this.drawer(this.outlineEl, () => this.renderOutline());
+    this.outlineOpen = !this.outlineOpen;
+    this.app.saveLocalStorage("doc-works-outline", this.outlineOpen ? "on" : "off");
+    this.outlineEl?.toggle(this.outlineOpen);
+    this.renderOutline();
+    this.fitDocument();
+  }
+
+  private toggleReview(): void {
+    if (this.contentEl.hasClass("is-narrow") && this.reviewEl) return this.drawer(this.reviewEl, () => this.renderReview());
+    this.setReview(!this.reviewOpen);
+  }
+
+  /** In a narrow pane a side panel opens over the document; its docked (wide) state is left as it was. */
+  private drawer(panel: HTMLElement, render: () => void): void {
+    if (this.closeDrawer) {
+      const same = panel.hasClass("is-drawer");
+      this.closeDrawer();
+      if (same) return;
+    }
+    this.closeDrawer = openDrawer(panel, {
+      root: this.contentEl,
+      onClose: () => {
+        this.closeDrawer = null;
+        panel.toggle(panel === this.reviewEl ? this.reviewOpen : this.outlineOpen);
+      },
+    });
+    render();
   }
 
   // ---------------------------------------------------------------------------
@@ -608,15 +798,20 @@ export class DocxView extends FileView {
   /** Font and Size show what's at the cursor: the text's own formatting, else its paragraph (and table) style. */
   private renderOutline(): void {
     const editor = this.editor, panel = this.outlineEl;
-    if (!editor || !panel || !this.outlineOpen) return;
+    if (!editor || !panel || !(this.outlineOpen || panel.hasClass("is-drawer"))) return;
     panel.empty();
-    panel.createDiv({ cls: "docx-review-title", text: "Document outline" });
+    const title = panel.createDiv({ cls: "docx-review-title docx-outline-title", text: "Document outline" });
+    const close = title.createEl("button", { cls: "clickable-icon docx-outline-close", attr: { "aria-label": "Close outline" } });
+    setIcon(close, "x");
+    // A drawer (narrow pane) just closes; docked, the outline turns off as View › Outline does.
+    close.addEventListener("click", () => (panel.hasClass("is-drawer") ? this.closeDrawer?.() : this.toggleOutline()));
     const entries = outlineEntries(editor.state.doc);
     if (!entries.length) panel.createDiv({ cls: "docx-review-empty", text: "Headings appear here." });
     const active = [...entries].reverse().find(e => e.pos <= editor.state.selection.from)?.pos;
+    // Nesting from the top heading level used (a document may start at Heading 2), as Google Docs' outline shows it.
+    const top = Math.min(...entries.map((e) => e.level));
     for (const entry of entries) {
-      const button = panel.createEl("button", { text: entry.text, cls: "docx-outline-entry", attr: { title: entry.text } });
-      button.style.paddingLeft = `${8 + (entry.level - 1) * 12}px`;
+      const button = panel.createEl("button", { text: entry.text, cls: "docx-outline-entry", attr: { title: entry.text, "data-depth": String(Math.min(entry.level - top, 5)) } });
       button.toggleClass("is-active", entry.pos === active);
       button.addEventListener("click", () => {
         editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, entry.pos)));
@@ -648,11 +843,54 @@ export class DocxView extends FileView {
     }
     showValue(this.fontSelect, font);
     showValue(this.sizeSelect, size === null ? null : String(size));
+    const image = this.selectedImage();
+    if (image !== null && this.wrapSelect) showValue(this.wrapSelect, attrsOf<ImageAttrs>(editor.state.doc.nodeAt(image)!).wrap);
+    this.toolbar?.sync();
+  }
+
+  /** The ruler reads layout: once per frame, after typing, not on every keystroke (which forced a layout each time). */
+  private scheduleRuler(): void {
+    if (this.rulerFrame) return;
+    this.rulerFrame = window.requestAnimationFrame(() => {
+      this.rulerFrame = 0;
+      this.ruler?.update();
+    });
   }
 
   private scheduleWordCount(): void {
     if (this.wordsTimer) window.clearTimeout(this.wordsTimer);
     this.wordsTimer = window.setTimeout(() => this.updateWordCount(), 250);
+  }
+
+  /** Google Docs' Tools › Word count: pages, words, characters with and without spaces ("n of total" for a selection). */
+  private wordCountDialog(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const { doc, selection } = editor.state;
+    const all = countWords(doc), part = selection.empty ? null : countWords(doc, selection.from, selection.to);
+    const pages = pageAt(editor.state, doc.content.size);
+    const show = (key: "words" | "chars" | "letters") => part ? `${part[key].toLocaleString()} of ${all[key].toLocaleString()}` : all[key].toLocaleString();
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Word count");
+    const table = modal.contentEl.createDiv({ cls: "dw-count" });
+    for (const [name, value] of [["Pages", pages === null ? "—" : pages.toLocaleString()], ["Words", show("words")], ["Characters", show("chars")], ["Characters excluding spaces", show("letters")]]) {
+      const row = table.createDiv({ cls: "dw-count-row" });
+      row.createSpan({ text: name });
+      row.createSpan({ text: value });
+    }
+    const label = modal.contentEl.createEl("label", { cls: "dw-count-toggle" });
+    const box = label.createEl("input", { type: "checkbox" });
+    box.checked = !this.wordsEl?.hidden;
+    label.appendText("Display word count while typing");
+    const buttons = modal.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => modal.close());
+    buttons.createEl("button", { text: "OK", cls: "mod-cta" }).addEventListener("click", () => {
+      if (this.wordsEl) this.wordsEl.hidden = !box.checked;
+      this.app.saveLocalStorage(WORD_COUNT_KEY, box.checked ? "on" : "off");
+      this.toolbar?.fit();
+      modal.close();
+    });
+    modal.open();
   }
 
   private updateWordCount(): void {
@@ -775,11 +1013,149 @@ export class DocxView extends FileView {
     this.setReview(true);
   }
 
+  /** Resolve / Reply / Delete for comment `id`, shared by the review panel's cards and the right-click menu. */
+  private commentActions(id: string): [string, () => void][] {
+    const docx = this.docx, editor = this.editor;
+    const c = docx?.comments().find((x) => x.id === id);
+    if (!docx || !editor || !c) return [];
+    return [
+      [c.resolved ? "Reopen" : "Resolve", () => {
+        docx.setCommentResolved(c.id, !c.resolved);
+        this.markDirty();
+        this.renderReview();
+      }],
+      ["Reply", () => void (async () => {
+        const text = await promptText(this.app, "Reply to comment", "");
+        if (!text?.trim()) return;
+        const author = await this.author();
+        if (!author || this.docx !== docx) return;
+        docx.replyToComment(c.id, text.trim(), author);
+        docx.setCommentResolved(c.id, false);
+        this.markDirty();
+        this.renderReview();
+      })()],
+      ["Delete", () => {
+        docx.deleteComment(c.id);
+        cmd.removeCommentAnchors(c.id)(editor.state, editor.dispatch);
+        this.markDirty();
+        this.renderReview();
+      }],
+    ];
+  }
+
+  /** Spell checker for our own right-click menus (null where there is none). */
+  speller: Speller | null = electronSpeller();
+
+  /**
+   * Right-click in the document. Plain text keeps the app's native menu (with its spelling fixes); in a table, on a
+   * picture, a link or commented text our menu shows instead: spelling fixes first (as the native menu would), then
+   * Cut / Copy / Paste and the actions for what was clicked.
+   */
+  private contextMenu(e: MouseEvent): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const target = e.target as HTMLElement;
+    const imageEl = target.closest<HTMLElement>(".docx-image");
+    let pos: number | null = null;
+    try {
+      pos = editor.posAtCoords({ left: e.clientX, top: e.clientY })?.pos ?? null;
+    } catch {
+      // no layout (tests): fall back to the clicked element
+    }
+    if (pos === null) {
+      try {
+        pos = editor.posAtDOM(target, 0);
+      } catch {
+        return;
+      }
+    }
+    const state = editor.state;
+    const imagePos = imageEl ? [pos, pos - 1, pos + 1].find((p) => p >= 0 && state.doc.nodeAt(p)?.type === schema.nodes.image) ?? null : null;
+    const $pos = state.doc.resolve(pos);
+    let inTable = false;
+    for (let d = $pos.depth; d > 0; d--) if ($pos.node(d).type === schema.nodes.table_cell) inTable = true;
+    const link = [...$pos.marks(), ...($pos.nodeAfter?.marks ?? [])].find((m) => m.type === schema.marks.link)?.attrs.href as string | undefined;
+    const commentId = target.closest<HTMLElement>("[data-comment]")?.dataset.comment ?? null;
+    if (imagePos === null && !inTable && !link && !commentId) return;
+    e.preventDefault();
+
+    // The caret moves to the click unless it already selects there, as with the native menu.
+    const sel = state.selection;
+    if (imagePos === null && !sel.ranges.some((r) => r.$from.pos <= pos && pos <= r.$to.pos)) {
+      editor.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve(pos))));
+    }
+    const menu = new Menu();
+    const item = (title: string, run: () => void) => menu.addItem((i) => i.setTitle(title).onClick(run));
+    const run = (command: Command) => () => {
+      command(editor.state, editor.dispatch);
+      editor.focus();
+    };
+
+    // Spelling, as the native menu offers it.
+    const word = imagePos === null ? wordAt(editor.state, editor.state.selection.empty ? editor.state.selection.head : pos) : null;
+    if (word && this.speller?.misspelled(word.text)) {
+      editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, word.from, word.to)));
+      const fixes = this.speller.suggestions(word.text).slice(0, 5);
+      for (const fix of fixes) item(fix, () => {
+        editor.dispatch(editor.state.tr.insertText(fix, word.from, word.to));
+        editor.focus();
+      });
+      if (!fixes.length) menu.addItem((i) => i.setTitle("No suggestions").setDisabled(true));
+      item("Add to dictionary", () => this.speller?.addToDictionary(word.text));
+      menu.addSeparator();
+    }
+    const edit = (command: "cut" | "copy" | "paste") => () => {
+      editor.focus();
+      if (!runEditCommand(command)) new Notice("Paste with your keyboard.");
+    };
+    item("Cut", edit("cut"));
+    item("Copy", edit("copy"));
+    item("Paste", edit("paste"));
+
+    if (link) {
+      menu.addSeparator();
+      item("Open link", () => window.open(link));
+      item("Edit link…", () => void this.editLink());
+      item("Remove link", run(cmd.setLink(null)));
+    }
+    if (commentId) {
+      menu.addSeparator();
+      for (const [label, fn] of this.commentActions(commentId)) item(label === "Delete" ? "Delete comment" : label === "Reply" ? "Reply…" : label, fn);
+    }
+    if (inTable) {
+      menu.addSeparator();
+      item("Insert row above", run(cmd.addRow(false)));
+      item("Insert row below", run(cmd.addRow(true)));
+      item("Insert column left", run(cmd.addColumn(false)));
+      item("Insert column right", run(cmd.addColumn(true)));
+      item("Delete row", run(cmd.deleteRow));
+      item("Delete column", run(cmd.deleteColumn));
+      item("Merge with cell to the right", run(cmd.mergeRight));
+      item("Merge with cell below", run(cmd.mergeDown));
+      item("Split cell", run(cmd.splitCell));
+      menu.addSeparator();
+      subMenu(menu, "Cell shading", (m) => this.fillShadingMenu(m));
+      item("Delete table", run(cmd.deleteTable));
+    }
+    if (imagePos !== null) {
+      menu.addSeparator();
+      item("Replace image…", () => pickImage((f) => void this.replaceImage(imagePos, f)));
+      item("Crop…", () => this.cropImage(imagePos));
+      item("Alt text…", () => this.altText(imagePos));
+      item("Delete picture", () => editor.dispatch(editor.state.tr.delete(imagePos, imagePos + 1)));
+    }
+    menu.showAtMouseEvent(e);
+  }
+
   private setReview(open: boolean): void {
+    // Narrow pane: show it as a drawer (a new comment, suggesting mode) without changing the remembered docked state.
+    if (this.contentEl.hasClass("is-narrow") && this.reviewEl) {
+      if (open && !this.reviewEl.hasClass("is-drawer")) this.drawer(this.reviewEl, () => this.renderReview());
+      return;
+    }
     this.reviewOpen = open;
     this.reviewEl?.toggle(open);
     this.app.saveLocalStorage(REVIEW_KEY, open ? "on" : "off");
-    this.contentEl.querySelector('[aria-label^="Review panel"]')?.toggleClass("is-active", open);
     this.renderReview();
     this.fitDocument();
   }
@@ -792,8 +1168,10 @@ export class DocxView extends FileView {
     writeBody(docx.body, editor.state.doc, this.origins, docx);
     fn(docx.body);
     const read = readDocx(docx.body, { imageSrc: (id) => this.imageSrc(id), hyperlinkHref: (id) => docx.hyperlinkHref(id) });
-    this.origins = read.origins;
-    editor.updateState(EditorState.create({ doc: read.doc, plugins: editor.state.plugins }));
+    // One undoable step (Accept / Reject undo like Google Docs'); the old version's XML stays in the origins for undo.
+    const doc = retainOrigins(read.doc, read.origins, this.origins);
+    editor.dispatch(closeHistory(editor.state.tr.replaceWith(0, editor.state.doc.content.size, doc.content)
+      .setDocAttribute("sectPr", doc.attrs.sectPr).setMeta("suggestionsRecorded", true)));
     this.markDirty();
     this.renderReview();
     repaginate(editor);
@@ -812,7 +1190,8 @@ export class DocxView extends FileView {
     const panel = this.reviewEl;
     const editor = this.editor;
     const docx = this.docx;
-    if (!panel || !editor || !docx || !this.reviewOpen) return;
+    // Closed panels aren't kept up to date, except while one is open as a drawer (narrow panes).
+    if (!panel || !editor || !docx || !(this.reviewOpen || panel.hasClass("is-drawer"))) return;
     panel.empty();
     const doc = editor.state.doc;
     const goTo = (from: number, to = from) => {
@@ -830,11 +1209,22 @@ export class DocxView extends FileView {
       });
       const row = c.createDiv({ cls: "docx-review-actions" });
       for (const [label, fn] of actions) row.createEl("button", { text: label }).addEventListener("click", fn);
+      // The same actions on right-click.
+      c.addEventListener("contextmenu", (e) => {
+        if ((e.target as HTMLElement).closest("textarea")) return;
+        e.preventDefault();
+        const menu = new Menu();
+        for (const [label, fn] of actions) menu.addItem((i) => i.setTitle(label).onClick(fn));
+        menu.showAtMouseEvent(e);
+      });
       return c;
     };
 
     // Comments
-    panel.createDiv({ cls: "docx-review-title", text: "Comments" });
+    const title = panel.createDiv({ cls: "docx-review-title docx-outline-title", text: "Comments" });
+    const close = title.createEl("button", { cls: "clickable-icon docx-outline-close", attr: { "aria-label": "Close comments" } });
+    setIcon(close, "x");
+    close.addEventListener("click", () => (panel.hasClass("is-drawer") ? this.closeDrawer?.() : this.setReview(false)));
     const ranges = commentRanges(doc);
     const comments = docx.comments();
     if (!comments.length) panel.createDiv({ cls: "docx-review-empty", text: "Select text and use Comment to add one." });
@@ -844,30 +1234,7 @@ export class DocxView extends FileView {
       const quote = range ? doc.textBetween(range.from, range.to, " ").slice(0, 60) : "";
       card(thread, `${c.resolved ? "Resolved · " : ""}${c.author}${c.date ? ` · ${new Date(c.date).toLocaleDateString()}` : ""}${quote ? ` · “${quote}”` : ""}`, c.text, (t) => docx.setCommentText(c.id, t), [
         ...(range ? ([["Go to", () => goTo(range.from, range.to)]] as [string, () => void][]) : []),
-        [c.resolved ? "Reopen" : "Resolve", () => {
-          docx.setCommentResolved(c.id, !c.resolved);
-          this.markDirty();
-          this.renderReview();
-        }],
-        ["Reply", () => void (async () => {
-          const text = await promptText(this.app, "Reply to comment", "");
-          if (!text?.trim()) return;
-          const author = await this.author();
-          if (!author || this.docx !== docx) return;
-          docx.replyToComment(c.id, text.trim(), author);
-          docx.setCommentResolved(c.id, false);
-          this.markDirty();
-          this.renderReview();
-        })()],
-        [
-          "Delete",
-          () => {
-            docx.deleteComment(c.id);
-            cmd.removeCommentAnchors(c.id)(editor.state, editor.dispatch);
-            this.markDirty();
-            this.renderReview();
-          },
-        ],
+        ...this.commentActions(c.id),
       ]).dataset.commentId = c.id;
       for (const reply of comments.filter(r => r.parentId === c.id)) {
         const replies = thread.createDiv({ cls: "docx-comment-reply" });
@@ -908,9 +1275,10 @@ export class DocxView extends FileView {
       const name = `${kind === "header" ? "Header" : "Footer"}${type === "default" ? "" : type === "first" ? " (first page)" : " (even pages)"}`;
       return root ? [{ root, name }] : [];
     });
+    // One card per edit, as Google Docs lists suggestions.
     const changes = [
-      ...revisions(docx.body).map((r) => ({ r, where: null as { root: Element; name: string } | null })),
-      ...parts.flatMap((where) => revisions(where.root).map((r) => ({ r, where }))),
+      ...groupRevisions(revisions(docx.body)).map((r) => ({ r, where: null as { root: Element; name: string } | null })),
+      ...parts.flatMap((where) => groupRevisions(revisions(where.root)).map((r) => ({ r, where }))),
     ];
     if (!changes.length) {
       panel.createDiv({ cls: "docx-review-empty", text: "No tracked changes." });
@@ -935,14 +1303,15 @@ export class DocxView extends FileView {
     };
     all.createEl("button", { text: "Accept all" }).addEventListener("click", () => everything(true));
     all.createEl("button", { text: "Reject all" }).addEventListener("click", () => everything(false));
-    const kinds = { insert: "Inserted", delete: "Deleted", format: "Formatted" };
+    const kinds = { insert: "Inserted", delete: "Deleted", format: "Formatted", replace: "Replaced" };
     for (const { r, where } of changes) {
-      const c = panel.createDiv({ cls: `docx-review-card docx-change-${r.kind}` });
+      const c = panel.createDiv({ cls: `docx-review-card docx-change-${r.kind === "replace" ? "delete" : r.kind}` });
       c.createDiv({ cls: "docx-review-meta", text: `${kinds[r.kind]}${r.author ? ` by ${r.author}` : ""}${where ? ` · ${where.name}` : ""}` });
       c.createDiv({ cls: "docx-review-text", text: r.text.slice(0, 200) || "(formatting)" });
+      if (r.kind === "replace") c.createDiv({ cls: "docx-review-text docx-review-inserted", text: `with ${r.inserted.slice(0, 200)}` });
       const row = c.createDiv({ cls: "docx-review-actions" });
-      row.createEl("button", { text: "Accept" }).addEventListener("click", () => decide(true, where, new Set([r.id])));
-      row.createEl("button", { text: "Reject" }).addEventListener("click", () => decide(false, where, new Set([r.id])));
+      row.createEl("button", { text: "Accept" }).addEventListener("click", () => decide(true, where, r.ids));
+      row.createEl("button", { text: "Reject" }).addEventListener("click", () => decide(false, where, r.ids));
     }
   }
 
@@ -1450,7 +1819,6 @@ export class DocxView extends FileView {
 
   private setPageView(on: boolean): void {
     this.pageView = on;
-    this.contentEl.querySelector('[aria-label^="Page view"]')?.toggleClass("is-active", on);
     this.hostEl?.toggleClass("is-paged", on);
     if (this.editor) {
       refreshSectionWidths(this.editor);
@@ -1459,8 +1827,9 @@ export class DocxView extends FileView {
   }
 
   /** Save the document as a PDF, laid out on its pages as in the page view. */
-  async exportPdf(): Promise<void> {
-    if (!this.editor || !this.hostEl || !this.file || !this.setup) return;
+  /** The pages as PDF (drawn in page view, which is turned on for the export if it's off). */
+  private async pdfBytes(): Promise<Uint8Array | null> {
+    if (!this.editor || !this.hostEl || !this.setup) return null;
     const paged = this.pageView;
     if (!paged) {
       this.setPageView(true);
@@ -1469,15 +1838,27 @@ export class DocxView extends FileView {
     }
     try {
       const { width, height } = this.setup;
-      const pages = printPages(this.hostEl, height);
-      await exportPdf(this.app, this.file, pages, { width, height }, "docx-theme-light");
+      return await renderPdf(printPages(this.hostEl, height), { width, height }, "docx-theme-light");
     } finally {
       if (!paged) this.setPageView(false);
     }
   }
 
-  private tableMenu(anchor: HTMLElement): void {
-    const menu = new Menu();
+
+  /** Cell shading for the selected cells: none, a few light fills, or any colour from the system picker. */
+  private fillShadingMenu(menu: Menu): void {
+    const shade = (color: string | null) => {
+      if (!this.editor) return;
+      if (!cmd.setCellBackground(color)(this.editor.state, this.editor.dispatch)) new Notice("Click inside a table first.");
+      this.editor.focus();
+    };
+    menuItem(menu, "None", () => shade(null));
+    for (const [name, color] of SHADES) menuItem(menu, name, () => shade(color));
+    menuItem(menu, "Custom…", () => pickColor(this.lastShade, (hex) => shade((this.lastShade = hex))));
+  }
+
+  /** Google Docs' Insert › Table and table tools. */
+  private fillTableMenu(menu: Menu): void {
     const item = (title: string, command: Command) =>
       menu.addItem((i) =>
         i.setTitle(title).onClick(() => {
@@ -1493,10 +1874,7 @@ export class DocxView extends FileView {
     item("Add column left", cmd.addColumn(false));
     item("Add column right", cmd.addColumn(true));
     menu.addSeparator();
-    for (const [name, color] of [["Blue", "#EBF3FB"], ["Gray", "#F2F2F2"], ["Yellow", "#FFF8E1"], ["Green", "#E8F5E9"]]) {
-      item(`Cell shading: ${name}`, cmd.setCellBackground(color));
-    }
-    item("Cell shading: none", cmd.setCellBackground(null));
+    subMenu(menu, "Cell shading", (m) => this.fillShadingMenu(m));
     menu.addSeparator();
     item("Merge with cell to the right", cmd.mergeRight);
     item("Merge with cell below", cmd.mergeDown);
@@ -1533,7 +1911,6 @@ export class DocxView extends FileView {
     item("Delete row", cmd.deleteRow);
     item("Delete column", cmd.deleteColumn);
     item("Delete table", cmd.deleteTable);
-    showBelow(menu, anchor);
   }
 
   // ---------------------------------------------------------------------------
@@ -1542,7 +1919,7 @@ export class DocxView extends FileView {
 
   private markDirty(): void {
     this.dirty = true;
-    this.saveEl?.setText("Saving…");
+    this.saveStatus?.saving();
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.saveNow(), SAVE_DELAY_MS);
   }
@@ -1558,12 +1935,12 @@ export class DocxView extends FileView {
         writeBody(this.docx.body, this.editor.state.doc, this.origins, this.docx);
         const bytes = await this.docx.save();
         await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+        if (this.dirty) this.saveStatus?.saving();
+        else this.saveStatus?.saved();
       } catch (err) {
         this.dirty = true;
         console.error("Failed to save .docx:", err);
-        new Notice(`Failed to save ${file.name}: ${(err as Error).message}`);
-      } finally {
-        this.saveEl?.setText(this.dirty ? "Saving…" : "Saved");
+        this.saveStatus?.failed(err, () => void this.saveNow(), file.name);
       }
     });
     return this.saving;
@@ -1757,4 +2134,22 @@ function textBox(text: string, font: string, size: number | null, room: number):
   }
   if (size === null) return { w: +room.toFixed(2), h: +(room / ratio).toFixed(2) };
   return { w: +(size * ratio).toFixed(2), h: size };
+}
+
+/** The word (letters, digits, apostrophes) around `pos` in its paragraph, or null. */
+function wordAt(state: EditorState, pos: number): { from: number; to: number; text: string } | null {
+  const $pos = state.doc.resolve(pos);
+  const block = $pos.parent;
+  if (!block.isTextblock) return null;
+  const start = $pos.start();
+  const text = block.textBetween(0, block.content.size, undefined, "\ufffc");
+  const at = pos - start;
+  const isWord = (ch: string | undefined) => !!ch && /[\p{L}\p{N}'’]/u.test(ch);
+  let a = at, b = at;
+  while (a > 0 && isWord(text[a - 1])) a--;
+  while (b < text.length && isWord(text[b])) b++;
+  const word = text.slice(a, b).replace(/^['’]+|['’]+$/g, "");
+  if (!word) return null;
+  const lead = text.slice(a, b).indexOf(word);
+  return { from: start + a + lead, to: start + a + lead + word.length, text: word };
 }

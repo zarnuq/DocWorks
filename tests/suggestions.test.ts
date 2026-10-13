@@ -8,7 +8,7 @@ import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { readDocx } from "../src/domain/docx/docx-reader";
 import { writeBody } from "../src/domain/docx/docx-writer";
 import { docxSchema as s } from "../src/domain/docx/schema";
-import { acceptRevisions, rejectRevisions, revisions } from "../src/domain/docx/revisions";
+import { acceptRevisions, groupRevisions, rejectRevisions, revisions } from "../src/domain/docx/revisions";
 import { suggestTransaction } from "../src/domain/docx/suggestions";
 import { NS } from "../src/core/utils/xml";
 
@@ -38,6 +38,67 @@ describe("suggestion recording", () => {
     const next = state.apply(suggestTransaction(state.tr.insertText("big ", 6), origins, pkg, ctx, "Ada"));
     writeBody(pkg.body, next.doc, origins, pkg);
     expect(revisions(pkg.body).map(r => [r.kind, r.text])).toEqual([["insert", "big "]]);
+  });
+
+  it("records a deletion as a deletion only when the original runs differ just in namespace declarations", async () => {
+    // Chromium writes a run's own xmlns declarations; one rewritten from the editor has none. Same text, same run.
+    const pkg = await DocxDocument.load(await blankDocx());
+    const run = (t: string, decl: boolean) => `<w:r${decl ? ' xmlns:zz="urn:zz"' : ""}><w:rPr><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">${t}</w:t></w:r>`;
+    const p = new DOMParser().parseFromString(`<w:p xmlns:w="${NS.w}">${run("conduct an ", false)}${run("integrated audit. You will do this independen", true)}${run("tly.", false)}</w:p>`, "application/xml").documentElement;
+    pkg.body.insertBefore(pkg.body.ownerDocument.importNode(p, true), pkg.body.firstChild);
+    const { doc, origins } = readDocx(pkg.body, context);
+    const state = EditorState.create({ doc });
+    const text = doc.textContent;
+    const next = state.apply(suggestTransaction(state.tr.delete(1 + text.indexOf("integrated"), 1 + text.indexOf(" this")), origins, pkg, context, "Ada"));
+    writeBody(pkg.body, next.doc, origins, pkg);
+    expect(revisions(pkg.body).map(r => [r.kind, r.text])).toEqual([["delete", "integrated audit. You will do"]]);
+  });
+
+  it("doesn't list an empty run (a blank line's) as a deleted change", async () => {
+    const pkg = await DocxDocument.load(await blankDocx());
+    const para = (inner: string) => `<w:p xmlns:w="${NS.w}">${inner}</w:p>`;
+    for (const xml of [para("<w:r><w:t>Hello world</w:t></w:r>"), para("<w:r/>"), para("<w:r><w:t>foo bar</w:t></w:r>")].reverse()) {
+      pkg.body.insertBefore(pkg.body.ownerDocument.importNode(new DOMParser().parseFromString(xml, "application/xml").documentElement, true), pkg.body.firstChild);
+    }
+    const { doc, origins } = readDocx(pkg.body, context);
+    const state = EditorState.create({ doc });
+    const next = state.apply(suggestTransaction(state.tr.delete(7, doc.content.size - 5), origins, pkg, context, "Ada"));
+    writeBody(pkg.body, next.doc, origins, pkg);
+    expect(revisions(pkg.body).filter(r => r.text === "")).toEqual([]);
+  });
+
+  it("gives every suggestion its own id when edits touch only part of a long document", async () => {
+    const pkg = await DocxDocument.load(await blankDocx());
+    const blocks = Array.from({ length: 40 }, (_, i) => s.nodes.paragraph.create(null, s.text(`Paragraph ${i}`)));
+    writeBody(pkg.body, s.nodes.doc.create(null, blocks), new Map(), pkg);
+    const { doc, origins } = readDocx(pkg.body, context);
+    let state = EditorState.create({ doc });
+    const edit = (tr: typeof state.tr) => { state = state.apply(suggestTransaction(tr, origins, pkg, context, "Ada")); };
+    const start = (i: number) => { let p = 0; for (let k = 0; k < i; k++) p += state.doc.child(k).nodeSize; return p + 1; };
+    edit(state.tr.insertText("late ", start(35)));
+    edit(state.tr.insertText("early ", start(2)));
+    edit(state.tr.delete(start(20), start(20) + 9));
+    writeBody(pkg.body, state.doc, origins, pkg);
+    const list = revisions(pkg.body);
+    expect(list.map(r => [r.kind, r.text])).toEqual([["insert", "early "], ["delete", "Paragraph"], ["insert", "late "]]);
+    expect(new Set(list.map(r => r.id)).size).toBe(3);
+    const accepted = pkg.body.cloneNode(true) as Element;
+    acceptRevisions(accepted);
+    expect(plain(accepted)).toContain("early Paragraph 2");
+  });
+
+  it("applies a suggestion in place: an edit in a table cell leaves the rest of the table (and its page gaps) where they were", async () => {
+    const pkg = await DocxDocument.load(await blankDocx());
+    const cell = (t: string) => s.nodes.table_cell.create(null, s.nodes.paragraph.create(null, s.text(t)));
+    const table = s.nodes.table.create(null, [s.nodes.table_row.create(null, [cell("a"), cell("b")]), s.nodes.table_row.create(null, [cell("c"), cell("d")])]);
+    writeBody(pkg.body, s.nodes.doc.create(null, [s.nodes.paragraph.create(null, s.text("x")), table, s.nodes.paragraph.create(null, s.text("y"))]), new Map(), pkg);
+    const { doc, origins } = readDocx(pkg.body, context);
+    const state = EditorState.create({ doc });
+    const tablePos = doc.child(0).nodeSize, secondRow = tablePos + 1 + doc.child(1).child(0).nodeSize;
+    const tr = suggestTransaction(state.tr.insertText("new ", tablePos + 4), origins, pkg, context, "Ada");
+    expect(tr.mapping.mapResult(secondRow).deleted).toBe(false);
+    expect(tr.mapping.mapResult(tablePos).deleted).toBe(false);
+    expect(tr.doc.child(1).child(0).child(0).textContent).toBe("new a");
   });
 
   it("records a replacement with author, deletion and insertion and restores either version", async () => {
@@ -242,6 +303,48 @@ describe("structural suggestions", () => {
     expect(lines(r.rejected)).toBe("Hello|world");
     expect(r.state.selection.$from.parent.textContent).toBe("world");
     expect(r.state.selection.$from.parentOffset).toBe(0);
+  });
+  it("records deleting a selection across paragraphs as the deleted text plus the paragraph marks between", async () => {
+    // "Hello world" | "middle" | "foo bar": delete from "world" to "bar".
+    const blocks = [p("Hello world"), p("middle"), p("foo bar")];
+    const r = await suggest(blocks, 1, (st, d) => d(st.tr.delete(7, 26)));
+    // The review list names a paragraph's mark before its text.
+    expect(r.kinds).toEqual([["delete", "¶"], ["delete", "world"], ["delete", "¶"], ["delete", "middle"], ["delete", "foo "]]);
+    expect(lines(r.accepted)).toBe(r.edited);
+    expect(lines(r.rejected)).toBe(r.original);
+  });
+  it("records deleting a selection across a table as deleted text, a deleted table and deleted marks, never an insertion", async () => {
+    const blocks = [p("Hello world"), p("one"), table(), p(""), p("foo bar"), p("end")];
+    // From "world" to "bar".
+    const r = await suggest(blocks, 1, (st, d) => {
+      let bar = -1;
+      st.doc.descendants((n, pos) => { if (n.isText && n.text === "foo bar") bar = pos + 4; return bar < 0; });
+      d(st.tr.delete(7, bar));
+    });
+    expect(r.kinds.filter(k => k[0] === "insert")).toEqual([]);
+    expect(lines(r.accepted)).toBe(r.edited);
+    expect(lines(r.rejected)).toBe(r.original);
+    // The table's text is struck through too.
+    expect(r.kinds.map(k => k[1]).join("|")).toContain("a");
+  });
+  it("groups one edit's revisions into one suggestion for review, as Google Docs lists it", async () => {
+    const r = await suggest([p("Hello world"), p("middle"), p("foo bar")], 1, (st, d) => d(st.tr.delete(7, 26)));
+    const groups = groupRevisions(revisions(r.body));
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ kind: "delete", text: "world middle foo " });
+    expect(groups[0].ids.size).toBe(revisions(r.body).length);
+    const typed = await suggest([p("Hello world"), p("foo bar")], 1, (st, d) => d(st.tr.insertText("big", 7, 18)));
+    expect(groupRevisions(revisions(typed.body))).toMatchObject([{ kind: "replace", text: "world foo ", inserted: "big" }]);
+  });
+  it("keeps separate edits (other times or authors) as separate suggestions", () => {
+    const rev = (id: string, date: string, author = "Ada") => ({ id, kind: "delete" as const, author, date, text: id });
+    expect(groupRevisions([rev("1", "t1"), rev("2", "t1"), rev("3", "t2"), rev("4", "t2", "Bo"), rev("5", "")]).map(g => [...g.ids])).toEqual([["1", "2"], ["3"], ["4"], ["5"]]);
+  });
+  it("records typing over a selection across paragraphs as one deletion and one insertion", async () => {
+    const r = await suggest([p("Hello world"), p("foo bar")], 1, (st, d) => d(st.tr.insertText("big", 7, 18)));
+    expect(r.kinds).toEqual([["delete", "¶"], ["delete", "world"], ["insert", "big"], ["delete", "foo "]]);
+    expect(lines(r.accepted)).toBe(r.edited);
+    expect(lines(r.rejected)).toBe(r.original);
   });
   it("records an added table column as inserted cells and a grid change", async () => {
     const r = await suggest([p("x"), table()], 6, (st, d) => cmd.addColumn(true)(st, d));

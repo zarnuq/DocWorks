@@ -2,7 +2,7 @@ import { insertPivot, Pivot, pivotAt, readPivots, refreshPivot } from "../../dom
 import { formulaSparklines, readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
 import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
-import { App, FileView, FuzzySuggestModal, Menu, Modal, Notice, Platform, Scope, Setting, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { App, FileView, FuzzySuggestModal, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { detectSeparator, removeDuplicates, splitSources, splitText } from "../../domain/xlsx/cleanup";
 import { importCsv, parseCsv, sheetToCsv } from "../../domain/xlsx/csv";
 import { addName, deleteName, listNames, renameName, setNameRange } from "../../domain/xlsx/names";
@@ -19,11 +19,16 @@ import { SheetSearchMatch, findSheetMatches, replaceCells } from "../../domain/x
 import { showFindPreview } from "../common/find-preview";
 import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
-import { FONTS, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys } from "../common/toolbar";
+import { SaveStatus } from "../common/save-status";
+import { runEditCommand } from "../common/spelling";
+import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
+
+import { FONTS, menuItem, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems } from "../common/toolbar";
 import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
 import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
-import { canExportPdf, exportPdf } from "../common/pdf";
+import { canExportPdf, renderPdf } from "../common/pdf";
+import { ExportFormat, exportDialog, writeExport } from "../common/export-dialog";
 import { Grid, Hit } from "./grid";
 import { Picture, sheetPictures } from "../../domain/xlsx/drawing";
 import { addRule, CfStyle, ConditionalFormats, deleteRule, readRules } from "../../domain/xlsx/conditional";
@@ -37,6 +42,10 @@ import { IMAGE_MIME } from "../../core/utils/images";
 
 export const VIEW_TYPE_XLSX = "doc-works-xlsx-view";
 const THEME_KEY = "doc-works-xlsx-theme";
+const H_ALIGNS: [string, string][] = [["Left", "left"], ["Center", "center"], ["Right", "right"]];
+const V_ALIGNS: [string, string][] = [["Top", "top"], ["Middle", "center"], ["Bottom", "bottom"]];
+const FUNCTIONS = ["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "IF", "VLOOKUP", "CONCATENATE"];
+const FREEZES: [string, string][] = [["No rows", "r0"], ["1 row", "r1"], ["2 rows", "r2"], ["Up to current row", "rc"], ["No columns", "c0"], ["1 column", "c1"], ["2 columns", "c2"], ["Up to current column", "cc"]];
 const ZOOM_KEY = "doc-works-xlsx-zoom";
 /** Google Sheets' zoom levels. */
 const ZOOMS = ["0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
@@ -60,6 +69,8 @@ const NUMBER_FORMATS: [string, string][] = [
 ];
 
 export class XlsxView extends FileView {
+  /** Stops giving focus back to the document after dialogs close. */
+  private stopFocusReturn: (() => void) | null = null;
   allowNoFile = false;
   private edits: Edits | null = null;
   private sheetIndex = 0;
@@ -69,7 +80,7 @@ export class XlsxView extends FileView {
   private formulaInput!: HTMLTextAreaElement;
   private tabsEl!: HTMLElement;
   private statusEl!: HTMLElement;
-  private saveIndicatorEl: HTMLElement | null = null;
+  private saveStatus: SaveStatus | null = null;
   private fontSelect: HTMLSelectElement | null = null;
   private sizeSelect: HTMLSelectElement | null = null;
   private formatSelect: HTMLSelectElement | null = null;
@@ -124,13 +135,10 @@ export class XlsxView extends FileView {
     }
     // The grid's own keys (its input is a textarea) that a user hotkey could take.
     shieldEditingKeys(this.scope, [[["Shift"], "Tab"], [[], "Tab"]]);
-    this.scope.register([], "F6", () => {
-      const grid = this.grid;
-      if (!grid || !this.contentEl.contains(document.activeElement)) return true;
-      if (grid.edit && !grid.commitEdit()) return false;
-      if (document.activeElement === grid.input) this.contentEl.querySelector<HTMLButtonElement>(".dw-toolbar button")?.focus();
-      else grid.focusGrid();
-      return false;
+    focusRegions(this.scope, this.contentEl, () => {
+      // Leaving the grid commits what is being typed, as Sheets does.
+      if (this.grid?.edit) this.grid.commitEdit();
+      return [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.nameBox?.parentElement, this.grid?.input, this.tabsEl, this.findEl];
     });
     this.scope.register(["Mod"], "f", () => {
       this.openFind();
@@ -158,7 +166,9 @@ export class XlsxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
+    addFileItems(this, menu, source);
+    menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
+    menu.addItem((i) => i.setTitle("Download sheet as CSV…").setIcon("file-spreadsheet").setSection("action").onClick(() => void this.exportAs("csv")));
   }
 
   private get wb(): Workbook {
@@ -176,6 +186,8 @@ export class XlsxView extends FileView {
   // ---------------------------------------------------------------------------
 
   async onLoadFile(file: TFile): Promise<void> {
+    this.stopFocusReturn?.();
+    this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(XlsxView) === this, () => this.grid?.focusGrid());
     this.contentEl.empty();
     this.contentEl.addClass("dw-root", "xlsx-editor-root");
     const status = this.contentEl.createDiv({ cls: "dw-loading", text: "Loading spreadsheet..." });
@@ -228,6 +240,7 @@ export class XlsxView extends FileView {
     if (this.savedZoom() !== "1") this.grid.setZoom(Number(this.savedZoom()));
     const bottom = this.contentEl.createDiv({ cls: "xlsx-bottom" });
     this.tabsEl = bottom.createDiv({ cls: "xlsx-tabs" });
+    escapeToEditor(this.tabsEl, () => this.grid?.focusGrid());
     this.statusEl = bottom.createDiv({ cls: "xlsx-status" });
     const input = this.grid.input;
     input.addEventListener("copy", (e) => this.onCopy(e, false));
@@ -247,6 +260,10 @@ export class XlsxView extends FileView {
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
     if (this.dirty) await this.saveNow();
     await this.saving;
+    // A closed file stops retrying (the save above was its last attempt).
+    this.saveStatus?.destroy();
+    this.stopFocusReturn?.();
+    this.stopFocusReturn = null;
     this.closeFind();
     this.grid?.destroy();
     this.grid = null;
@@ -581,22 +598,6 @@ export class XlsxView extends FileView {
     let name = "";
     if (!this.change(() => (name = importCsv(this.edits!, rows, file.basename, this.sheetIndex)))) return;
     this.showSheet(this.wb.sheets.findIndex((s) => s.name === name));
-  }
-
-  /** File › Download › CSV: the current sheet as "<workbook> - <sheet>.csv" in the workbook's folder. */
-  private async downloadCsv(): Promise<void> {
-    if (!this.file) return;
-    const folder = this.file.parent?.path ?? "";
-    const path = normalizePath(`${folder && folder !== "/" ? folder + "/" : ""}${this.file.basename} - ${this.sheet.name}.csv`);
-    const text = sheetToCsv(this.sheet);
-    const existing = this.app.vault.getAbstractFileByPath(path);
-    try {
-      if (existing instanceof TFile) await this.app.vault.modify(existing, text);
-      else await this.app.vault.create(path, text);
-      new Notice(`Saved ${path}`);
-    } catch (err) {
-      new Notice(`Could not save ${path}: ${(err as Error).message}`);
-    }
   }
 
   /** Google's Insert › Pivot table: a new sheet with a pivot table over the selection, then its editor. */
@@ -953,12 +954,8 @@ export class XlsxView extends FileView {
     if (!this.grid) return;
     this.valuesOnly = valuesOnly;
     this.grid.input.focus();
-    if (Platform.isDesktopApp) {
-      const contents = (window.require("electron") as { remote: { getCurrentWebContents(): Record<typeof command, () => void> } }).remote.getCurrentWebContents();
-      contents[command]();
-    } else if (command === "paste") new Notice("Paste with your keyboard or the system menu in the cell editor.");
     // ponytail: no Electron on mobile; the browser's own copy / cut command raises the same clipboard events.
-    else activeDocument.execCommand(command);
+    if (!runEditCommand(command)) new Notice("Paste with your keyboard or the system menu in the cell editor.");
     // The event arrives shortly after; a later Ctrl+V must not paste values only.
     window.setTimeout(() => (this.valuesOnly = false), 1000);
   }
@@ -972,80 +969,141 @@ export class XlsxView extends FileView {
       if ((e.target as HTMLElement).closest("button")) e.preventDefault();
     });
     const tb = new Toolbar(bar);
+    const zoomTo = (z: string) => {
+      zoom.value = z;
+      this.grid?.setZoom(Number(z));
+      this.app.saveLocalStorage(ZOOM_KEY, z);
+    };
+
+    // --- The row: everyday controls, as Google Sheets' toolbar ---
     tb.icon("undo-2", "Undo (Ctrl+Z)", () => this.undo());
     tb.icon("redo-2", "Redo (Ctrl+Y)", () => this.redo());
+    tb.pin();
     tb.gap();
-    this.formatSelect = tb.select("Number format", "123", NUMBER_FORMATS, (code) => this.format({ numFmt: code }));
+    const zoom = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [`${Math.round(Number(z) * 100)}%`, z]), zoomTo);
+    zoom.value = this.savedZoom();
+    tb.gap();
     tb.button("$", "Format as currency", () => this.format({ numFmt: '"$"#,##0.00' }));
     tb.button("%", "Format as percent", () => this.format({ numFmt: "0%" }));
     tb.button(".0←", "Decrease decimal places", () => this.decimals(-1));
     tb.button(".00→", "Increase decimal places", () => this.decimals(1));
+    this.formatSelect = tb.select("Number format", "123", NUMBER_FORMATS, (code) => this.format({ numFmt: code }));
     tb.gap();
     this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (fontName) => this.format({ fontName }));
     this.sizeSelect = tb.select("Font size", "Size", FONT_SIZES.map((s) => [String(s), String(s)]), (s) => this.format({ fontSize: Number(s) }));
+    tb.pin();
     tb.gap();
     this.toggles.set("bold", tb.button("B", "Bold (Ctrl+B)", () => this.toggle("bold"), "bold"));
     this.toggles.set("italic", tb.button("I", "Italic (Ctrl+I)", () => this.toggle("italic"), "italic"));
     this.toggles.set("strike", tb.button("S", "Strikethrough (Ctrl+Shift+X)", () => this.toggle("strike"), "strike"));
     this.toggles.set("underline", tb.button("U", "Underline (Ctrl+U)", () => this.toggle("underline"), "underline"));
     tb.color("A", "Text color", "#000000", (color) => this.format({ color }));
+    tb.gap();
     tb.color("▇", "Fill color", "#FFFF00", (fill) => this.format({ fill }));
     tb.button("No fill", "Remove fill color", () => this.format({ fill: null }));
     tb.iconSelect("square-dashed", "Borders", [["All borders", "all"], ["Outer borders", "outer"], ["Top", "top"], ["Bottom", "bottom"], ["Left", "left"], ["Right", "right"], ["No borders", "none"]], (v) =>
       this.borders(v as "all")
     );
-    tb.gap();
-    tb.icon("align-left", "Align left", () => this.format({ hAlign: "left" }));
-    tb.icon("align-center", "Align center", () => this.format({ hAlign: "center" }));
-    tb.icon("align-right", "Align right", () => this.format({ hAlign: "right" }));
-    tb.iconSelect("align-vertical-justify-center", "Vertical align", [["Top", "top"], ["Middle", "center"], ["Bottom", "bottom"]], (v) => this.format({ vAlign: v as "top" }));
-    this.toggles.set("wrap", tb.icon("wrap-text", "Wrap text", () => this.toggle("wrap")));
     tb.icon("merge", "Merge cells", () => this.mergeToggle());
     tb.gap();
-    tb.iconSelect("sigma", "Functions", ["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "IF", "VLOOKUP", "CONCATENATE"].map((f) => [f, f]), (f) => this.insertFunction(f));
-    tb.icon("arrow-down-az", "Sort ascending by this column", () => this.sort(false));
-    tb.icon("arrow-up-za", "Sort descending by this column", () => this.sort(true));
-    tb.icon("filter", "Create or remove a filter", () => this.toggleFilter());
-    const data = tb.iconSelect("database", "Data", [
-      ["Remove duplicates…", "dedupe"],
-      ["Split text to columns…", "split"],
-      ["Named ranges…", "names"],
-      ["Import CSV as new sheet…", "import"],
-      ["Download sheet as CSV", "export"],
-    ], (v) => {
-      data.value = "";
-      if (v === "dedupe") this.removeDuplicatesDialog();
-      else if (v === "split") this.splitTextDialog();
-      else if (v === "names") this.namedRangesDialog();
-      else if (v === "import") this.pickCsv();
-      else if (v === "export") void this.downloadCsv();
-    });
-    tb.iconSelect("snowflake", "Freeze", [["No rows", "r0"], ["1 row", "r1"], ["2 rows", "r2"], ["Up to current row", "rc"], ["No columns", "c0"], ["1 column", "c1"], ["2 columns", "c2"], ["Up to current column", "cc"]], (v) =>
-      this.freeze(v)
-    );
+    tb.iconSelect("align-left", "Horizontal align", H_ALIGNS, (v) => this.format({ hAlign: v as "left" }));
+    tb.iconSelect("align-vertical-justify-center", "Vertical align", V_ALIGNS, (v) => this.format({ vAlign: v as "top" }));
+    this.toggles.set("wrap", tb.icon("wrap-text", "Wrap text", () => this.toggle("wrap")));
+    tb.gap();
+    tb.icon("message-square-plus", "Insert comment", () => this.commentDialog(this.sel.r1, this.sel.c1));
     tb.icon("chart-column", "Insert chart", () => this.insertChart());
-    tb.icon("table-2", "Insert pivot table", () => this.insertPivotTable());
-    tb.icon("palette", "Conditional formatting", () => this.conditionalDialog());
-    tb.icon("list-checks", "Data validation (dropdowns and rules)", () => this.validationDialog());
-    tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
-    const zoom = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [`${Math.round(Number(z) * 100)}%`, z]), (z) => {
-      this.grid?.setZoom(Number(z));
-      this.app.saveLocalStorage(ZOOM_KEY, z);
-    });
-    zoom.value = this.savedZoom();
-    const { syncTheme, status } = tb.end(this.theme, (t) => this.setTheme(t), "grid");
-    this.syncTheme = syncTheme;
-    this.saveIndicatorEl = status;
-  }
+    tb.icon("filter", "Create or remove a filter", () => this.toggleFilter());
+    tb.iconSelect("sigma", "Functions", FUNCTIONS.map((f) => [f, f]), (f) => this.insertFunction(f));
 
-  private syncTheme: ((t: PaperTheme) => void) | null = null;
+    // --- The menus: every command ---
+    const menu = (name: string, build: (m: Menu) => void) =>
+      tb.menu(name, (m) => {
+        build(m);
+        this.refocusAfter(m);
+      });
+    tb.fileMenu(this, (m) => {
+      menuItem(m, "Export…", () => void this.exportAs());
+      menuItem(m, "Download sheet as CSV…", () => void this.exportAs("csv"));
+    });
+    menu("Edit", (m) => {
+      menuItem(m, "Undo", () => this.undo());
+      menuItem(m, "Redo", () => this.redo());
+      m.addSeparator();
+      menuItem(m, "Cut", () => this.editCommand("cut"));
+      menuItem(m, "Copy", () => this.editCommand("copy"));
+      menuItem(m, "Paste", () => this.editCommand("paste"));
+      menuItem(m, "Paste values only", () => this.editCommand("paste", true));
+      m.addSeparator();
+      menuItem(m, "Find and replace", () => this.openFind());
+    });
+    menu("View", (m) => {
+      subMenu(m, "Freeze", (s) => {
+        for (const [label, v] of FREEZES) menuItem(s, label, () => this.freeze(v));
+      });
+      subMenu(m, "Zoom", (s) => {
+        for (const z of ZOOMS) menuItem(s, `${Math.round(Number(z) * 100)}%`, () => zoomTo(z), { checked: zoom.value === z });
+      });
+      m.addSeparator();
+      menuItem(m, "Light", () => this.setTheme("light"), { checked: this.theme === "light" });
+      menuItem(m, "Dark", () => this.setTheme("dark"), { checked: this.theme === "dark" });
+    });
+    menu("Insert", (m) => {
+      menuItem(m, "Sheet", () => {
+        this.change(() => ops.addSheet(this.edits!, this.sheetIndex));
+        this.showSheet(this.sheetIndex + 1);
+      });
+      menuItem(m, "Chart", () => this.insertChart());
+      menuItem(m, "Pivot table", () => this.insertPivotTable());
+      subMenu(m, "Function", (s) => {
+        for (const f of FUNCTIONS) menuItem(s, f, () => this.insertFunction(f));
+      });
+      m.addSeparator();
+      menuItem(m, "Comment", () => this.commentDialog(this.sel.r1, this.sel.c1));
+      menuItem(m, "Note", () => void this.editNote(this.sel.r1, this.sel.c1));
+      menuItem(m, "Dropdown", () => this.validationDialog());
+    });
+    menu("Format", (m) => {
+      subMenu(m, "Number", (s) => {
+        for (const [label, code] of NUMBER_FORMATS) menuItem(s, label, () => this.format({ numFmt: code }));
+      });
+      subMenu(m, "Text", (s) => {
+        for (const [label, key] of [["Bold", "bold"], ["Italic", "italic"], ["Underline", "underline"], ["Strikethrough", "strike"]] as const) menuItem(s, label, () => this.toggle(key));
+      });
+      subMenu(m, "Alignment", (s) => {
+        for (const [label, h] of H_ALIGNS) menuItem(s, label, () => this.format({ hAlign: h as "left" }));
+        s.addSeparator();
+        for (const [label, v] of V_ALIGNS) menuItem(s, label, () => this.format({ vAlign: v as "top" }));
+      });
+      menuItem(m, "Wrap text", () => this.toggle("wrap"));
+      menuItem(m, "Merge cells", () => this.mergeToggle());
+      m.addSeparator();
+      menuItem(m, "Conditional formatting", () => this.conditionalDialog());
+    });
+    menu("Data", (m) => {
+      const r = this.sel;
+      menuItem(m, "Sort A → Z", () => this.sort(false));
+      menuItem(m, "Sort Z → A", () => this.sort(true));
+      menuItem(m, this.sheet.filter ? "Remove filter" : "Create a filter", () => this.toggleFilter());
+      menuItem(m, "Data validation", () => this.validationDialog());
+      m.addSeparator();
+      menuItem(m, "Remove duplicates…", () => this.removeDuplicatesDialog());
+      menuItem(m, "Split text to columns…", () => this.splitTextDialog());
+      menuItem(m, "Named ranges…", () => this.namedRangesDialog());
+      m.addSeparator();
+      this.groupItems(m, "row", r.r1, r.r2);
+      this.groupItems(m, "col", r.c1, r.c2);
+      m.addSeparator();
+      menuItem(m, "Import CSV as new sheet…", () => this.pickCsv());
+    });
+
+    this.saveStatus = tb.end().status;
+  }
 
   private setTheme(theme: PaperTheme): void {
     this.theme = theme;
     this.app.saveLocalStorage(THEME_KEY, theme);
     this.contentEl.toggleClass("xlsx-theme-dark", theme === "dark");
     this.contentEl.toggleClass("xlsx-theme-light", theme === "light");
-    this.syncTheme?.(theme);
     if (this.grid) {
       this.grid.dark = theme === "dark";
       this.grid.invalidate();
@@ -1544,12 +1602,25 @@ export class XlsxView extends FileView {
 
   /** Export the current sheet's used range: fit to page width (landscape Letter), rows split across pages. */
   /** Google Sheets' print screen: what to print, paper, orientation, scale, margins and gridlines; then the PDF. */
-  async exportPdf(): Promise<void> {
-    if (!this.edits || !this.file) return;
+  /** File › Download, as Google Sheets: PDF (with the print settings) or the current sheet as CSV. */
+  async exportAs(initial?: "pdf" | "csv"): Promise<void> {
+    const file = this.file;
+    if (!this.edits || !file) return;
     if (this.grid?.edit) this.grid.commitEdit();
-    const choice = await printDialog(this.app, printSettings(this.sheet), this.sel.r1 !== this.sel.r2 || this.sel.c1 !== this.sel.c2);
+    const print = { settings: { ...printSettings(this.sheet), margins: { ...printSettings(this.sheet).margins } }, what: "sheet" as PrintWhat };
+    const hasSelection = this.sel.r1 !== this.sel.r2 || this.sel.c1 !== this.sel.c2;
+    const formats: ExportFormat[] = [{ id: "csv", label: "Comma-separated values, current sheet (.csv)", ext: "csv", outside: true, name: `${file.basename} - ${this.sheet.name}` }];
+    if (canExportPdf()) formats.unshift({ id: "pdf", label: "PDF document (.pdf)", ext: "pdf", outside: true, options: (el) => printOptions(el, print, hasSelection) });
+    const choice = await exportDialog(this.app, file, formats, initial);
     if (!choice) return;
-    const { settings, what } = choice;
+    if (choice.format === "csv") return void (await writeExport(this.app, choice.target, sheetToCsv(this.sheet), choice.open));
+    const data = await this.sheetPdf(print.settings, print.what);
+    if (data) await writeExport(this.app, choice.target, data, choice.open);
+  }
+
+  /** The sheet, selection or workbook printed to PDF with `settings` (kept on the sheet, as in Excel). */
+  private async sheetPdf(settings: PrintSettings, what: PrintWhat): Promise<Uint8Array | null> {
+    if (!this.edits) return null;
     // The settings belong to the sheet (as in Excel): keep them when changed.
     if (JSON.stringify(settings) !== JSON.stringify(printSettings(this.sheet))) this.change(() => setPrintSettings(this.edits!, this.sheet, settings));
     const jobs: { sheet: Sheet; range: Rect }[] = [];
@@ -1562,7 +1633,10 @@ export class XlsxView extends FileView {
       }
       if (used) jobs.push({ sheet, range: used });
     }
-    if (!jobs.length) return void new Notice("There's nothing to print.");
+    if (!jobs.length) {
+      new Notice("There's nothing to print.");
+      return null;
+    }
     const pages: HTMLElement[] = [];
     let size = { width: 816, height: 1056 };
     for (const { sheet, range } of jobs) {
@@ -1617,7 +1691,7 @@ export class XlsxView extends FileView {
         pages.push(page);
       }
     }
-    await exportPdf(this.app, this.file, pages, size);
+    return renderPdf(pages, size);
   }
 
   // ---------------------------------------------------------------------------
@@ -1626,7 +1700,7 @@ export class XlsxView extends FileView {
 
   private markDirty(): void {
     this.dirty = true;
-    this.saveIndicatorEl?.setText("Saving…");
+    this.saveStatus?.saving();
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.saveNow(), 800);
   }
@@ -1642,12 +1716,12 @@ export class XlsxView extends FileView {
         this.lastWrite = Date.now();
         await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
         this.lastWrite = Date.now();
+        if (this.dirty) this.saveStatus?.saving();
+        else this.saveStatus?.saved();
       } catch (err) {
         this.dirty = true;
         console.error("Failed to save .xlsx:", err);
-        new Notice(`Failed to save ${file.name}: ${(err as Error).message}`);
-      } finally {
-        this.saveIndicatorEl?.setText(this.dirty ? "Saving…" : "Saved");
+        this.saveStatus?.failed(err, () => void this.saveNow(), file.name);
       }
     });
     return this.saving;
@@ -1703,36 +1777,24 @@ const MARGINS: Record<string, PrintSettings["margins"]> = {
   wide: { top: 1, bottom: 1, left: 1, right: 1 },
 };
 
-/** The print settings screen; resolves null when cancelled. */
-function printDialog(app: App, current: PrintSettings, hasSelection: boolean): Promise<{ settings: PrintSettings; what: "sheet" | "selection" | "workbook" } | null> {
-  return new Promise((resolve) => {
-    let result: { settings: PrintSettings; what: "sheet" | "selection" | "workbook" } | null = null;
-    const ps: PrintSettings = { ...current, margins: { ...current.margins } };
-    let what: "sheet" | "selection" | "workbook" = "sheet";
-    const modal = new Modal(app);
-    modal.titleEl.setText("Print settings");
-    const dropdown = (name: string, options: Record<string, string>, value: string, set: (v: string) => void) =>
-      new Setting(modal.contentEl).setName(name).addDropdown((d) => d.addOptions(options).setValue(value).onChange(set));
-    dropdown("Print", { sheet: "Current sheet", ...(hasSelection ? { selection: "Selected cells" } : {}), workbook: "Workbook" }, what, (v) => (what = v as typeof what));
-    dropdown("Paper size", { letter: "Letter (8.5\" × 11\")", a4: "A4 (8.27\" × 11.69\")", legal: "Legal (8.5\" × 14\")" }, ps.paper, (v) => (ps.paper = v as PrintSettings["paper"]));
-    dropdown("Page orientation", { portrait: "Portrait", landscape: "Landscape" }, ps.landscape ? "landscape" : "portrait", (v) => (ps.landscape = v === "landscape"));
-    dropdown("Scale", { normal: "Normal", width: "Fit to width", page: "Fit to page" }, ps.fit, (v) => (ps.fit = v as PrintSettings["fit"]));
-    new Setting(modal.contentEl).setName("Scale (%)").setDesc("Used when the scale is normal.").addText((t) => {
-      t.inputEl.type = "number";
-      t.setValue(String(ps.scale)).onChange((v) => (ps.scale = Math.min(400, Math.max(10, Math.round(Number(v) || 100)))));
-    });
-    const preset = Object.keys(MARGINS).find((k) => JSON.stringify(MARGINS[k]) === JSON.stringify(ps.margins)) ?? "custom";
-    dropdown("Margins", { normal: "Normal", narrow: "Narrow", wide: "Wide", ...(preset === "custom" ? { custom: "As saved" } : {}) }, preset, (v) => {
-      if (MARGINS[v]) ps.margins = { ...MARGINS[v] };
-    });
-    new Setting(modal.contentEl).setName("Show gridlines").addToggle((t) => t.setValue(ps.gridlines).onChange((v) => (ps.gridlines = v)));
-    new Setting(modal.contentEl)
-      .addButton((b) => b.setButtonText("Export to PDF").setCta().onClick(() => {
-        result = { settings: ps, what };
-        modal.close();
-      }))
-      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
-    modal.onClose = () => resolve(result);
-    modal.open();
+type PrintWhat = "sheet" | "selection" | "workbook";
+
+/** The PDF options of the export dialog: what to print, paper, orientation, scale, margins and gridlines. */
+function printOptions(el: HTMLElement, state: { settings: PrintSettings; what: PrintWhat }, hasSelection: boolean): void {
+  const ps = state.settings;
+  const dropdown = (name: string, options: Record<string, string>, value: string, set: (v: string) => void) =>
+    new Setting(el).setName(name).addDropdown((d) => d.addOptions(options).setValue(value).onChange(set));
+  dropdown("Print", { sheet: "Current sheet", ...(hasSelection ? { selection: "Selected cells" } : {}), workbook: "Workbook" }, state.what, (v) => (state.what = v as PrintWhat));
+  dropdown("Paper size", { letter: "Letter (8.5\" × 11\")", a4: "A4 (8.27\" × 11.69\")", legal: "Legal (8.5\" × 14\")" }, ps.paper, (v) => (ps.paper = v as PrintSettings["paper"]));
+  dropdown("Page orientation", { portrait: "Portrait", landscape: "Landscape" }, ps.landscape ? "landscape" : "portrait", (v) => (ps.landscape = v === "landscape"));
+  dropdown("Scale", { normal: "Normal", width: "Fit to width", page: "Fit to page" }, ps.fit, (v) => (ps.fit = v as PrintSettings["fit"]));
+  new Setting(el).setName("Scale (%)").setDesc("Used when the scale is normal.").addText((t) => {
+    t.inputEl.type = "number";
+    t.setValue(String(ps.scale)).onChange((v) => (ps.scale = Math.min(400, Math.max(10, Math.round(Number(v) || 100)))));
   });
+  const preset = Object.keys(MARGINS).find((k) => JSON.stringify(MARGINS[k]) === JSON.stringify(ps.margins)) ?? "custom";
+  dropdown("Margins", { normal: "Normal", narrow: "Narrow", wide: "Wide", ...(preset === "custom" ? { custom: "As saved" } : {}) }, preset, (v) => {
+    if (MARGINS[v]) ps.margins = { ...MARGINS[v] };
+  });
+  new Setting(el).setName("Show gridlines").addToggle((t) => t.setValue(ps.gridlines).onChange((v) => (ps.gridlines = v)));
 }

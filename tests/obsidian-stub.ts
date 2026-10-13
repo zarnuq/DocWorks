@@ -31,6 +31,7 @@ export const Platform = { isDesktopApp: true, isMobile: false };
 
 export class App {
   scope = new Scope();
+  workspace = { getActiveViewOfType: (_type: unknown): unknown => null };
   loadLocalStorage(key: string): unknown {
     return localData.get(key) ?? null;
   }
@@ -77,17 +78,25 @@ export class Notice {
 }
 
 export class Menu {
-  /** Items added, by title, so tests can run one. */
-  items: { title: string; run?: Fn }[] = [];
+  /** Items added, by title, so tests can run one. Separators are `{ title: "---" }`. */
+  items: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu }[] = [];
+  /** Obsidian's (unlisted) MenuItem.setSubmenu; tests turn it off to check the fallback. */
+  static noSubmenus = false;
   addItem(cb: Fn) {
-    const entry: { title: string; run?: Fn } = { title: "" };
-    const item: any = { setTitle: (t: string) => ((entry.title = t), item), setIcon: () => item, setSection: () => item, onClick: (fn: Fn) => ((entry.run = fn), item), setChecked: () => item, setDisabled: () => item };
+    const entry: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu } = { title: "" };
+    const item: any = {
+      setTitle: (t: string) => ((entry.title = t), item), setIcon: () => item, setSection: () => item, setWarning: () => item,
+      onClick: (fn: Fn) => ((entry.run = fn), item),
+      setChecked: (c: boolean | null) => ((entry.checked = c), item),
+      setDisabled: (d: boolean) => ((entry.disabled = d), item),
+    };
+    if (!Menu.noSubmenus) item.setSubmenu = () => (entry.submenu ??= new Menu());
     cb(item);
     this.items.push(entry);
     return this;
   }
   hideCallbacks: Fn[] = [];
-  addSeparator() { return this; }
+  addSeparator() { this.items.push({ title: "---" }); return this; }
   onHide(cb: Fn) { this.hideCallbacks.push(cb); return this; }
   hide() { this.hideCallbacks.forEach((cb) => cb()); return this; }
   showAtPosition() { Menu.last = this; }
@@ -131,7 +140,7 @@ export class Setting {
       addOptions: (options: Record<string, string>) => { for (const [value, text] of Object.entries(options)) input.createEl("option", { value, text }); return c; },
       setPlaceholder: () => c,
       setLimits: (min: number, max: number, step: number) => { Object.assign(input, { min: String(min), max: String(max), step: String(step) }); return c; },
-      setDynamicTooltip: () => c, inputEl: input,
+      setDynamicTooltip: () => c, inputEl: input, selectEl: input, toggleEl: input,
     };
     cb(c);
     return this;

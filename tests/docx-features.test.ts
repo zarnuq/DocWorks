@@ -126,9 +126,9 @@ describe("links", () => {
 describe("word count", () => {
   it("counts words and characters in the document or the selection", () => {
     const st = state([s.paragraph.create(null, schema.text("One two  three")), s.paragraph.create(null, schema.text("four-five six."))]);
-    expect(countWords(st.doc)).toEqual({ words: 5, chars: 28 });
-    expect(countWords(st.doc, 1, 8)).toEqual({ words: 2, chars: 7 });
-    expect(countWords(s.doc.create(null, s.paragraph.create()))).toEqual({ words: 0, chars: 0 });
+    expect(countWords(st.doc)).toEqual({ words: 5, chars: 28, letters: 24 });
+    expect(countWords(st.doc, 1, 8)).toEqual({ words: 2, chars: 7, letters: 6 });
+    expect(countWords(s.doc.create(null, s.paragraph.create()))).toEqual({ words: 0, chars: 0, letters: 0 });
   });
 });
 

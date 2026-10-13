@@ -292,7 +292,7 @@ function pageDecorations(view: EditorView, opts: PagesOptions): PagesState {
     el.setCssProps({ "--docx-spacer": `${s.height}px` });
     if (s.gapAt !== null) {
       const gap = el.createDiv({ cls: s.gapAt < 0 ? "docx-page-gap docx-page-gap-float is-squeezed" : "docx-page-gap docx-page-gap-float" });
-      gap.setCssProps({ "--docx-gap-top": `${s.gapAt}px`, "--docx-gap-left": `${-s.left}px` });
+      gap.setCssProps({ "--docx-gap-top": `${s.gapAt}px`, "--docx-gap-left": `${-s.left}px`, "--docx-squeeze": `${Math.min(0, s.gapAt)}px` });
       gapParts(gap, s.page);
     }
     return el;

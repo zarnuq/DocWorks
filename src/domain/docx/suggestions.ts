@@ -1,4 +1,4 @@
-import { Fragment, Node as PMNode } from "prosemirror-model";
+import { Fragment, Mark, Node as PMNode, Slice } from "prosemirror-model";
 import { TextSelection, Transaction } from "prosemirror-state";
 import { isHistoryTransaction } from "prosemirror-history";
 import { NS } from "../../core/utils/xml";
@@ -6,7 +6,8 @@ import { Origins, ReadContext, readDocx, w, wVal } from "./docx-reader";
 import { WriteContext, writeBody } from "./docx-writer";
 import { attrsOf, XmlAttrs } from "./schema";
 
-const xml = (el: Element) => new XMLSerializer().serializeToString(el);
+/** XML for comparing, without namespace declarations: Chromium writes those a node carries even where redundant, so the same run read from a file and rewritten from the editor would differ. */
+const xml = (el: Element) => new XMLSerializer().serializeToString(el).replace(/\sxmlns(?::[\w.-]+)?="[^"]*"/g, "");
 const copy = (el: Element) => el.cloneNode(true) as Element;
 const element = (doc: Document, name: string) => doc.createElementNS(NS.w, `w:${name}`);
 
@@ -48,32 +49,59 @@ function align<T>(a: T[], b: T[], same: (a: T, b: T) => boolean, compatible: (a:
   return out;
 }
 
-interface Token { el: Element; wrappers: Element[]; text: string | null; }
-function tokens(parent: Element, wrappers: Element[] = []): Token[] {
+/**
+ * One character of a text run, or one other run-level element. A text token shares its run (`el`) with the run's
+ * other characters; `tokenEl` makes the one-character copy only when it is written out. `sig` (properties and
+ * wrappers) is serialized once per run, so comparing tokens doesn't serialize XML on every keystroke.
+ */
+interface Token { el: Element; wrappers: Element[]; text: string | null; key: string; sig: string; }
+function tokens(parent: Element, wrappers: Element[] = [], wrapSig = ""): Token[] {
   return Array.from(parent.children).flatMap(el => {
-    if (el.namespaceURI === NS.w && ["ins", "hyperlink"].includes(el.localName)) return tokens(el, [...wrappers, el.cloneNode(false) as Element]);
+    if (el.namespaceURI === NS.w && ["ins", "hyperlink"].includes(el.localName)) {
+      const wrapper = el.cloneNode(false) as Element;
+      return tokens(el, [...wrappers, wrapper], wrapSig + xml(wrapper));
+    }
     const t = w(el, "t");
     if (el.localName === "r" && t && Array.from(el.children).every(c => c === t || c.localName === "rPr")) {
-      return Array.from(t.textContent ?? "").map(text => {
-        const run = copy(el);
-        w(run, "t")!.textContent = text;
-        w(run, "t")!.setAttributeNS(NS.xml, "xml:space", "preserve");
-        return { el: run, wrappers, text };
-      });
+      const bare = el.cloneNode(true) as Element;
+      w(bare, "t")!.remove();
+      const sig = xml(bare) + wrapSig;
+      return Array.from(t.textContent ?? "").map(text => ({ el, wrappers, text, key: text, sig }));
     }
-    return el.localName === "pPr" ? [] : [{ el: copy(el), wrappers, text: null }];
+    // An empty run (Word leaves them in blank paragraphs) holds nothing to record.
+    if (el.localName === "pPr" || (el.localName === "r" && Array.from(el.children).every(c => c.localName === "rPr"))) return [];
+    const key = xml(el);
+    return [{ el: copy(el), wrappers, text: null, key, sig: key + wrapSig }];
   });
 }
-const tokenKey = (t: Token) => t.text ?? xml(t.el);
-const tokenSame = (a: Token, b: Token) => tokenKey(a) === tokenKey(b) && xml(a.el) === xml(b.el) && a.wrappers.map(xml).join("") === b.wrappers.map(xml).join("");
+const tokenKey = (t: Token) => t.key;
+const tokenSame = (a: Token, b: Token) => a.text === b.text && a.sig === b.sig;
+/** A copy of the token's element; for a character, its run holding just that character (not a copy of the whole run). */
+function tokenEl(t: Token): Element {
+  if (t.text === null) return copy(t.el);
+  const run = t.el.cloneNode(false) as Element;
+  for (const child of Array.from(t.el.children)) {
+    if (child.localName !== "t") run.appendChild(copy(child));
+    else {
+      const text = run.appendChild(child.cloneNode(false)) as Element;
+      text.textContent = t.text;
+      text.setAttributeNS(NS.xml, "xml:space", "preserve");
+    }
+  }
+  return run;
+}
+const xmlCache = new WeakMap<Element, string>();
+/** XML of an element that is never changed after it is made (token wrappers), serialized once. */
+function cachedXml(el: Element): string {
+  let out = xmlCache.get(el);
+  if (out === undefined) xmlCache.set(el, (out = xml(el)));
+  return out;
+}
 
 class Recorder {
-  private id: number;
   private formatChanges = new Map<string, Element>();
   private date = new Date().toISOString();
-  constructor(before: Element, private author: string) {
-    this.id = Array.from(before.getElementsByTagNameNS(NS.w, "*")).reduce((n, el) => Math.max(n, Number(wVal(el, "id")) || 0), 0) + 1;
-  }
+  constructor(public id: number, private author: string) {}
   private revision(doc: Document, name: string): Element {
     const el = element(doc, name);
     for (const [key, value] of Object.entries({ id: String(this.id++), author: this.author, date: this.date })) el.setAttributeNS(NS.w, `w:${key}`, value);
@@ -152,15 +180,22 @@ class Recorder {
       }
       return null;
     };
+    // Per character: wrappers stay the shared (never mutated) elements, compared by cached XML and copied only when a
+    // new wrapper starts; a run joins the previous one when their properties match (compared by key, not re-serialized).
+    let lastKey: string | null = null;
     for (const [index, [a, b]] of pairs.entries()) {
       const token = b ?? a!;
-      let run = copy(token.el);
-      const wrappers = token.wrappers.map(copy);
+      let run = tokenEl(token);
+      let runKey = token.text !== null ? token.sig : null;
+      const wrappers = token.wrappers.slice();
       if (a && b) {
         active = null;
         const insertion = a.wrappers.find(e => e.localName === "ins");
-        if (insertion && !wrappers.some(e => e.localName === "ins")) wrappers.unshift(copy(insertion));
-        if (!tokenSame(a, b) && a.text !== null && b.text !== null && !wrappers.some(e => e.localName === "ins")) this.properties(w(a.el, "rPr"), run, "rPr");
+        if (insertion && !wrappers.some(e => e.localName === "ins")) wrappers.unshift(insertion);
+        if (!tokenSame(a, b) && a.text !== null && b.text !== null && !wrappers.some(e => e.localName === "ins")) {
+          this.properties(w(a.el, "rPr"), run, "rPr");
+          runKey = xml(w(run, "rPr") ?? element(run.ownerDocument, "rPr"));
+        }
       } else {
         const kind = b ? "ins" : "del";
         if (!b && wrappers.some(e => e.localName === "ins" && wVal(e, "author") === this.author)) continue;
@@ -174,20 +209,23 @@ class Recorder {
           active = { kind, el: near ? (near.cloneNode(false) as Element) : this.revision(next.ownerDocument, kind) };
         }
         for (let i = wrappers.length - 1; i >= 0; i--) if (wrappers[i].localName === "ins") wrappers.splice(i, 1);
-        wrappers.unshift(active.el.cloneNode(false) as Element);
+        wrappers.unshift(active.el);
         if (!b) for (const t of Array.from(run.getElementsByTagNameNS(NS.w, "t"))) {
           const deleted = element(next.ownerDocument, "delText");
           deleted.setAttributeNS(NS.xml, "xml:space", "preserve");
           deleted.textContent = t.textContent;
           t.replaceWith(deleted);
         }
+        if (runKey !== null) runKey = `${kind}:${runKey}`;
       }
-      const signature = wrappers.map(xml).join("");
+      const signature = wrappers.map(cachedXml).join("");
+      if (signature !== lastSignature) lastKey = null;
       if (signature !== lastSignature || !target) {
         target = null;
         for (const wrapper of wrappers) {
-          if (target) target.appendChild(wrapper); else children.push(wrapper);
-          target = wrapper;
+          const placed = wrapper.cloneNode(false) as Element;
+          if (target) target.appendChild(placed); else children.push(placed);
+          target = placed;
         }
         lastSignature = signature;
       }
@@ -195,8 +233,9 @@ class Recorder {
       const previous = container?.lastElementChild ?? (!wrappers.length ? children.at(-1) : null);
       const t = w(run, "t") ?? w(run, "delText");
       const previousText = previous && (w(previous, "t") ?? w(previous, "delText"));
-      if (t && previousText && t.localName === previousText.localName && previous.localName === "r" && xml(w(run, "rPr") ?? element(run.ownerDocument, "rPr")) === xml(w(previous, "rPr") ?? element(run.ownerDocument, "rPr"))) previousText.textContent += t.textContent ?? "";
+      if (t && previousText && runKey !== null && runKey === lastKey && previous.localName === "r") previousText.textContent += t.textContent ?? "";
       else if (container) container.appendChild(run); else children.push(run);
+      lastKey = t ? runKey : null;
     }
     for (const el of Array.from(next.children)) if (el.localName !== "pPr") el.remove();
     next.append(...children);
@@ -223,6 +262,10 @@ class Recorder {
       const rPr = w(pPr, "rPr") ?? pPr.insertBefore(element(out.ownerDocument, "rPr"), w(pPr, "sectPr"));
       rPr.appendChild(this.revision(out.ownerDocument, kind));
     } else if (out.localName === "tr") {
+      // Word strikes through (or underlines) a deleted (inserted) row's text as well.
+      for (const cell of Array.from(out.children).filter(c => c.localName === "tc")) {
+        for (const p of Array.from(cell.children).filter(c => c.localName === "p")) p.replaceWith(this.block(p, kind));
+      }
       const props = w(out, "trPr") ?? out.insertBefore(element(out.ownerDocument, "trPr"), out.firstChild);
       props.insertBefore(this.revision(out.ownerDocument, kind), w(props, "trPrChange"));
     } else if (out.localName === "tbl") {
@@ -274,6 +317,60 @@ class Recorder {
     }
     return null;
   }
+  /** A paragraph like `p` (its properties) holding `parts`, each wrapped back in its insertion / link. */
+  private static paragraph(p: Element, parts: Token[]): Element {
+    const out = p.cloneNode(false) as Element;
+    const props = w(p, "pPr");
+    if (props) out.appendChild(copy(props));
+    for (const t of parts) out.appendChild(t.wrappers.reduceRight<Element>((inner, wrapper) => {
+      const outer = wrapper.cloneNode(false) as Element;
+      outer.appendChild(inner);
+      return outer;
+    }, tokenEl(t)));
+    return out;
+  }
+  /**
+   * A selection deleted (or typed over) across paragraphs: old paragraphs against the one they became. Each old
+   * paragraph keeps its own text with the cut part deleted, the typed text goes where the cut starts, and every
+   * paragraph mark but the last is deleted, as Word records it. Returns null when `pairs[i]` doesn't start one.
+   */
+  private partialJoin(pairs: [Element | null, Element | null][], i: number): { out: Element[]; used: number } | null {
+    // Old blocks (tables in between included) against one new paragraph, which must come from old paragraphs at both ends.
+    let n = 0, at = -1;
+    for (; i + n < pairs.length; n++) {
+      const [a, b] = pairs[i + n];
+      if (!a || (b && (b.localName !== "p" || a.localName !== "p" || at >= 0))) break;
+      if (b) at = n;
+    }
+    while (n > 0 && pairs[i + n - 1][0]!.localName !== "p") n--;
+    const olds = pairs.slice(i, i + n).map(([a]) => a!);
+    if (n < 2 || at < 0 || at >= n || olds[0].localName !== "p") return null;
+    const merged = pairs[i + at][1]!;
+    const parts = olds.map(p => (p.localName === "p" ? tokens(p) : [])), all = parts.flat(), now = tokens(merged);
+    let head = 0, tail = 0;
+    while (head < Math.min(now.length, all.length) && tokenKey(now[head]) === tokenKey(all[head])) head++;
+    while (tail < Math.min(now.length, all.length) - head && tokenKey(now.at(-1 - tail)!) === tokenKey(all.at(-1 - tail)!)) tail++;
+    const typed = now.slice(head, now.length - tail);
+    // Blocks other than paragraphs can only be deleted whole: the cut has to cover them.
+    let offset = 0;
+    for (const [j, old] of olds.entries()) {
+      if (old.localName !== "p" && (head > offset || all.length - tail < offset)) return null;
+      offset += parts[j].length;
+    }
+    let start = 0, placed = false;
+    const out = olds.map((old, j) => {
+      if (old.localName !== "p") return this.block(old, "del");
+      const end = start + parts[j].length;
+      const kept = now.slice(start, Math.max(start, Math.min(end, head)));
+      if (!placed && head <= end) { kept.push(...typed); placed = true; }
+      for (let k = Math.max(start, all.length - tail); k < end; k++) kept.push(now[k - all.length + now.length]);
+      start = end;
+      const next = Recorder.paragraph(old, kept);
+      this.inline(old, next);
+      return j < n - 1 ? this.mark(next, "del") : next;
+    });
+    return { out, used: n };
+  }
   patch(old: Element, next: Element): Element {
     const out = copy(next);
     if (old.isEqualNode(next)) return out;
@@ -310,7 +407,7 @@ class Recorder {
         (a, b) => a.namespaceURI === b.namespaceURI && a.localName === b.localName && ["p", "tbl", "tr", "tc", "sectPr", "tblPr", "tblGrid", "trPr", "tcPr", "sdt", "sdtContent"].includes(a.localName));
       const children: Element[] = [];
       for (let i = 0; i < pairs.length; i++) {
-        const joined = this.splitOrJoin(pairs, i);
+        const joined = this.splitOrJoin(pairs, i) ?? this.partialJoin(pairs, i);
         if (joined) {
           children.push(...joined.out);
           i += joined.used - 1;
@@ -331,7 +428,7 @@ class Recorder {
 let generation = 0;
 const originIndexes = new WeakMap<Origins, Map<string, string[]>>();
 /** Preserve origin versions referenced by undo history instead of replacing them after each edit. */
-function retainOrigins(doc: PMNode, readOrigins: Origins, origins: Origins): PMNode {
+export function retainOrigins(doc: PMNode, readOrigins: Origins, origins: Origins): PMNode {
   const prefix = `suggestion${++generation}:`;
   let index = originIndexes.get(origins);
   if (!index) {
@@ -417,21 +514,88 @@ function cursorBefore(source: PMNode, target: PMNode, pos: number, origins: Orig
   return Math.min(pos, target.content.size);
 }
 
-/** Turn the user's transaction into one undoable Word-compatible suggestion. Does not mutate the package. */
+/**
+ * Apply `next` over `old` (the same blocks, starting at `pos`) as small steps: changed attributes in place and only
+ * the differing text inside a paragraph replaced. Decorations elsewhere (page gaps, spacers) then stay put instead of
+ * vanishing with a replaced block. Returns false, changing nothing, when the block structure differs.
+ */
+function patchInPlace(tr: Transaction, pos: number, old: Fragment, next: Fragment): boolean {
+  const ops: (() => void)[] = [];
+  const walk = (at: number, a: Fragment, b: Fragment): boolean => {
+    if (a.childCount !== b.childCount) return false;
+    for (let i = 0; i < a.childCount; at += a.child(i).nodeSize, i++) {
+      const x = a.child(i), y = b.child(i), here = at;
+      if (x.type !== y.type) return false;
+      if (x !== y && !x.eq(y)) {
+        if (x.isTextblock) {
+          const start = x.content.findDiffStart(y.content);
+          const end = x.content.findDiffEnd(y.content);
+          if (start !== null && end) {
+            const [endA, endB] = [Math.max(end.a, start), Math.max(end.b, start)];
+            ops.push(() => tr.replace(here + 1 + start, here + 1 + endA, new Slice(y.content.cut(start, endB), 0, 0)));
+          }
+        } else if (x.isLeaf || !walk(here + 1, x.content, y.content)) return false;
+        // Attribute steps (unlike setNodeMarkup) don't touch positions, so nothing mapped across them is lost.
+        if (!Mark.sameSet(x.marks, y.marks)) ops.push(() => tr.setNodeMarkup(here, undefined, y.attrs, y.marks));
+        else for (const [name, value] of Object.entries(y.attrs)) if (x.attrs[name] !== value) ops.push(() => tr.setNodeAttribute(here, name, value));
+      }
+    }
+    return true;
+  };
+  if (!walk(pos, old, next)) return false;
+  // Last first, so earlier positions stay valid.
+  for (const op of ops.reverse()) op();
+  return true;
+}
+
+const maxId = (root: Element) => Array.from(root.getElementsByTagNameNS(NS.w, "*")).reduce((n, el) => Math.max(n, Number(wVal(el, "id")) || 0), 0);
+/** The next free revision id per document (its origins), found from the whole body once, then counted up. */
+const nextIds = new WeakMap<Origins, number>();
+
+/**
+ * Turn the user's transaction into one undoable Word-compatible suggestion. Does not mutate the package.
+ * Only the top-level blocks the edit changed (and one neighbour each side) are written, compared and read back,
+ * so a keystroke costs the same in a long document as in a short one.
+ */
 export function suggestTransaction(tr: Transaction, origins: Origins, ctx: WriteContext, readContext: ReadContext, author: string, opts: { forward?: boolean } = {}): Transaction {
   if (!tr.docChanged || isHistoryTransaction(tr) || tr.getMeta("addToHistory") === false || tr.getMeta("suggestionsRecorded")) return tr;
+  const a = tr.before, b = tr.doc;
+  let start = 0, endA = a.childCount, endB = b.childCount;
+  // A change to the document's own attributes (the final section) goes through the whole body.
+  if (a.sameMarkup(b)) {
+    const same = (x: PMNode, y: PMNode) => x === y || x.eq(y);
+    while (start < endA && start < endB && same(a.child(start), b.child(start))) start++;
+    while (endA > start && endB > start && same(a.child(endA - 1), b.child(endB - 1))) { endA--; endB--; }
+    start = Math.max(0, start - 1);
+    const after = Math.min(1, a.childCount - endA);
+    endA += after;
+    endB += after;
+  }
+  const at = (doc: PMNode, index: number) => { let pos = 0; for (let k = 0; k < index; k++) pos += doc.child(k).nodeSize; return pos; };
+  const fromA = at(a, start), toA = at(a, endA), fromB = at(b, start), toB = at(b, endB);
   const owner = document.implementation.createDocument(NS.w, "w:body");
   const before = owner.documentElement;
-  writeBody(before, tr.before, origins, ctx);
-  const after = copy(before);
-  writeBody(after, tr.doc, origins, ctx);
-  const recorded = new Recorder(before, author).patch(before, after);
+  writeBody(before, a.copy(a.content.cut(fromA, toA)), origins, ctx);
+  const afterBody = copy(before);
+  writeBody(afterBody, b.copy(b.content.cut(fromB, toB)), origins, ctx);
+  let first = nextIds.get(origins);
+  if (first === undefined) {
+    const whole = owner.createElementNS(NS.w, "w:body");
+    writeBody(whole, a, origins, ctx);
+    first = maxId(whole) + 1;
+  }
+  const recorder = new Recorder(Math.max(first, maxId(before) + 1), author);
+  const recorded = recorder.patch(before, afterBody);
+  nextIds.set(origins, recorder.id);
   const read = readDocx(recorded, readContext);
   const suggested = retainOrigins(read.doc, read.origins, origins);
+  // The cursor, mapped within the recorded blocks only (outside them nothing moved but the size of what's between).
+  const source = b.copy(b.content.cut(fromB, toB)), grown = suggested.content.size - (toB - fromB);
+  const place = (pos: number, forward?: boolean) => pos < fromB ? pos : pos > toB ? pos + grown : fromB + cursorAt(source, suggested, pos - fromB, origins, forward);
   const selection = tr.selection;
-  const from = cursorAt(tr.doc, suggested, selection.from, origins, opts.forward && selection.empty), to = selection.empty ? from : cursorAt(tr.doc, suggested, selection.to, origins);
-  tr.replaceWith(0, tr.doc.content.size, suggested.content);
-  tr.setDocAttribute("sectPr", suggested.attrs.sectPr);
+  const from = place(selection.from, opts.forward && selection.empty), to = selection.empty ? from : place(selection.to);
+  if (!patchInPlace(tr, fromB, b.content.cut(fromB, toB), suggested.content)) tr.replaceWith(fromB, toB, suggested.content);
+  if (!a.sameMarkup(b)) tr.setDocAttribute("sectPr", suggested.attrs.sectPr);
   tr.setSelection(TextSelection.near(tr.doc.resolve(from)));
   if (from !== to) tr.setSelection(TextSelection.create(tr.doc, from, to));
   return tr.setMeta("suggestionsRecorded", true);

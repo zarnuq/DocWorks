@@ -4,7 +4,7 @@ import { attrsOf, cropBox, ImageAttrs } from "../../domain/docx/schema";
 import { placementCss, PlacementGeometry, recrop, Wrap } from "../../domain/docx/drawing";
 
 /** Google Docs' image options, in its order. */
-const WRAPS: [Wrap, string][] = [
+export const WRAPS: [Wrap, string][] = [
   ["inline", "In line"],
   ["square", "Wrap text"],
   ["topBottom", "Break text"],

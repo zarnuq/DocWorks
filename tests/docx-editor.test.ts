@@ -4,6 +4,7 @@ import { DecorationSet } from "prosemirror-view";
 import { docxSchema as schema } from "../src/domain/docx/schema";
 import { DocxStyles } from "../src/domain/docx/docx-styles";
 import { cmd, docxPlugins, EditorContext } from "../src/presentation/docx/docx-editor";
+import { CellSelection } from "../src/presentation/docx/cell-selection";
 
 const s = schema.nodes;
 const para = (text: string, attrs: Record<string, unknown> = {}) => s.paragraph.create(attrs, text ? schema.text(text) : null);
@@ -213,6 +214,52 @@ describe("tables", () => {
   it("shades the current cell", () => {
     const st = run(inCell(withTable(), 1, 2), cmd.setCellBackground("#ABCDEF"));
     expect(table(st).child(1).child(2).attrs.background).toBe("#ABCDEF");
+  });
+
+  // A drag from cell a to cell b.
+  const across = (a: EditorState, b: EditorState) => a.apply(a.tr.setSelection(CellSelection.create(a.doc, a.selection.from - 2, b.selection.from - 2)));
+  const fills = (st: EditorState) => [0, 1].map((r) => [0, 1, 2].map((c) => table(st).child(r).child(c).attrs.background as string | null));
+
+  it("shades every cell of a selection across a row", () => {
+    const st = withTable();
+    const next = run(across(inCell(st, 1, 0), inCell(st, 1, 2)), cmd.setCellBackground("#ABCDEF"));
+    expect(fills(next)).toEqual([[null, null, null], ["#ABCDEF", "#ABCDEF", "#ABCDEF"]]);
+  });
+
+  it("marks the selected cells when a selection spans more than one", () => {
+    const marked = (st: EditorState) => {
+      const out: string[] = [];
+      for (const p of st.plugins) {
+        const set = p.props.decorations?.call(p, st) as DecorationSet | undefined;
+        set?.find().forEach((d) => {
+          if ((d as unknown as { type: { attrs: { class?: string } } }).type.attrs.class === "is-cell-selected") out.push(`${d.from}`);
+        });
+      }
+      return out.length;
+    };
+    const st = withTable();
+    expect(marked(inCell(st, 0, 0))).toBe(0);
+    expect(marked(across(inCell(st, 0, 0), inCell(st, 1, 1)))).toBe(4);
+  });
+
+  it("won't drag a selection across cells (dropping it would add cells to a row)", () => {
+    const dragstart = (st: EditorState) => {
+      const e = new Event("dragstart", { cancelable: true });
+      for (const p of st.plugins) p.props.handleDOMEvents?.dragstart?.call(p, { state: st } as never, e as DragEvent);
+      return e.defaultPrevented;
+    };
+    const st = withTable();
+    expect(dragstart(across(inCell(st, 0, 0), inCell(st, 0, 1)))).toBe(true);
+    const inOne = inCell(st, 0, 0);
+    expect(dragstart(inOne.apply(inOne.tr.setSelection(TextSelection.create(inOne.doc, inOne.selection.from - 1, inOne.selection.from))))).toBe(false);
+  });
+
+  it("shades the rectangle of cells a selection spans, across rows and columns", () => {
+    const st = withTable();
+    const next = run(across(inCell(st, 0, 0), inCell(st, 1, 1)), cmd.setCellBackground("#ABCDEF"));
+    expect(fills(next)).toEqual([["#ABCDEF", "#ABCDEF", null], ["#ABCDEF", "#ABCDEF", null]]);
+    const column = run(across(inCell(st, 0, 2), inCell(st, 1, 2)), cmd.setCellBackground("#123456"));
+    expect(fills(column)).toEqual([[null, null, "#123456"], [null, null, "#123456"]]);
   });
 
   it("deletes the whole table", () => {

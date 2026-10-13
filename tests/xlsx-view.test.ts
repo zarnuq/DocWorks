@@ -1,7 +1,7 @@
-vi.mock("../src/presentation/common/pdf", () => ({ exportPdf: vi.fn(async () => null) }));
+vi.mock("../src/presentation/common/pdf", () => ({ canExportPdf: () => true, renderPdf: vi.fn(async () => null) }));
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
-import { App, TFile, WorkspaceLeaf } from "./obsidian-stub";
+import { App, Menu, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { XlsxView } from "../src/presentation/xlsx/xlsx-view";
 import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
@@ -34,6 +34,20 @@ async function mount() {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   };
   return { view, file, saved, input, type };
+}
+
+function menuTitles(view: { contentEl: HTMLElement }, name: string): string[] {
+  Array.from(view.contentEl.querySelectorAll<HTMLButtonElement>(".dw-menu-btn")).find((x) => x.textContent === name)!.click();
+  return Menu.last!.items.map((i) => i.title).filter((t) => t !== "---");
+}
+function runMenu(view: { contentEl: HTMLElement }, name: string, ...path: string[]): void {
+  menuTitles(view, name);
+  let menu = Menu.last!;
+  for (const title of path) {
+    const item = menu.items.find((i) => i.title === title)!;
+    if (item.submenu) menu = item.submenu;
+    else item.run!(new MouseEvent("click"));
+  }
 }
 
 const reopen = async (data: ArrayBuffer) => Workbook.open(await XlsxWorkbook.load(new Uint8Array(data)));
@@ -261,16 +275,16 @@ describe("XlsxView conditional formatting and dropdowns", () => {
 describe('spreadsheet printing', () => {
   it('includes charts outside the used cells in the printed pages', async () => {
     const { view, file } = await mount();
-    const v = view as unknown as { edits: import('../src/domain/xlsx/commands').Edits; sheet: import('../src/domain/xlsx/workbook-model').Sheet; exportPdf(): Promise<void> };
+    const v = view as unknown as { edits: import('../src/domain/xlsx/commands').Edits; sheet: import('../src/domain/xlsx/workbook-model').Sheet };
     const { insertChart, moveChart } = await import('../src/domain/xlsx/charts');
     const path = insertChart(v.edits, v.sheet, {r1: 0, c1: 0, r2: 3, c2: 2});
     moveChart(v.edits, path, {x: 50, y: 400, w: 300, h: 200});
-    const exporting = view.exportPdf();
-    const button = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Export to PDF')!;
+    const exporting = view.exportAs('pdf');
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.test-modal button')).find(b => b.textContent === 'Export')!;
     expect(button).toBeTruthy(); button.click();
     await exporting;
-    const { exportPdf } = await import('../src/presentation/common/pdf');
-    const pages = vi.mocked(exportPdf).mock.calls.at(-1)![2];
+    const { renderPdf } = await import('../src/presentation/common/pdf');
+    const pages = vi.mocked(renderPdf).mock.calls.at(-1)![0];
     expect(pages.some(p => p.querySelector('.xlsx-chart svg'))).toBe(true);
     expect(Math.max(...pages.map(p => parseFloat(p.querySelector<HTMLElement>('.xlsx-print-sheet')!.style.getPropertyValue('--xlsx-print-h'))))).toBeGreaterThanOrEqual(600);
     await view.onUnloadFile(file);
@@ -306,9 +320,10 @@ it("F6 moves focus between the cell editor and toolbar without committing naviga
   const scope = view.scope as unknown as { keys: {mods: string[]; key: string; fn: () => boolean}[] };
   const f6 = scope.keys.find(k => k.key === "F6" && !k.mods.length)!;
   expect(f6).toBeDefined();
+  const back = scope.keys.find(k => k.key === "F6" && k.mods.join() === "Shift")!;
   input.focus(); f6.fn();
-  expect(document.activeElement).toBe(view.contentEl.querySelector('.dw-toolbar button'));
-  f6.fn(); expect(document.activeElement).toBe(input);
+  expect((view as any).tabsEl.contains(document.activeElement)).toBe(true);
+  back.fn(); expect(document.activeElement).toBe(input);
   expect(saved).toEqual([]);
   await view.onUnloadFile(file);
 });
@@ -410,13 +425,91 @@ describe("XlsxView data tools", () => {
     const v = view as any;
     const written: [string, string][] = [];
     v.app.vault.create = async (path: string, data: string) => { written.push([path, data]); return new TFile(path); };
-    (file as any).parent = { path: "folder" };
-    await v.downloadCsv();
+    (file as any).path = "folder/book.xlsx";
+    const exporting = v.exportAs("csv");
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".test-modal button")).find((b) => b.textContent === "Export")!.click();
+    await exporting;
     expect(written[0][0]).toBe("folder/book - Data.csv");
     expect(written[0][1].startsWith("Name,Notes,Double\r\n")).toBe(true);
     v.app.vault.read = async () => "a,b\n1,2\n";
     await v.importCsvFile(new TFile("in/prices.csv"));
     expect(v.sheet.name).toBe("prices");
     expect(v.sheet.cell("B2")!.value).toBe(2);
+  });
+});
+
+describe("XlsxView save status", () => {
+  it("shows Couldn't save with Retry when writing fails, and Saved after a retry works", async () => {
+    const { view, type } = await mount();
+    const v = view as any;
+    let fail = true;
+    const write = v.app.vault.modifyBinary;
+    v.app.vault.modifyBinary = async (f: unknown, d: ArrayBuffer) => {
+      if (fail) throw new Error("read-only file");
+      return write(f, d);
+    };
+    type("5");
+    await v.saveNow();
+    const status = view.contentEl.querySelector<HTMLElement>(".dw-status")!;
+    expect(status.textContent).toContain("Couldn't save");
+    fail = false;
+    status.querySelector<HTMLButtonElement>("button")!.click();
+    await v.saving;
+    expect(status.textContent).toBe("Saved");
+  });
+});
+
+describe("XlsxView keyboard", () => {
+  it("has one toolbar Tab stop and cycles F6 through toolbar, formula bar, grid and sheet tabs", async () => {
+    const { view } = await mount();
+    const v = view as any;
+    const stops = Array.from(view.contentEl.querySelectorAll<HTMLElement>(".dw-toolbar button, .dw-toolbar select, .dw-toolbar input")).filter((el) => el.tabIndex === 0);
+    expect(stops).toHaveLength(1);
+    const f6 = v.scope.keys.find((k: any) => k.key === "F6" && !k.mods.length).fn;
+    v.grid.focusGrid();
+    f6();
+    expect(v.tabsEl.contains(document.activeElement)).toBe(true);
+    f6();
+    expect(view.contentEl.querySelector(".dw-menubar")!.contains(document.activeElement)).toBe(true);
+    f6();
+    expect(view.contentEl.querySelector(".dw-toolbar")!.contains(document.activeElement)).toBe(true);
+    f6();
+    expect(document.activeElement).toBe(v.nameBox);
+    f6();
+    expect(document.activeElement).toBe(v.grid.input);
+  });
+});
+
+describe("XlsxView menus", () => {
+  it("has Google's menus; the data tools live in Data, not the row", async () => {
+    const { view, file } = await mount();
+    expect(Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent)).toEqual(["File", "Edit", "View", "Insert", "Format", "Data"]);
+    expect(menuTitles(view, "File")).toEqual(["Export…", "Download sheet as CSV…"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Chart", "Pivot table", "Function", "Comment", "Note", "Dropdown"]);
+    expect(menuTitles(view, "Format")).toEqual(["Number", "Text", "Alignment", "Wrap text", "Merge cells", "Conditional formatting"]);
+    expect(menuTitles(view, "Data")).toEqual(["Sort A → Z", "Sort Z → A", "Create a filter", "Data validation", "Remove duplicates…", "Split text to columns…", "Named ranges…", "Group rows 2 - 2", "Group columns A - A", "Import CSV as new sheet…"]);
+    for (const l of ["Data", "Freeze", "Insert pivot table", "Conditional formatting", "Find and replace (Ctrl+F)"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).toBeNull();
+    for (const l of ["Undo (Ctrl+Z)", "Number format", "Font", "Bold (Ctrl+B)", "Fill color", "Borders", "Horizontal align", "Wrap text", "Insert comment", "Insert chart", "Create or remove a filter", "Functions"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).not.toBeNull();
+    expect(view.contentEl.querySelector(".dw-segmented")).toBeNull();
+    await view.onUnloadFile(file);
+  });
+
+  it("freezes from View and switches the theme there", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    runMenu(view, "View", "Freeze", "1 row");
+    expect(v.sheet.frozen.rows).toBe(1);
+    runMenu(view, "View", "Dark");
+    expect(view.contentEl.classList.contains("xlsx-theme-dark")).toBe(true);
+    menuTitles(view, "View");
+    expect(Menu.last!.items.find((i) => i.title === "Dark")!.checked).toBe(true);
+    await view.onUnloadFile(file);
+  });
+
+  it("names the filter item after the sheet's state", async () => {
+    const { view, file } = await mount();
+    runMenu(view, "Data", "Create a filter");
+    expect(menuTitles(view, "Data")).toContain("Remove filter");
+    await view.onUnloadFile(file);
   });
 });

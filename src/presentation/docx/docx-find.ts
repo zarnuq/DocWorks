@@ -122,8 +122,8 @@ export function findPlugin(): Plugin<FindState> {
   });
 }
 
-/** Words and characters (with spaces, without paragraph breaks), like Word's count. */
-export function countWords(doc: PMNode, from = 0, to = doc.content.size): { words: number; chars: number } {
+/** Words, characters (with spaces, without paragraph breaks) and characters excluding spaces, like Google Docs' count. */
+export function countWords(doc: PMNode, from = 0, to = doc.content.size): { words: number; chars: number; letters: number } {
   const text = doc.textBetween(from, to, "\n", "\n");
-  return { words: text.split(/\s+/).filter(Boolean).length, chars: text.replace(/\n/g, "").length };
+  return { words: text.split(/\s+/).filter(Boolean).length, chars: text.replace(/\n/g, "").length, letters: text.replace(/\s/g, "").length };
 }

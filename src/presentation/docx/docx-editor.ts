@@ -18,6 +18,7 @@ import { Columns, DEFAULT_SECTPR, ONE_COLUMN, regroup, sections, sectionType, wi
 import { latexToOmml, ommlToLatex } from "../../domain/docx/math";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
+import { CellSelection, cellBefore, cellSelectionPlugin } from "./cell-selection";
 
 export interface EditorContext {
   /** numId of the list definition used for new bullet / numbered lists. */
@@ -58,12 +59,13 @@ function codeBlockAt($pos: ResolvedPos): { node: PMNode; pos: number } | null {
 
 /** Positions and nodes of the paragraphs touched by the selection. */
 function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[] {
-  const { from, to } = state.selection;
   const out: { pos: number; node: PMNode }[] = [];
-  state.doc.nodesBetween(from, to, (node, pos) => {
-    if (node.type === schema.nodes.paragraph) out.push({ pos, node });
-    return node.type !== schema.nodes.paragraph;
-  });
+  for (const { $from, $to } of state.selection.ranges) {
+    state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+      if (node.type === schema.nodes.paragraph) out.push({ pos, node });
+      return node.type !== schema.nodes.paragraph;
+    });
+  }
   return out;
 }
 
@@ -142,6 +144,18 @@ const rowsOf = (table: PMNode) => {
 const gridStart = (cells: PMNode[], col: number) => cells.slice(0, col).reduce((n, c) => n + attrsOf<CellAttrs>(c).colspan, 0);
 /** Index of the cell starting at grid column `g`, or -1. */
 const cellAtGrid = (cells: PMNode[], g: number) => cells.findIndex((_, i) => gridStart(cells, i) === g);
+
+/** Positions of the selected cells: a cell selection's, else every cell the selection touches (or the one around the cursor). */
+function selectedCells(state: EditorState): number[] {
+  const sel = state.selection;
+  if (sel instanceof CellSelection) return sel.cells;
+  const out: number[] = [];
+  state.doc.nodesBetween(sel.from, sel.to, (node, pos) => {
+    if (node.type === schema.nodes.table_cell) out.push(pos);
+  });
+  const around = cellBefore(sel.$from);
+  return out.length ? out : around === null ? [] : [around];
+}
 
 const isEmptyCell = (cell: PMNode) => cell.childCount === 1 && cell.firstChild!.content.size === 0;
 /** Cell content followed by another cell's content (skipping an empty side). */
@@ -678,15 +692,17 @@ export const cmd = {
   /** Apply a mark with attrs (or remove it when attrs is null) to the selection or the next typed text. */
   setMark(type: MarkType, attrs: Attrs | null): Command {
     return (state, dispatch) => {
-      const { from, to, empty } = state.selection;
+      const { ranges, empty } = state.selection;
       if (dispatch) {
         const tr = state.tr;
         if (empty) {
           tr.removeStoredMark(type);
           if (attrs) tr.addStoredMark(type.create(attrs));
         } else {
-          tr.removeMark(from, to, type);
-          if (attrs) tr.addMark(from, to, type.create(attrs));
+          for (const { $from, $to } of ranges) {
+            tr.removeMark($from.pos, $to.pos, type);
+            if (attrs) tr.addMark($from.pos, $to.pos, type.create(attrs));
+          }
         }
         dispatch(tr);
       }
@@ -696,10 +712,11 @@ export const cmd = {
 
   /** Remove all direct formatting (and the original run properties), keeping links. */
   clearFormatting: ((state, dispatch) => {
-    const { from, to } = state.selection;
     if (dispatch) {
       const tr = state.tr;
-      for (const type of Object.values(schema.marks)) if (type !== schema.marks.link && type !== schema.marks.insertion) tr.removeMark(from, to, type);
+      for (const { $from, $to } of state.selection.ranges) {
+        for (const type of Object.values(schema.marks)) if (type !== schema.marks.link && type !== schema.marks.insertion) tr.removeMark($from.pos, $to.pos, type);
+      }
       dispatch(tr.setStoredMarks([]));
     }
     return true;
@@ -834,15 +851,17 @@ export const cmd = {
   deleteColumn: editTable((rows, { col }) => rows.map((cells) => cells.filter((_, i) => i !== col))),
   deleteTable: editTable(() => []),
 
+  /** Shade every selected cell: the block of rows and columns between the selection's ends, as Google Docs' cell selection. */
   setCellBackground(background: string | null): Command {
     return (state, dispatch) => {
-      const $from = state.selection.$from;
-      for (let d = $from.depth; d > 0; d--) {
-        if ($from.node(d).type !== schema.nodes.table_cell) continue;
-        if (dispatch) dispatch(state.tr.setNodeMarkup($from.before(d), undefined, { ...$from.node(d).attrs, background }));
-        return true;
+      const cells = selectedCells(state);
+      if (!cells.length) return false;
+      if (dispatch) {
+        const tr = state.tr;
+        for (const pos of cells) tr.setNodeMarkup(pos, undefined, { ...tr.doc.nodeAt(pos)!.attrs, background });
+        dispatch(tr);
       }
-      return false;
+      return true;
     };
   },
 
@@ -1223,5 +1242,6 @@ export function docxPlugins(ctx: EditorContext, extraKeys: Record<string, Comman
     }),
     findPlugin(),
     sectionDedupe(),
+    cellSelectionPlugin(),
   ];
 }

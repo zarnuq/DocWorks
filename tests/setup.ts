@@ -59,6 +59,9 @@ Object.assign(HTMLElement.prototype, {
   toggleClass(this: HTMLElement, c: string, on: boolean) {
     this.classList.toggle(c, on);
   },
+  hasClass(this: HTMLElement, c: string) {
+    return this.classList.contains(c);
+  },
   setText(this: HTMLElement, t: string) {
     this.textContent = t;
   },

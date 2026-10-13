@@ -87,3 +87,21 @@ describe("drawing adjusted pictures", () => {
     host.remove();
   });
 });
+
+describe("replacing a picture", () => {
+  it("swaps the image, keeping size, crop and adjustments, and drops an SVG version of the old one", async () => {
+    const { replacePicture } = await import("../src/domain/pptx/picture-adjust");
+    const { doc, path, pic, model, blip } = await picture();
+    setPictureAdjust(pic, { ...NO_ADJUST, recolor: "gray" });
+    const svg = blip().ownerDocument.createElementNS(A, "a:extLst");
+    svg.appendChild(blip().ownerDocument.createElementNS(A, "a:ext")).setAttribute("uri", "{96DAC541-7B7A-43D3-8B79-37D633B846F1}");
+    blip().appendChild(svg);
+    const before = model().rect;
+    const JPG = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    replacePicture(doc, path, pic, JPG, "jpeg");
+    expect(model().rect).toEqual(before);
+    expect(model().adjust!.recolor).toBe("gray");
+    expect(await doc.media(model().image!)).toEqual(JPG);
+    expect(blip().getElementsByTagNameNS(A, "ext")).toHaveLength(0);
+  });
+});

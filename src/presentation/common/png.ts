@@ -1,9 +1,9 @@
 /*
  * Download a slide as PNG, as Google Slides' File › Download › PNG: the slide is drawn over everything at the top left
  * of the window, Chromium's DevTools protocol renders that box of the page at PNG_WIDTH pixels wide (the window's
- * own capture returns stale frames while it isn't focused), and the picture is saved next to the deck. Desktop only.
+ * own capture returns stale frames while it isn't focused), and the export dialog saves it. Desktop only.
  */
-import { App, normalizePath, Notice, TFile } from "obsidian";
+import { Notice } from "obsidian";
 import { canExportPdf } from "./pdf";
 
 interface Electron {
@@ -23,14 +23,8 @@ interface Electron {
 /** Width of the saved picture in pixels (Full HD for a 16:9 deck). */
 export const PNG_WIDTH = 1920;
 
-/** "<folder>/<deck> - slide N.png". */
-export function pngPath(file: TFile, slideNumber: number): string {
-  const folder = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/") + 1) : "";
-  return normalizePath(`${folder}${file.basename} - slide ${slideNumber}.png`);
-}
-
-/** Draw a slide `size` px big with `draw`, capture it and save it; resolves with the vault path, or null. */
-export async function exportPng(app: App, file: TFile, slideNumber: number, size: { width: number; height: number }, draw: (host: HTMLElement) => void): Promise<string | null> {
+/** Draw a slide `size` px big with `draw` and capture it as PNG bytes; null on mobile or failure (with a notice). */
+export async function renderPng(size: { width: number; height: number }, draw: (host: HTMLElement) => void): Promise<Uint8Array | null> {
   if (!canExportPdf()) {
     new Notice("Downloading a PNG needs the desktop app.");
     return null;
@@ -58,14 +52,7 @@ export async function exportPng(app: App, file: TFile, slideNumber: number, size
     } finally {
       if (!attached) dbg.detach();
     }
-    const bytes = Uint8Array.from(atob(shot.data), (c) => c.charCodeAt(0));
-    const data = bytes.buffer;
-    const path = pngPath(file, slideNumber);
-    const existing = app.vault.getFileByPath(path);
-    if (existing) await app.vault.modifyBinary(existing, data);
-    else await app.vault.createBinary(path, data);
-    new Notice(`Saved ${path}`);
-    return path;
+    return Uint8Array.from(atob(shot.data), (c) => c.charCodeAt(0));
   } catch (e) {
     new Notice(`Couldn't save the PNG: ${e instanceof Error ? e.message : String(e)}`);
     return null;

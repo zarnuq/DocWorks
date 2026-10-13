@@ -73,15 +73,15 @@ export function buildArrangePanel(host: HTMLElement, a: ArrangeControl): void {
 }
 
 const EMU_PER_INCH = 914400;
-const EMU_PER_PT = 12700;
+export const EMU_PER_PT = 12700;
 const DEFAULT_COLOR = "#4472C4";
-const DASHES: [string, string][] = [
+export const DASHES: [string, string][] = [
   ["Solid", "solid"], ["Round dot", "sysDot"], ["Square dot", "sysDash"], ["Dash", "dash"], ["Dash dot", "dashDot"],
   ["Long dash", "lgDash"], ["Long dash dot", "lgDashDot"], ["Long dash dot dot", "lgDashDotDot"],
 ];
 const ARROWS: [string, string][] = [["None", ""], ["Triangle", "triangle"], ["Stealth", "stealth"], ["Open", "arrow"], ["Diamond", "diamond"], ["Oval", "oval"]];
 
-const spPrOf = (el: Element) => Array.from(el.children).find((c) => c.localName === "spPr" && c.namespaceURI === NS.p)!;
+export const spPrOf = (el: Element) => Array.from(el.children).find((c) => c.localName === "spPr" && c.namespaceURI === NS.p)!;
 const base = (c: string) => c.slice(0, 7).toLowerCase();
 const alphaOf = (c: string) => (c.length === 9 ? parseInt(c.slice(7), 16) / 255 : 1);
 const withAlpha = (c: string, a: number) =>
@@ -180,6 +180,23 @@ const TABLE_FLAGS: [string, keyof TableFlags][] = [
   ["First column", "firstCol"], ["Last column", "lastCol"], ["Banded columns", "bandCol"],
 ];
 
+/** Row / column / merge actions for cells `range` of a table, shared by the format panel and the right-click menu. */
+export function tableActions(t: NonNullable<ShapeModel["table"]>, range: CellRange): [string, (tbl: Element) => void][] {
+  const [r1, c1, r2, c2] = range;
+  const out: [string, (tbl: Element) => void][] = [
+    ["Insert row above", (x) => insertRow(x, r1, false)],
+    ["Insert row below", (x) => insertRow(x, r2, true)],
+    ["Insert column left", (x) => insertCol(x, c1, false)],
+    ["Insert column right", (x) => insertCol(x, c2, true)],
+  ];
+  if (t.rows.length > 1) out.push(["Delete row", (x) => { for (let r = r2; r >= r1; r--) deleteRow(x, r); }]);
+  if (t.cols.length > 1) out.push(["Delete column", (x) => { for (let c = c2; c >= c1; c--) deleteCol(x, c); }]);
+  if (r1 !== r2 || c1 !== c2) out.push(["Merge cells", (x) => mergeCells(x, [r1, c1, r2, c2])]);
+  const here = t.cells[r1]?.[c1];
+  if (here && r1 === r2 && c1 === c2 && (here.gridSpan > 1 || here.rowSpan > 1)) out.push(["Split cell", (x) => splitCell(x, r1, c1)]);
+  return out;
+}
+
 /** Rows and columns, merging, cell fill and borders, and style options for a table. */
 function tableControls(section: (title: string) => HTMLElement, shape: ShapeModel, ctl: PanelControl): void {
   const t = shape.table!;
@@ -192,15 +209,7 @@ function tableControls(section: (title: string) => HTMLElement, shape: ShapeMode
   const buttons = s.createDiv({ cls: "pptx-props-buttons" });
   const btn = (text: string, fn: (tbl: Element) => void) => buttons.createEl("button", { text }).addEventListener("click", () => tbl(fn));
   if (range) {
-    btn("Insert row above", (x) => insertRow(x, r1, false));
-    btn("Insert row below", (x) => insertRow(x, r2, true));
-    btn("Insert column left", (x) => insertCol(x, c1, false));
-    btn("Insert column right", (x) => insertCol(x, c2, true));
-    if (t.rows.length > 1) btn("Delete row", (x) => { for (let r = r2; r >= r1; r--) deleteRow(x, r); });
-    if (t.cols.length > 1) btn("Delete column", (x) => { for (let c = c2; c >= c1; c--) deleteCol(x, c); });
-    if (r1 !== r2 || c1 !== c2) btn("Merge cells", (x) => mergeCells(x, [r1, c1, r2, c2]));
-    const here = t.cells[r1]?.[c1];
-    if (here && r1 === r2 && c1 === c2 && (here.gridSpan > 1 || here.rowSpan > 1)) btn("Split cell", (x) => splitCell(x, r1, c1));
+    for (const [text, fn] of tableActions(t, range)) btn(text, fn);
     number(s, "Column width (in)", t.cols[c1] / EMU_PER_INCH, (v) => tbl((x) => setColWidth(x, c1, Math.max(0.1, v) * EMU_PER_INCH)));
     number(s, "Row height (in)", t.rows[r1] / EMU_PER_INCH, (v) => tbl((x) => setRowHeight(x, r1, Math.max(0.1, v) * EMU_PER_INCH)));
   } else {

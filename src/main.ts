@@ -1,5 +1,5 @@
 import { addExportToMenu, addNoteExportToMenu, exportNoteToDocx } from "./presentation/common/export-note";
-import { exportDocxToMarkdown } from "./presentation/common/export-markdown";
+import { exportDocxFile } from "./presentation/common/export-markdown";
 import { registerEmbeds } from "./presentation/common/embeds";
 import { canExportPdf } from "./presentation/common/pdf";
 import { App, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
@@ -21,8 +21,8 @@ export default class DocWorksPlugin extends Plugin {
     const active = this.app.workspace.getActiveViewOfType(DocxView);
     const open = active?.file?.path === file.path ? active : this.app.workspace.getLeavesOfType(VIEW_TYPE_DOCX)
       .map(leaf => leaf.view).find((view): view is DocxView => view instanceof DocxView && view.file?.path === file.path);
-    if (open) await open.exportMarkdown();
-    else await exportDocxToMarkdown(this.app, file);
+    if (open) await open.exportAs("md");
+    else await exportDocxFile(this.app, file);
   }
 
   /**
@@ -108,7 +108,7 @@ export default class DocWorksPlugin extends Plugin {
       checkCallback: (checking) => {
         const view = this.app.workspace.getActiveViewOfType(DocxView) ?? this.app.workspace.getActiveViewOfType(PptxView) ?? this.app.workspace.getActiveViewOfType(XlsxView);
         if (!view || !canExportPdf()) return false;
-        if (!checking) void view.exportPdf();
+        if (!checking) void view.exportAs("pdf");
         return true;
       },
     });

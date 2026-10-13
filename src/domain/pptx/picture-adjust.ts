@@ -5,6 +5,7 @@
  */
 import { NS, childNS } from "../../core/utils/xml";
 import { ColorContext, resolveColor } from "./color";
+import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 
 /** "none", "gray", or "dark:<accentN>" / "light:<accentN>". */
 export type Recolor = string;
@@ -109,4 +110,16 @@ export function pictureFilter(adj: PictureAdjust): string | null {
     out.push(`<feComponentTransfer>${f("R", 0)}${f("G", 1)}${f("B", 2)}</feComponentTransfer>`);
   }
   return out.length ? out.join("") : null;
+}
+
+/** Replace a picture's image, keeping its size, crop and adjustments (an SVG version of the old image goes). */
+export function replacePicture(doc: PptxDocument, part: string, pic: Element, bytes: Uint8Array, ext: string): void {
+  const blip = blipOf(pic);
+  if (!blip) return;
+  blip.setAttributeNS(NS.r, "r:embed", doc.addImage(part, bytes, ext));
+  // Office 2016+ keeps an SVG version in a:extLst, which would still be drawn instead of the new image.
+  for (const ext of Array.from(blip.getElementsByTagNameNS(NS.a, "ext"))) if (ext.getElementsByTagNameNS("*", "svgBlip").length || ext.getAttribute("uri") === "{96DAC541-7B7A-43D3-8B79-37D633B846F1}") ext.remove();
+  const list = childNS(blip, NS.a, "extLst");
+  if (list && !list.children.length) list.remove();
+  doc.touch(part);
 }

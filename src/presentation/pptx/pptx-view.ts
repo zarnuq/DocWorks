@@ -8,7 +8,9 @@ import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastr
 import { Align, Rect, RunProps, ShapeModel, SlideModel, parseSlide, plainText, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
 import { JUMPS, linkLabel, linkTarget, setShapeLink } from "../../domain/pptx/links";
 import { NS } from "../../core/utils/xml";
+import { writeFill, writeLine } from "../../domain/pptx/shape-style";
 import { applyFormat, copyFormat, ShapeFormat } from "../../domain/pptx/paint-format";
+import { NO_ADJUST, replacePicture, setPictureAdjust } from "../../domain/pptx/picture-adjust";
 import {
   CONNECTORS,
   Glue,
@@ -20,6 +22,7 @@ import {
   lineBox,
   rerouteConnectors,
   setAdjust,
+  setCrop,
   setRect,
   setTransform,
   shapeId,
@@ -30,7 +33,7 @@ import {
 } from "../../domain/pptx/slide-edit";
 import { presetGeometry, solveAdjust } from "../../domain/pptx/geometry";
 import { buildShapeGallery, ShapeChoice } from "./shape-gallery";
-import { ArrangeControl, buildArrangePanel, buildShapePanel, buildSlidePanel, PanelControl, SlideControl } from "./shape-panel";
+import { ArrangeControl, buildArrangePanel, buildShapePanel, buildSlidePanel, DASHES, PanelControl, SlideControl, spPrOf, tableActions } from "./shape-panel";
 import { alignRects, Alignment, Clip, copyItems, distributeRects, groupItems, itemRect, pasteItems, setItemRect, snapRect, topLevel, ungroupItem } from "../../domain/pptx/arrange";
 import { History } from "../../core/utils/history";
 import { IMAGE_MIME } from "../../core/utils/images";
@@ -38,7 +41,11 @@ import { pickImage } from "../common/images";
 import { findSlideMatches, SlideSearchMatch, replaceAll, replaceMatch } from "../../domain/pptx/find";
 import { showFindPreview } from "../common/find-preview";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
-import { EDITING_KEYS, FONTS, PaperTheme, promptText, shieldEditingKeys, showValue, Toolbar } from "../common/toolbar";
+import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
+import { openDrawer, watchNarrow } from "../common/narrow";
+import { SaveStatus } from "../common/save-status";
+import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
+
 import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
 import { loadEmbeddedFonts } from "./embedded-fonts";
@@ -47,8 +54,9 @@ import { nextVisible, Slideshow } from "./slideshow";
 import { readAnimations, readTransition, writeTransition } from "../../domain/pptx/animation";
 import { updateAnimationPart, addAnimation, animationEntries, moveAnimation, removeAnimation, updateAnimation } from "../../domain/pptx/animation-edit";
 import { buildMotionPanel } from "./motion-panel";
-import { canExportPdf, exportPdf } from "../common/pdf";
-import { exportPng } from "../common/png";
+import { canExportPdf, renderPdf } from "../common/pdf";
+import { renderPng } from "../common/png";
+import { exportDialog, writeExport } from "../common/export-dialog";
 import { RenderedShape, renderSlide } from "./slide-renderer";
 import { rangeInParagraph } from "./text-html";
 import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
@@ -60,6 +68,9 @@ const THUMB_WIDTH = 168;
 const THUMB_CHROME = 40;
 /** Slide width in grid view. */
 const GRID_THUMB_WIDTH = 240;
+const ALIGNS: [string, Align][] = [["Left", "l"], ["Center", "ctr"], ["Right", "r"], ["Justify", "just"]];
+const LINE_SPACINGS = ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"];
+const CHAR_SPACINGS: [string, string][] = [["Very tight", "-3"], ["Tight", "-1.5"], ["Normal", "0"], ["Loose", "3"], ["Very loose", "6"]];
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 72, 96];
 const MIN_SIZE_EMU = 91440;
 const EMU_PER_PT = 12700;
@@ -126,6 +137,8 @@ let slideClipboard: SlideClip | null = null;
 const extOf = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowerCase();
 
 export class PptxView extends FileView {
+  /** Stops giving focus back to the document after dialogs close. */
+  private stopFocusReturn: (() => void) | null = null;
   allowNoFile = false;
   paperTheme: "light" | "dark" = "dark";
 
@@ -163,7 +176,8 @@ export class PptxView extends FileView {
   private notesObserver: ResizeObserver | null = null;
   private notesTimer: number | null = null;
   private propsEl!: HTMLElement;
-  private showProps = this.app.loadLocalStorage(PROPS_KEY) !== "hidden";
+  // Closed until View › Format panel opens it, as Google Slides' Format options.
+  private showProps = this.app.loadLocalStorage(PROPS_KEY) === "shown";
   private showMotion = false;
   private showTheme = false;
   private editPart: string | null = null;
@@ -179,14 +193,17 @@ export class PptxView extends FileView {
   private extendingRange = false;
   /** Slide index being dragged in the thumbnail pane. */
   private dragFrom: number | null = null;
-  private saveIndicatorEl: HTMLElement | null = null;
-  private syncTheme: ((t: PaperTheme) => void) | null = null;
+  private saveStatus: SaveStatus | null = null;
+  private toolbar: Toolbar | null = null;
+  private narrowWatch: ReturnType<typeof watchNarrow> | null = null;
+  private closeDrawer: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, private settings: DocWorksSettings = { ...DEFAULT_SETTINGS }) {
     super(leaf);
     // Shape shortcuts go through a view scope so they win over app hotkeys (Ctrl+G opens the graph otherwise).
     // They only act while the slide stage has focus; in text they fall through to normal editing.
     this.scope = new Scope(this.app.scope);
+    focusRegions(this.scope, this.contentEl, () => [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.thumbsEl, this.stageEl, this.propsEl, this.notesEl, this.findEl]);
     const keys: [Modifier[], string, () => void][] = [
       [["Mod"], "c", () => void this.copySelection()],
       [["Mod"], "x", () => void this.cutSelection()],
@@ -239,8 +256,8 @@ export class PptxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
-    if (canExportPdf()) menu.addItem((i) => i.setTitle("Download current slide as PNG").setIcon("image-down").setSection("action").onClick(() => void this.exportPng()));
+    addFileItems(this, menu, source);
+    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
   }
 
   getViewType(): string {
@@ -264,6 +281,8 @@ export class PptxView extends FileView {
   // ---------------------------------------------------------------------------
 
   async onLoadFile(file: TFile): Promise<void> {
+    this.stopFocusReturn?.();
+    this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(PptxView) === this, () => this.stageEl?.focus({ preventScroll: true }));
     this.contentEl.empty();
     this.contentEl.addClass("pptx-editor-root");
     const status = this.contentEl.createDiv({ cls: "dw-loading", text: "Loading presentation..." });
@@ -338,6 +357,7 @@ export class PptxView extends FileView {
     );
     this.slideHostEl = this.stageEl.createDiv({ cls: "pptx-slide-host" });
     this.propsEl = body.createDiv({ cls: "pptx-props" });
+    escapeToEditor(this.propsEl, () => this.stageEl.focus({ preventScroll: true }));
     this.propsEl.hide();
     this.slideHostEl.addEventListener("pointerdown", (e) => this.drawing && this.startDraw(e), { capture: true });
     const notesBox = this.stageEl.createDiv({ cls: "pptx-notes-box" });
@@ -385,6 +405,11 @@ export class PptxView extends FileView {
       if (!this.pendingCommit && !this.activeTextFocused()) this.refit();
     });
     this.resizeObserver.observe(this.stageEl);
+    this.narrowWatch = watchNarrow(this.contentEl, (narrow) => {
+      if (!narrow) this.closeDrawer?.();
+      this.toolbar?.fit();
+      this.fitThumbs?.();
+    });
 
     this.index = 0;
     this.setPaperTheme(paperFor(this.settings, "dark"));
@@ -415,6 +440,8 @@ export class PptxView extends FileView {
     document.removeEventListener("selectionchange", this.onSelectionChange);
     window.removeEventListener("blur", this.onWindowBlur);
     this.resizeObserver?.disconnect();
+    this.narrowWatch?.();
+    this.closeDrawer?.();
     // onLoadFile empties contentEl; without this the next file's Ctrl+F and shape gallery see stale elements.
     if (this.findEl) this.closeFind();
     this.closeGallery();
@@ -422,6 +449,10 @@ export class PptxView extends FileView {
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
     if (this.dirty) await this.saveNow();
     await this.saving;
+    // A closed file stops retrying (the save above was its last attempt).
+    this.saveStatus?.destroy();
+    this.stopFocusReturn?.();
+    this.stopFocusReturn = null;
     for (const url of this.imageUrls.values()) URL.revokeObjectURL(url);
     this.imageUrls.clear();
     this.doc = null;
@@ -512,12 +543,10 @@ export class PptxView extends FileView {
 
   /** Google's grid view: the slides fill the window as a grid, for reordering; double-click opens one. */
   private gridView = false;
-  private gridBtn: HTMLElement | null = null;
 
   private setGridView(on: boolean): void {
     this.gridView = on;
     this.contentEl.toggleClass("pptx-grid-view", on);
-    this.gridBtn?.toggleClass("is-active", on);
     if (!this.thumbsEl) return;
     this.thumbsEl.setCssProps({ "--pptx-thumb-zoom": on ? String(GRID_THUMB_WIDTH / THUMB_WIDTH) : "" });
     if (on) this.thumbsEl.focus();
@@ -616,8 +645,7 @@ export class PptxView extends FileView {
     });
   }
 
-  private slideMenu(i: number): Menu {
-    const menu = new Menu();
+  private slideMenu(i: number, menu = new Menu()): Menu {
     const item = (title: string, icon: string, run: () => void) => menu.addItem((m) => m.setTitle(title).setIcon(icon).onClick(run));
     const count = this.doc?.slides().length ?? 0;
     item("New slide", "plus", () => this.mutate((d) => (this.index = d.addSlide(i))));
@@ -700,6 +728,7 @@ export class PptxView extends FileView {
     this.flushCommit();
     this.showMotion = true;
     this.showProps = true;
+    this.openPropsDrawer();
     this.setSelection(this.items, this.selected?.shape.el ?? null);
   }
 
@@ -981,6 +1010,11 @@ export class PptxView extends FileView {
    * panel; groups and multi-selections get a selection box and the arrange panel.
    */
   private setSelection(items: Element[], primaryEl: Element | null = null): void {
+    this.applySelection(items, primaryEl);
+    this.toolbar?.sync();
+  }
+
+  private applySelection(items: Element[], primaryEl: Element | null): void {
     for (const r of this.rendered) {
       r.el.removeClass("is-selected", "is-in-selection");
       r.el.querySelectorAll(".pptx-handle-adjust").forEach((h) => h.remove());
@@ -997,14 +1031,14 @@ export class PptxView extends FileView {
       if (this.selected && !this.selected.shape.inherited) this.selected.el.addClass("is-selected");
       if (items.length && !single) this.drawSelectionBox();
       this.renderMotionPanel();
-      this.propsEl.toggle(this.showProps);
+      this.showPropsEl();
       return;
     }
 
     if (!items.length && this.showTheme) { this.renderThemePanel(); return; }
     if (!items.length) {
       if (this.doc && this.model) buildSlidePanel(this.propsEl, this.slideControl());
-      this.propsEl.toggle(this.showProps && !!this.model);
+      this.propsEl.toggle((this.showProps || this.propsEl.hasClass("is-drawer")) && !!this.model);
       return;
     }
     const rs = single ? this.rendered.find((r) => r.shape.el === single) : null;
@@ -1045,7 +1079,7 @@ export class PptxView extends FileView {
       this.drawSelectionBox();
       buildArrangePanel(this.propsEl, this.arrangeControl());
     }
-    this.propsEl.toggle(this.showProps);
+    this.showPropsEl();
   }
 
   /** Dashed box around a group or multi-selection; a single group can be resized from its corner. */
@@ -1319,6 +1353,28 @@ export class PptxView extends FileView {
     item("Ungroup", () => this.ungroupSelection(), this.items.some((i) => i.localName === "grpSp"));
     item("Bring to front", () => this.arrangeControl().order("front"), has);
     item("Send to back", () => this.arrangeControl().order("back"), has);
+    // A table cell: its row / column / merge actions (on the cells selected with Shift+click, else this one).
+    const cellRs = this.rendered.find((r) => r.shape.kind === "cell" && r.el.contains(target));
+    if (cellRs?.shape.cell) {
+      const frame = topLevel(cellRs.shape.el);
+      const table = this.rendered.find((r) => r.shape.el === frame)?.shape.table;
+      const here = cellRs.shape.cell;
+      const sel = this.tableCell?.frame === frame ? this.tableCell.range : null;
+      const inSel = sel && here.r >= Math.min(sel[0], sel[2]) && here.r <= Math.max(sel[0], sel[2]) && here.c >= Math.min(sel[1], sel[3]) && here.c <= Math.max(sel[1], sel[3]);
+      const range: CellRange = inSel ? sel : [here.r, here.c, here.r, here.c];
+      if (table) {
+        menu.addSeparator();
+        for (const [title, fn] of tableActions(table, range)) item(title, () => this.editShape(frame, (f) => fn(f.getElementsByTagNameNS(NS.a, "tbl")[0])));
+      }
+    }
+    // A picture: replace it, or undo a crop or colour changes.
+    if (rs?.shape.kind === "pic" && !rs.shape.media) {
+      const el = rs.shape.el;
+      menu.addSeparator();
+      item("Replace image…", () => this.replaceImage(el));
+      item("Reset crop", () => this.editShape(el, (p) => setCrop(p, { l: 0, t: 0, r: 0, b: 0 })), !!rs.shape.crop);
+      item("Reset colour adjustments", () => this.editShape(el, (p) => setPictureAdjust(p, NO_ADJUST)), JSON.stringify(rs.shape.adjust) !== JSON.stringify(NO_ADJUST));
+    }
     menu.addSeparator();
     item("Select all", () => this.setSelection(this.slideItems()));
     menu.showAtMouseEvent(e);
@@ -1804,8 +1860,7 @@ export class PptxView extends FileView {
     this.withText((r, el) => applyRunStyle(el, { link }, r.pxPerPt));
   }
 
-  private fieldMenu(anchor: HTMLElement): void {
-    const menu = new Menu();
+  private fillFieldMenu(menu: Menu): void {
     const add = (title: string, type: string, text: () => string) =>
       menu.addItem((i) =>
         i.setTitle(title).onClick(() => {
@@ -1822,8 +1877,6 @@ export class PptxView extends FileView {
       );
     add("Slide number", "slidenum", () => String(this.index + 1));
     add("Date", "datetime1", () => new Date().toLocaleDateString());
-    const r = anchor.getBoundingClientRect();
-    menu.showAtPosition({ x: r.left, y: r.bottom });
   }
 
   private clearFormatting(): void {
@@ -1938,25 +1991,33 @@ export class PptxView extends FileView {
     (this.gridView ? this.thumbsEl : this.stageEl).focus({ preventScroll: true });
   }
 
-  /** Google's Download › PNG: the current slide, as large as the window allows, saved next to the deck. */
-  async exportPng(): Promise<void> {
-    const doc = this.doc;
-    if (!doc || !this.file) return;
+  /** File › Download, as Google Slides: the deck as PDF or the current slide as PNG (desktop: both print through Electron). */
+  async exportAs(initial?: "pdf" | "png"): Promise<void> {
+    const doc = this.doc, file = this.file;
+    if (!doc || !file) return;
     this.flushCommit();
+    const i = this.index;
+    const choice = await exportDialog(this.app, file, [
+      { id: "pdf", label: "PDF document (.pdf)", ext: "pdf", outside: true },
+      { id: "png", label: "PNG image of the current slide (.png)", ext: "png", outside: true, name: `${file.basename} - slide ${i + 1}` },
+    ], initial);
+    if (!choice) return;
+    const data = choice.format === "png" ? await this.slidePng(doc, i) : await this.deckPdf(doc);
+    if (data) await writeExport(this.app, choice.target, data, choice.open);
+  }
+
+  /** The slide, as large as the window allows, captured at full HD. */
+  private slidePng(doc: PptxDocument, i: number): Promise<Uint8Array | null> {
     const { cx, cy } = doc.slideSize;
     const width = Math.floor(Math.min(window.innerWidth, (window.innerHeight * cx) / cy, 1920));
     const height = Math.floor((width * cy) / cx);
-    const i = this.index;
-    await exportPng(this.app, this.file, i + 1, { width, height }, (host) =>
+    return renderPng({ width, height }, (host) =>
       renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 })
     );
   }
 
-  /** Save the slides (not hidden ones) as a PDF, one slide per page. */
-  async exportPdf(): Promise<void> {
-    const doc = this.doc;
-    if (!doc || !this.file) return;
-    this.flushCommit();
+  /** The slides (not hidden ones) as a PDF, one slide per page. */
+  private deckPdf(doc: PptxDocument): Promise<Uint8Array | null> {
     const width = doc.slideSize.cx / 9525;
     const height = doc.slideSize.cy / 9525;
     const pages = doc.slides().flatMap((s, i) => {
@@ -1965,7 +2026,7 @@ export class PptxView extends FileView {
       renderSlide(page, parseSlide(doc, s.path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 });
       return [page];
     });
-    await exportPdf(this.app, this.file, pages, { width, height });
+    return renderPdf(pages, { width, height });
   }
 
   /** Run the slideshow from the first visible slide, or from the current one. */
@@ -2528,90 +2589,221 @@ export class PptxView extends FileView {
     bar.addEventListener("mousedown", (e) => {
       if ((e.target as HTMLElement).closest("button")) e.preventDefault();
     });
-    const tb = new Toolbar(bar);
+    const tb = (this.toolbar = new Toolbar(bar));
     const btn = (label: string, title: string, run: () => void, cls = "") => tb.button(label, title, run, cls);
     const sep = () => tb.gap();
+    const bullets = () => this.updateParas((p) => ({ ...p, bullet: p.bullet && !p.bullet.startsWith("#") ? null : "•" }));
+    const numbering = () => this.updateParas((p) => ({ ...p, bullet: p.bullet?.startsWith("#") ? null : "#arabicPeriod" }));
+    const align = (align: Align) => this.updateParas((p) => ({ ...p, align }));
+    const lineSpacing = (v: string) => this.updateParas((p) => ({ ...p, lnSpc: { pct: Number(v) } }));
+    const shape = (fn: (spPr: Element) => void) => {
+      const rs = this.selectedShape();
+      if (rs) this.editShape(rs.shape.el, (el) => fn(spPrOf(el)), true);
+    };
+    const picture = (fn: (el: Element) => void) => () => {
+      const rs = this.selectedShape();
+      if (rs?.shape.kind === "pic") fn(rs.shape.el);
+    };
 
+    // --- The row: everyday controls, as Google Slides' toolbar ---
     btn("↶", "Undo (Ctrl+Z)", () => this.undo());
     btn("↷", "Redo (Ctrl+Y)", () => this.redo());
+    this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
+    this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
+    tb.pin();
     sep();
-
+    this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [z === 1 ? "Fit" : `${z * 100}%`, String(z)]), (v) => this.setZoom(Number(v)));
+    this.zoomSelect.value = "1";
+    sep();
+    btn("Text box", "Insert text box", () => this.addTextBox());
+    tb.icon("image", "Insert image from file", () => pickImage((file) => void this.insertImageFile(file)));
+    const shapesBtn = btn("Shapes ▾", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
+    tb.icon("table", "Insert table", () => void this.insertTable());
+    tb.icon("message-square", "Comments on this slide", () => this.commentsDialog());
+    sep();
     this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => this.setRunStyle({ font }));
     this.sizeSelect = tb.select("Font size", "Size", FONT_SIZES.map((sz) => [`${sz} pt`, String(sz)]), (sz) => this.setRunStyle({ sz: Number(sz) }));
+    tb.pin();
     sep();
-
     btn("B", "Bold (Ctrl+B)", () => this.toggle("b"), "bold");
     btn("I", "Italic (Ctrl+I)", () => this.toggle("i"), "italic");
     btn("U", "Underline (Ctrl+U)", () => this.toggle("u"), "underline");
-    btn("S", "Strikethrough", () => this.toggle("strike"), "strike");
     tb.color("A", "Text color", "#000000", (color) => this.setRunStyle({ color }));
-    btn("Tx", "Clear formatting", () => this.clearFormatting());
     sep();
-
-    for (const [icon, label, align] of [
-      ["align-left", "left", "l"],
-      ["align-center", "center", "ctr"],
-      ["align-right", "right", "r"],
-      ["align-justify", "justify", "just"],
-    ] as [string, string, Align][]) {
-      tb.icon(icon, `Align ${label}`, () => this.updateParas((p) => ({ ...p, align })));
-    }
-    tb.icon("list", "Toggle bullets", () => this.updateParas((p) => ({ ...p, bullet: p.bullet && !p.bullet.startsWith("#") ? null : "•" })));
-    tb.icon("list-ordered", "Toggle numbering", () => this.updateParas((p) => ({ ...p, bullet: p.bullet?.startsWith("#") ? null : "#arabicPeriod" })));
+    tb.iconSelect("align-left", "Align", ALIGNS.map(([label, a]) => [label, a]), (v) => align(v as Align));
+    tb.iconSelect("unfold-vertical", "Line spacing", LINE_SPACINGS.map((v) => [v, v]), lineSpacing);
+    sep();
+    tb.icon("list", "Toggle bullets", bullets);
+    tb.icon("list-ordered", "Toggle numbering", numbering);
     tb.icon("outdent", "Decrease list level (Shift+Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })));
     tb.icon("indent", "Increase list level (Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })));
-    tb.iconSelect("unfold-vertical", "Line spacing", ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"].map((v) => [v, v]), (v) =>
-      this.updateParas((p) => ({ ...p, lnSpc: { pct: Number(v) } }))
+    sep();
+    btn("Tx", "Clear formatting", () => this.clearFormatting());
+    // Shape tools, while a shape is selected (Google Slides' fill and border buttons).
+    sep();
+    tb.color("▇", "Shape fill", "#4472C4", (color) => shape((spPr) => writeFill(spPr, { type: "solid", color })));
+    tb.color("▢", "Border color", "#000000", (color) => shape((spPr) => writeLine(spPr, { color })));
+    tb.iconSelect("minus", "Border weight", ["0.5", "1", "2", "3", "4.5", "6"].map((v) => [`${v} pt`, v]), (v) => shape((spPr) => writeLine(spPr, { width: Number(v) * EMU_PER_PT })));
+    tb.iconSelect("more-horizontal", "Border dash", DASHES, (dash) => shape((spPr) => writeLine(spPr, { dash })));
+    tb.context(() => this.selectedShape()?.shape.el.localName === "sp");
+    // Picture tools, while a picture is selected.
+    sep();
+    btn("Crop", "Crop image", () => this.showCrop());
+    btn("Replace", "Replace image", picture((el) => this.replaceImage(el)));
+    tb.iconSelect("rotate-ccw", "Reset image", [["Reset crop", "crop"], ["Reset colour adjustments", "adjust"]], (v) =>
+      picture((el) => this.editShape(el, (p) => (v === "crop" ? setCrop(p, { l: 0, t: 0, r: 0, b: 0 }) : setPictureAdjust(p, NO_ADJUST))))()
     );
-    tb.iconSelect("unfold-horizontal", "Character spacing", [["Very tight", "-3"], ["Tight", "-1.5"], ["Normal", "0"], ["Loose", "3"], ["Very loose", "6"]], (v) =>
-      this.setRunStyle({ spc: Number(v) })
-    );
-    btn("Link", "Add, change or remove a link (Ctrl+click follows it)", () => void this.editLink());
-    const fieldBtn = btn("Field ▾", "Insert the slide number or date", () => this.fieldMenu(fieldBtn));
+    tb.context(() => this.selectedShape()?.shape.kind === "pic" && !this.selectedShape()?.shape.media);
     sep();
+    const present = btn("▶ Present", "Present from this slide (Shift+F5). F5 presents from the beginning.", () => this.startPresentation(false), "mod-cta");
 
-    btn("Text box", "Insert text box", () => this.addTextBox());
-    btn("Chart", "Insert an editable chart", () => this.editChart());
-    btn("Table", "Insert table", () => void this.insertTable());
-    const shapesBtn = btn("Shapes ▾", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
-    btn("Audio/video", "Insert audio or video from file", () => this.pickMedia());
-    btn("Image", "Insert image from file", () => pickImage((file) => void this.insertImageFile(file)));
-    btn("Delete shape", "Delete selected shape (Del)", () => this.deleteSelected());
-    sep();
-
-    const slideBtn = btn("Slide ▾", "Add, duplicate, delete, hide, move or group slides into sections", () => {
-      const r = slideBtn.getBoundingClientRect();
-      this.slideMenu(this.index).showAtPosition({ x: r.left, y: r.bottom });
+    // --- The menus: every command ---
+    tb.fileMenu(this, (mn) => menuItem(mn, "Export…", () => void this.exportAs()));
+    tb.menu("Edit", (mn) => {
+      const has = this.items.length > 0;
+      menuItem(mn, "Undo", () => this.undo());
+      menuItem(mn, "Redo", () => this.redo());
+      mn.addSeparator();
+      menuItem(mn, "Cut", () => void this.cutSelection(), { disabled: !has });
+      menuItem(mn, "Copy", () => void this.copySelection(), { disabled: !has });
+      menuItem(mn, "Paste", () => this.paste(), { disabled: !clipboard });
+      menuItem(mn, "Delete", () => this.deleteSelected(), { disabled: !has });
+      mn.addSeparator();
+      menuItem(mn, "Find and replace", () => this.openFind());
     });
-    btn("Theme", "Edit theme colors, fonts, master and custom layouts", () => { this.showMotion = false; this.showTheme = true; this.showProps = true; this.setSelection([]); });
-    btn("Motion", "Add slide transitions and object animations", () => this.openMotion());
-    sep();
-    this.gridBtn = tb.icon("layout-grid", "Grid view (Ctrl+Alt+1)", () => this.setGridView(!this.gridView));
-    this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
-    this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
-    const panelBtn = tb.icon("panel-right", "Show or hide the format panel", () => {
-      this.showProps = !this.showProps;
-      this.app.saveLocalStorage(PROPS_KEY, this.showProps ? "shown" : "hidden");
-      panelBtn.toggleClass("is-active", this.showProps);
-      this.propsEl.toggle(this.showProps);
+    tb.menu("View", (mn) => {
+      menuItem(mn, "Present", () => this.startPresentation(false));
+      menuItem(mn, "Present from start", () => this.startPresentation(true));
+      mn.addSeparator();
+      menuItem(mn, "Grid view", () => this.setGridView(!this.gridView), { checked: this.gridView });
+      menuItem(mn, "Format panel", () => this.toggleProps(), { checked: this.showProps });
+      subMenu(mn, "Zoom", (s) => {
+        for (const z of ZOOMS) menuItem(s, z === 1 ? "Fit" : `${z * 100}%`, () => this.setZoom(z), { checked: this.zoomSelect?.value === String(z) });
+      });
+      mn.addSeparator();
+      menuItem(mn, "Light", () => this.setPaperTheme("light"), { checked: this.paperTheme === "light" });
+      menuItem(mn, "Dark", () => this.setPaperTheme("dark"), { checked: this.paperTheme === "dark" });
     });
-    panelBtn.toggleClass("is-active", this.showProps);
-    tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
-    tb.icon("message-square", "Comments on this slide", () => this.commentsDialog());
-    this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [z === 1 ? "Fit" : `${z * 100}%`, String(z)]), (v) => this.setZoom(Number(v)));
-    this.zoomSelect.value = "1";
-    btn("▶ Present", "Present from this slide (Shift+F5). F5 presents from the beginning.", () => this.startPresentation(false), "mod-cta");
+    tb.menu("Insert", (mn) => {
+      menuItem(mn, "Text box", () => this.addTextBox());
+      menuItem(mn, "Image", () => pickImage((file) => void this.insertImageFile(file)));
+      menuItem(mn, "Audio or video", () => this.pickMedia());
+      menuItem(mn, "Shape", () => this.toggleGallery(shapesBtn));
+      menuItem(mn, "Table", () => void this.insertTable());
+      menuItem(mn, "Chart", () => this.editChart());
+      menuItem(mn, "Link", () => void this.editLink());
+      subMenu(mn, "Field", (s) => this.fillFieldMenu(s));
+      menuItem(mn, "Comment", () => this.commentsDialog());
+      mn.addSeparator();
+      menuItem(mn, "New slide", () => this.mutate((d) => (this.index = d.addSlide(this.index))));
+    });
+    tb.menu("Format", (mn) => {
+      subMenu(mn, "Text", (s) => {
+        menuItem(s, "Bold", () => this.toggle("b"));
+        menuItem(s, "Italic", () => this.toggle("i"));
+        menuItem(s, "Underline", () => this.toggle("u"));
+        menuItem(s, "Strikethrough", () => this.toggle("strike"));
+      });
+      subMenu(mn, "Align", (s) => {
+        for (const [label, a] of ALIGNS) menuItem(s, label, () => align(a));
+      });
+      subMenu(mn, "Line spacing", (s) => {
+        for (const v of LINE_SPACINGS) menuItem(s, v, () => lineSpacing(v));
+      });
+      subMenu(mn, "Character spacing", (s) => {
+        for (const [label, v] of CHAR_SPACINGS) menuItem(s, label, () => this.setRunStyle({ spc: Number(v) }));
+      });
+      menuItem(mn, "Bullets", bullets);
+      menuItem(mn, "Numbering", numbering);
+      mn.addSeparator();
+      menuItem(mn, "Clear formatting", () => this.clearFormatting());
+    });
+    tb.menu("Slide", (mn) => {
+      this.slideMenu(this.index, mn);
+      mn.addSeparator();
+      menuItem(mn, "Theme…", () => this.openTheme());
+      menuItem(mn, "Motion…", () => this.openMotion());
+    });
+    tb.menu("Arrange", (mn) => {
+      const a = this.arrangeControl(), has = this.items.length > 0;
+      subMenu(mn, "Order", (s) => {
+        for (const [label, z] of [["Bring to front", "front"], ["Bring forward", "forward"], ["Send backward", "backward"], ["Send to back", "back"]] as const) menuItem(s, label, () => a.order(z), { disabled: !has });
+      });
+      subMenu(mn, "Align", (s) => {
+        for (const [label, z] of [["Left", "left"], ["Center", "center"], ["Right", "right"], ["Top", "top"], ["Middle", "middle"], ["Bottom", "bottom"]] as const) menuItem(s, label, () => a.align(z), { disabled: !has });
+      });
+      subMenu(mn, "Distribute", (s) => {
+        menuItem(s, "Horizontally", () => a.distribute("horizontal"), { disabled: a.count < 3 });
+        menuItem(s, "Vertically", () => a.distribute("vertical"), { disabled: a.count < 3 });
+      });
+      menuItem(mn, "Group", () => this.groupSelection(), { disabled: this.items.length < 2 });
+      menuItem(mn, "Ungroup", () => this.ungroupSelection(), { disabled: !this.items.some((i) => i.localName === "grpSp") });
+    });
 
-    const end = tb.end(this.paperTheme, (t) => this.setPaperTheme(t), "workspace");
-    this.syncTheme = end.syncTheme;
-    this.saveIndicatorEl = end.status;
+    const end = tb.end();
+    this.saveStatus = end.status;
+    end.el.prepend(present);
+    tb.sync();
+  }
+
+  /** The selected shape the user can edit (not one drawn from the layout), if exactly one is selected. */
+  private selectedShape(): RenderedShape | null {
+    return this.selected && !this.selected.shape.inherited ? this.selected : null;
+  }
+
+  private openTheme(): void {
+    this.showMotion = false;
+    this.showTheme = true;
+    this.showProps = true;
+    this.openPropsDrawer();
+    this.setSelection([]);
+  }
+
+  /** Google's Crop: here the format panel's crop fields. */
+  private showCrop(): void {
+    if (!this.showProps || this.contentEl.hasClass("is-narrow")) this.toggleProps();
+    this.propsEl.querySelector<HTMLInputElement>('[aria-label="Crop left %"]')?.focus();
+  }
+
+  private replaceImage(el: Element): void {
+    pickImage((file) => void file.arrayBuffer().then((buf) => {
+      const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "png";
+      this.mutate((doc) => replacePicture(doc, this.editPart ?? doc.slides()[this.index].path, el, new Uint8Array(buf), ext), "slide");
+      void this.loadMedia().then(() => this.renderCurrent());
+    }));
+  }
+
+  /** The format panel shows when docked, or while it's open as a drawer (narrow panes). */
+  private showPropsEl(): void {
+    this.propsEl.toggle(this.showProps || this.propsEl.hasClass("is-drawer"));
+  }
+
+  /** In a narrow pane, panel content (theme, motion, crop) only shows in the drawer: open it. */
+  private openPropsDrawer(): void {
+    if (this.contentEl.hasClass("is-narrow") && !this.closeDrawer) this.toggleProps();
+  }
+
+  private toggleProps(): void {
+    if (this.contentEl.hasClass("is-narrow")) {
+      if (this.closeDrawer) return this.closeDrawer();
+      this.closeDrawer = openDrawer(this.propsEl, {
+        root: this.contentEl,
+        onClose: () => {
+          this.closeDrawer = null;
+          this.propsEl.toggle(this.showProps);
+        },
+      });
+      return;
+    }
+    this.showProps = !this.showProps;
+    this.app.saveLocalStorage(PROPS_KEY, this.showProps ? "shown" : "hidden");
+    this.propsEl.toggle(this.showProps);
   }
 
   setPaperTheme(theme: "light" | "dark"): void {
     this.paperTheme = theme;
     this.contentEl.toggleClass("pptx-theme-dark", theme === "dark");
     this.contentEl.toggleClass("pptx-theme-light", theme === "light");
-    this.syncTheme?.(theme);
   }
 
   // ---------------------------------------------------------------------------
@@ -2636,19 +2828,19 @@ export class PptxView extends FileView {
         this.dirty = false;
         const bytes = await this.doc.save();
         await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+        this.updateSaveStatus(this.dirty || !!this.pendingCommit);
       } catch (err) {
         this.dirty = true;
         console.error("Failed to save .pptx:", err);
-        new Notice(`Failed to save ${file.name}: ${(err as Error).message}`);
-      } finally {
-        this.updateSaveStatus(this.dirty || !!this.pendingCommit);
+        this.saveStatus?.failed(err, () => void this.saveNow(), file.name);
       }
     });
     return this.saving;
   }
 
   private updateSaveStatus(dirty: boolean): void {
-    this.saveIndicatorEl?.setText(dirty ? "Saving…" : "Saved");
+    if (dirty) this.saveStatus?.saving();
+    else this.saveStatus?.saved();
   }
 }
 

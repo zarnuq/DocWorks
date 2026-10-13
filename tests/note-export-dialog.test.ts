@@ -24,13 +24,13 @@ it("adds DOCX after the built-in items, once, when the menu is shown", () => {
 });
 
 it("returns no export settings when cancelled", async () => {
-  const result = promptNoteExport(new App(), "Note");
+  const result = promptNoteExport(new App(), Object.assign(new TFile(), { path: "Note.md" }));
   click("Cancel");
   expect(await result).toBeNull();
 });
 
 it("uses the selected settings only after pressing Export", async () => {
-  const result = promptNoteExport(new App(), "My note");
+  const result = promptNoteExport(new App(), Object.assign(new TFile(), { path: "Notes/My note.md" }));
   for (const name of ["Include file name as title", "Landscape"]) {
     const toggle = row(name).querySelector<HTMLInputElement>("input")!;
     toggle.checked = true;
@@ -41,7 +41,7 @@ it("uses the selected settings only after pressing Export", async () => {
     input.value = value;
     input.dispatchEvent(new Event("change"));
   }
-  click("Export to .docx");
-  expect(await result).toEqual({ pageSize: "a4", landscape: true, margin: "narrow", scale: 75, title: "My note" });
+  click("Export");
+  expect(await result).toEqual({ format: "docx", target: { vault: "Notes/My note.docx" }, open: true, options: { pageSize: "a4", landscape: true, margin: "narrow", scale: 75, title: "My note" } });
   expect(document.querySelector(".test-modal")).toBeNull();
 });

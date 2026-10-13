@@ -2,7 +2,8 @@
  * Export a markdown note as a Word document next to it: Obsidian renders the note (callouts, wikilinks, embeds),
  * and the rendered HTML is turned into the document. Pictures come from the vault; web images are left out.
  */
-import { App, Component, Menu, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, Component, Menu, Notice, Setting, TFile } from "obsidian";
+import { ExportChoice, exportDialog, writeExport } from "./export-dialog";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { DEFAULT_NOTE_EXPORT_OPTIONS, NoteExportOptions, noteToDocx } from "../../domain/docx/from-html";
 import { blankDocx } from "../../infrastructure/blank";
@@ -56,8 +57,8 @@ async function loadPicture(app: App, file: TFile): Promise<Picture | null> {
 }
 
 export async function exportNoteToDocx(app: App, file: TFile): Promise<void> {
-  const options = await promptNoteExport(app, file.basename);
-  if (!options) return;
+  const choice = await promptNoteExport(app, file);
+  if (!choice) return;
   const notice = new Notice("Exporting to .docx…", 0);
   const component = new Component();
   component.load();
@@ -69,13 +70,9 @@ export async function exportNoteToDocx(app: App, file: TFile): Promise<void> {
       const pic = target && (await loadPicture(app, target));
       if (pic) pictures.set(img, pic);
     }
-    const bytes = await noteToDocx(await blankDocx(), el, (img) => pictures.get(img) ?? null, options);
-    const dir = file.parent && !file.parent.isRoot() ? `${file.parent.path}/` : "";
-    let path = `${dir}${file.basename}.docx`;
-    for (let i = 1; app.vault.getAbstractFileByPath(path); i++) path = `${dir}${file.basename} ${i}.docx`;
-    const created = await app.vault.createBinary(path, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-    new Notice(`Exported to ${path}${warnings.length ? `\n${warnings.join("\n")}` : ""}`);
-    await app.workspace.getLeaf("tab").openFile(created);
+    const bytes = await noteToDocx(await blankDocx(), el, (img) => pictures.get(img) ?? null, choice.options);
+    const path = await writeExport(app, choice.target, bytes, choice.open);
+    if (path && warnings.length) new Notice(warnings.join("\n"));
   } catch (err) {
     new Notice(`Couldn't export to .docx: ${(err as Error).message}`);
   } finally {
@@ -84,33 +81,33 @@ export async function exportNoteToDocx(app: App, file: TFile): Promise<void> {
   }
 }
 
-/** Closing the dialog without exporting leaves the vault untouched. */
-export function promptNoteExport(app: App, basename: string): Promise<NoteExportOptions | null> {
-  return new Promise((resolve) => {
-    const options = { ...DEFAULT_NOTE_EXPORT_OPTIONS };
-    let result: NoteExportOptions | null = null;
-    const modal = new Modal(app);
-    modal.titleEl.setText("Export to .docx");
-    modal.contentEl.createEl("p", { text: `Export “${basename}” to DOCX with the settings below.` });
-    new Setting(modal.contentEl).setName("Include file name as title").addToggle((toggle) =>
-      toggle.setValue(false).onChange((value) => { options.title = value ? basename : ""; })
-    );
-    new Setting(modal.contentEl).setName("Page size").addDropdown((select) =>
-      select.addOptions({ letter: "Letter", legal: "Legal", a4: "A4", a5: "A5" }).setValue(options.pageSize).onChange((value) => { options.pageSize = value as NoteExportOptions["pageSize"]; })
-    );
-    new Setting(modal.contentEl).setName("Landscape").addToggle((toggle) =>
-      toggle.setValue(options.landscape).onChange((value) => { options.landscape = value; })
-    );
-    new Setting(modal.contentEl).setName("Margin").addDropdown((select) =>
-      select.addOptions({ default: "Default (1 inch)", narrow: "Narrow (½ inch)", wide: "Wide (2 inches)", none: "None" }).setValue(options.margin).onChange((value) => { options.margin = value as NoteExportOptions["margin"]; })
-    );
-    new Setting(modal.contentEl).setName("Downscale percent").setDesc("Reduce text and picture sizes.").addSlider((slider) =>
-      slider.setLimits(10, 100, 1).setValue(options.scale).onChange((value) => { options.scale = value; })
-    );
-    new Setting(modal.contentEl)
-      .addButton((button) => button.setButtonText("Export to .docx").setCta().onClick(() => { result = { ...options }; modal.close(); }))
-      .addButton((button) => button.setButtonText("Cancel").onClick(() => modal.close()));
-    modal.onClose = () => resolve(result);
-    modal.open();
-  });
+/** The export dialog with the note's DOCX options; closing it without exporting leaves the vault untouched. */
+export async function promptNoteExport(app: App, file: TFile): Promise<(ExportChoice & { options: NoteExportOptions }) | null> {
+  const options = { ...DEFAULT_NOTE_EXPORT_OPTIONS };
+  const choice = await exportDialog(app, file, [
+    {
+      id: "docx",
+      label: "Word document (.docx)",
+      ext: "docx",
+      outside: true,
+      options: (el) => {
+        new Setting(el).setName("Include file name as title").addToggle((toggle) =>
+          toggle.setValue(!!options.title).onChange((value) => { options.title = value ? file.basename : ""; })
+        );
+        new Setting(el).setName("Page size").addDropdown((select) =>
+          select.addOptions({ letter: "Letter", legal: "Legal", a4: "A4", a5: "A5" }).setValue(options.pageSize).onChange((value) => { options.pageSize = value as NoteExportOptions["pageSize"]; })
+        );
+        new Setting(el).setName("Landscape").addToggle((toggle) =>
+          toggle.setValue(options.landscape).onChange((value) => { options.landscape = value; })
+        );
+        new Setting(el).setName("Margin").addDropdown((select) =>
+          select.addOptions({ default: "Default (1 inch)", narrow: "Narrow (½ inch)", wide: "Wide (2 inches)", none: "None" }).setValue(options.margin).onChange((value) => { options.margin = value as NoteExportOptions["margin"]; })
+        );
+        new Setting(el).setName("Downscale percent").setDesc("Reduce text and picture sizes.").addSlider((slider) =>
+          slider.setLimits(10, 100, 1).setValue(options.scale).onChange((value) => { options.scale = value; })
+        );
+      },
+    },
+  ]);
+  return choice && { ...choice, options: { ...options } };
 }

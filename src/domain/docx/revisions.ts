@@ -144,3 +144,39 @@ export function acceptRevisions(root: Element, ids?: Set<string>): number {
 export function rejectRevisions(root: Element, ids?: Set<string>): number {
   return apply(root, ids, false);
 }
+
+/** One suggestion as Google Docs lists it: the revisions one edit made (same author and time, side by side). */
+export interface RevisionGroup {
+  ids: Set<string>;
+  kind: Revision["kind"] | "replace";
+  author: string;
+  /** Deleted (or inserted, or formatted) text, paragraphs joined by spaces; "¶" when only paragraph marks. */
+  text: string;
+  /** For a replacement, the inserted text. */
+  inserted: string;
+}
+
+export function groupRevisions(list: Revision[]): RevisionGroup[] {
+  const runs: Revision[][] = [];
+  for (const r of list) {
+    const last = runs.at(-1)?.at(-1);
+    if (last && r.date && last.date === r.date && last.author === r.author) runs.at(-1)!.push(r);
+    else runs.push([r]);
+  }
+  const join = (rs: Revision[]) => {
+    const words = rs.map((r) => r.text).filter((t) => t !== "¶");
+    return words.length ? words.join(" ").replace(/ {2,}/g, " ") : rs.length ? "¶" : "";
+  };
+  return runs.map((rs) => {
+    const kinds = new Set(rs.map((r) => r.kind));
+    const ins = rs.filter((r) => r.kind === "insert"), del = rs.filter((r) => r.kind === "delete");
+    const replace = ins.length > 0 && del.length > 0 && del.some((r) => r.text !== "¶");
+    return {
+      ids: new Set(rs.map((r) => r.id)),
+      kind: replace ? "replace" : kinds.size === 1 ? rs[0].kind : del.length ? "delete" : rs[0].kind,
+      author: rs[0].author,
+      text: replace ? join(del) : join(rs),
+      inserted: replace ? join(ins) : "",
+    };
+  });
+}

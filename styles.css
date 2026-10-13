@@ -13,11 +13,34 @@
   color: var(--text-muted);
 }
 
-.dw-toolbar {
+/* Google's menu row above the toolbar: File, Edit, View, Insert, Format, … */
+.dw-menubar {
   display: flex;
   flex-wrap: wrap;
+  gap: var(--size-2-1);
+  padding: var(--size-2-1) var(--size-4-2) 0;
+  background: var(--background-secondary);
+  user-select: none;
+}
+
+.dw-menubar .dw-menu-btn {
+  height: auto;
+  padding: var(--size-2-1) var(--size-4-2);
+  font-size: var(--font-ui-small);
+  background: transparent;
+  box-shadow: none;
+}
+
+.dw-menubar .dw-menu-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* One row: groups that don't fit fold into the ⋮ menu (Toolbar.fit) instead of wrapping. */
+.dw-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow: hidden;
   align-items: center;
-  /* Rows of button groups sit close together; groups in a row keep their spacing. */
   gap: var(--size-2-1) var(--size-4-2);
   padding: var(--size-4-1) var(--size-4-3);
   border-bottom: var(--border-width) solid var(--background-modifier-border);
@@ -25,9 +48,32 @@
   user-select: none;
 }
 
+/* The right-most group (the document's editing mode) sits against the end area, as in Google Docs. */
+.dw-toolbar > .dw-push {
+  margin-left: auto;
+}
+
+.dw-toolbar > .dw-push:not([hidden]) ~ .dw-end {
+  margin-left: 0;
+}
+
+/* Narrow panes: the word count stays in Tools › Word count. */
+.is-narrow .docx-words {
+  display: none;
+}
+
+/* A native select is as wide as its longest option ("Update 'Heading 1' to match"); cap it so the row fits more. */
+.dw-toolbar .dw-select {
+  max-width: 8.5em;
+}
+
+.dw-toolbar .dw-select[aria-label="Font size"],
+.dw-toolbar .dw-select[aria-label="Zoom"] {
+  max-width: 6.5em;
+}
+
 .dw-toolbar .dw-btn,
-.dw-toolbar .dw-select,
-.dw-segmented button {
+.dw-toolbar .dw-select {
   height: var(--input-height);
   font-size: var(--font-ui-smaller);
 }
@@ -123,8 +169,28 @@
   background: var(--background-primary);
 }
 
-.dw-group:empty {
+.dw-group:empty,
+.dw-group[hidden],
+.dw-more[hidden] {
   display: none;
+}
+
+.dw-toolbar > .dw-group,
+.dw-toolbar > .dw-end,
+.dw-more {
+  flex-shrink: 0;
+}
+
+/* A colour picker opened from the ⋮ menu (the toolbar's own input is hidden with its group). */
+.dw-color-temp {
+  position: fixed;
+  left: 50%;
+  top: 30%;
+  width: 0;
+  height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
 }
 
 .dw-group .dw-btn:not(.is-active):not(:hover) {
@@ -136,16 +202,6 @@
   align-items: center;
   gap: var(--size-4-2);
   margin-left: auto;
-}
-
-.dw-segmented {
-  display: inline-flex;
-  gap: var(--size-2-1);
-}
-
-.dw-segmented button.is-active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
 }
 
 .dw-status {
@@ -261,9 +317,28 @@
 
 :is(.docx-editor-host, .docx-hf-editor) .ProseMirror td {
   border: 1px solid #9ca3af;
+  /* A long unbroken word wraps inside its cell, as in Word, instead of widening the table past the page. */
+  overflow-wrap: anywhere;
   /* Word's default cell margins: none above and below, 0.08" at the sides; a table style can set its own. */
   padding: var(--docx-cell-top, 0) var(--docx-cell-right, 0.075in) var(--docx-cell-bottom, 0) var(--docx-cell-left, 0.075in);
   vertical-align: top;
+}
+
+/* A selection across cells: the whole cells tinted (over their own shading) instead of patches of text. */
+:is(.docx-editor-host, .docx-hf-editor) .ProseMirror td.is-cell-selected {
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+  outline: 1px solid var(--interactive-accent);
+  outline-offset: -1px;
+}
+
+/* A selection the editor draws itself (cells): the browser's own highlight and caret stay hidden. */
+.ProseMirror-hideselection *::selection,
+.ProseMirror table:has(td.is-cell-selected) ::selection {
+  background: transparent;
+}
+
+.ProseMirror-hideselection {
+  caret-color: transparent;
 }
 
 /* Cells covered by a vertical merge; the first cell spans them. */
@@ -519,6 +594,7 @@ img.docx-behind,
 }
 
 .pptx-body {
+  position: relative;
   flex: 1;
   display: flex;
   min-height: 0;
@@ -1419,6 +1495,16 @@ textarea.pptx-notes {
   background: #1e1e1e;
 }
 
+/* A page running long inside a table cell: only the text that runs over shows through the bottom margin, not the
+   cell's shading below it. */
+.docx-theme-light .is-paged .docx-page-gap-float.is-squeezed .docx-page-foot {
+  background: linear-gradient(transparent calc(-1 * var(--docx-squeeze, 0px)), #ffffff 0);
+}
+
+.docx-theme-dark .is-paged .docx-page-gap-float.is-squeezed .docx-page-foot {
+  background: linear-gradient(transparent calc(-1 * var(--docx-squeeze, 0px)), #1e1e1e 0);
+}
+
 /* Measuring the text flow: page decorations out of the way. */
 .docx-measuring :is(.docx-page-gap, .docx-page-first, .docx-page-last, .docx-page-spacer) {
   display: none;
@@ -1514,6 +1600,30 @@ textarea.pptx-notes {
   margin-right: var(--size-4-2);
 }
 
+.docx-words[hidden] {
+  display: none;
+}
+
+/* Tools › Word count, laid out like Google Docs'. */
+.dw-count-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--size-4-4);
+  padding: var(--size-4-3) var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.dw-count-row:last-child {
+  border-bottom: none;
+}
+
+.dw-count-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
 /* Wide enough for a header laid out as a table. */
 .modal.docx-hf-modal {
   width: min(900px, 92vw);
@@ -1550,6 +1660,7 @@ textarea.pptx-notes {
 
 /* Word: editor next to the review panel */
 .docx-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1613,21 +1724,52 @@ textarea.pptx-notes {
   background: var(--background-secondary);
 }
 
-.docx-outline-entry {
+/* Flat rows like Google Docs' outline: sub-headings step in under their section, with a guide line.
+   (Scoped to the panel to win over Obsidian's own button style.) */
+.docx-outline .docx-outline-entry {
+  --docx-outline-indent: 0px;
   display: block;
-  width: 100%;
+  box-sizing: border-box;
+  width: calc(100% - var(--docx-outline-indent));
   height: auto;
-  margin: 3px 0;
-  padding: 6px 8px;
+  margin: 1px 0 1px var(--docx-outline-indent);
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-s);
   text-align: left;
   white-space: normal;
   box-shadow: none;
   background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-normal);
 }
 
-.docx-outline-entry.is-active {
+.docx-outline .docx-outline-entry[data-depth="0"] {
+  margin-top: 6px;
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.docx-outline .docx-outline-entry:not([data-depth="0"]) {
+  border-left: 2px solid var(--background-modifier-border);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+}
+
+.docx-outline .docx-outline-entry[data-depth="1"] { --docx-outline-indent: 10px; }
+.docx-outline .docx-outline-entry[data-depth="2"] { --docx-outline-indent: 22px; }
+.docx-outline .docx-outline-entry[data-depth="3"] { --docx-outline-indent: 34px; }
+.docx-outline .docx-outline-entry[data-depth="4"] { --docx-outline-indent: 46px; }
+.docx-outline .docx-outline-entry[data-depth="5"] { --docx-outline-indent: 58px; }
+
+.docx-outline .docx-outline-entry:hover {
+  background: var(--background-modifier-hover);
+}
+
+.docx-outline .docx-outline-entry.is-active {
   color: var(--interactive-accent);
   background: var(--background-modifier-hover);
+  border-left-color: var(--interactive-accent);
 }
 
 .docx-ruler {
@@ -1786,6 +1928,7 @@ textarea.pptx-notes {
 
 .docx-change-insert .docx-review-text { color: #15803d; }
 .docx-change-delete .docx-review-text { color: #b91c1c; text-decoration: line-through; }
+.docx-change-delete .docx-review-text.docx-review-inserted { color: #15803d; text-decoration: none; }
 
 .docx-editor-host .ProseMirror .docx-ins {
   color: #15803d;
@@ -2436,7 +2579,12 @@ textarea.pptx-notes {
   overflow: hidden;
   white-space: nowrap;
 }
-.pptx-thumbs:focus-visible, .dw-btn:focus-visible, .xlsx-tab:focus-visible {
+/* One visible focus ring for keyboard users across toolbars, panels, tabs and thumbnails. */
+.pptx-thumbs:focus-visible,
+.dw-btn:focus-visible,
+.xlsx-tab:focus-visible,
+:is(.dw-menubar, .dw-toolbar, .pptx-props, .docx-outline, .docx-review, .xlsx-formula-bar, .xlsx-tabs, .dw-find, .xlsx-find, .pptx-find) :is(button, select, input, textarea, [tabindex]):focus-visible,
+.dw-status-retry:focus-visible {
   outline: 2px solid var(--interactive-accent);
   outline-offset: 2px;
 }
@@ -2620,4 +2768,72 @@ textarea.pptx-notes {
 /* Paint format in documents: a copy cursor over the text while painting. */
 .docx-editor-host.is-painting .ProseMirror {
   cursor: copy;
+}
+
+/* A failed save: the status turns red and offers Retry. */
+.dw-status.is-error {
+  color: var(--text-error);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dw-status-retry {
+  padding: 0 8px;
+  height: auto;
+  font-size: inherit;
+}
+
+/* Export dialog: the path the file will get, and a warning when it replaces one. */
+.dw-export-path {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  margin: -4px 0 8px;
+}
+.dw-export-warning {
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: 8px;
+}
+
+/* Narrow panes (narrow.ts): docked side panels hide; opened ones float over the document's edge. */
+.is-narrow :is(.docx-outline, .docx-review, .pptx-props):not(.is-drawer) {
+  display: none;
+}
+
+.is-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: var(--layer-popover);
+  width: min(320px, 85%);
+  max-width: none;
+  overflow: auto;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.docx-outline.is-drawer {
+  left: 0;
+}
+
+.docx-review.is-drawer,
+.pptx-props.is-drawer {
+  right: 0;
+}
+
+.is-narrow .pptx-thumbs {
+  width: 48px;
+}
+
+.is-narrow .pptx-thumbs .pptx-thumb-slide {
+  display: none;
+}
+
+/* The outline's title row with its close (×) button. */
+.docx-outline-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
