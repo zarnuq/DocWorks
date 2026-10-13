@@ -1,3 +1,4 @@
+import { setLinkAttrs } from "./links";
 import { NS, childNS, escapeXml } from "../../core/utils/xml";
 import { Para, Rect, Run, Spacing, TextBody, TextStyle, resolveLevel, runProps } from "./slide-model";
 import { fitTable } from "./table";
@@ -56,7 +57,7 @@ function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>
     childNS(rPr, NS.a, "hlinkClick")?.remove();
     if (run.link && style.links) {
       const h = el(doc, "hlinkClick");
-      h.setAttributeNS(NS.r, "r:id", style.links.add(run.link));
+      setLinkAttrs(h, style.links.add(run.link));
       insertBeforeFirst(rPr, h, new Set(["hlinkMouseOver", "rtl", "extLst"]));
     }
   }

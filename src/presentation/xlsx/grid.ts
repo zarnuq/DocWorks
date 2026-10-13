@@ -13,10 +13,13 @@ import { Picture } from "../../domain/xlsx/drawing";
 import type { CfStyle } from "../../domain/xlsx/conditional";
 import type { Sparkline } from "../../domain/xlsx/sparklines";
 import { fontStack } from "../../core/utils/fonts";
+import { OutlineAxis, OutlineGroup, outlineGroups, summaryIndex } from "../../domain/xlsx/outline";
 import { Op, paint } from "./paint";
 
 export const HEADER_W = 46;
 export const HEADER_H = 24;
+/** Width of one outline level in the group gutter left of the row headers (and above the column headers). */
+const GUTTER = 16;
 let accessibilityId = 0;
 const REF_COLORS = ["#1a73e8", "#e8710a", "#9334e6", "#188038", "#d93025", "#12b5cb"];
 
@@ -26,9 +29,11 @@ export interface Pos {
 }
 
 export interface Hit extends Pos {
-  area: "cell" | "colHeader" | "rowHeader" | "corner";
+  area: "cell" | "colHeader" | "rowHeader" | "corner" | "outline";
   /** Pointer on a header boundary: resizing this column / row. */
   resize?: number;
+  /** In the group gutter: the group whose +/- button is under the pointer, if any. */
+  outline?: { axis: OutlineAxis; group: OutlineGroup };
 }
 
 export interface GridHost {
@@ -67,6 +72,8 @@ export interface GridHost {
   chartMenu?(key: string, e: MouseEvent): void;
   /** A chart dragged (or resized from its corner) to `box`, in sheet pixels. */
   moveChart?(key: string, box: { x: number; y: number; w: number; h: number }): void;
+  /** The +/- of a row / column group was clicked. */
+  toggleGroup?(axis: OutlineAxis, group: OutlineGroup): void;
 }
 
 /** Text to edit for a cell: "=formula", or the value written so that typing it back gives the same value. */
@@ -206,6 +213,7 @@ export class Grid {
       const hit = this.hit(e.clientX, e.clientY);
       if (!hit) return;
       e.preventDefault();
+      if (hit.area === "outline") return;
       const sel = this.selection();
       if (hit.area === "cell" && !this.contains(sel, hit)) this.select(hit, hit);
       // A header outside the selected rows / columns selects its whole row / column first.
@@ -222,6 +230,34 @@ export class Grid {
 
   private get sheet(): Sheet {
     return this.host.sheet();
+  }
+
+  private outlineCache: { sheet: Sheet; row: OutlineGroup[]; col: OutlineGroup[] } | null = null;
+
+  /** Row and column groups of the current sheet (sheets are rebuilt after every structural edit, so cached by sheet). */
+  private outline(): { row: OutlineGroup[]; col: OutlineGroup[] } {
+    const s = this.sheet;
+    if (this.outlineCache?.sheet !== s) this.outlineCache = { sheet: s, row: outlineGroups(s, "row"), col: outlineGroups(s, "col") };
+    return this.outlineCache;
+  }
+
+  /** Group gutter widths: one level's width per level, plus room for the outermost button. */
+  private gutter(axis: OutlineAxis): number {
+    const depth = Math.max(0, ...this.outline()[axis].map((g) => g.level));
+    return depth ? depth * GUTTER + 4 : 0;
+  }
+
+  private get hw(): number {
+    return HEADER_W + this.gutter("row");
+  }
+
+  private get hh(): number {
+    return HEADER_H + this.gutter("col");
+  }
+
+  /** Header sizes including group gutters. */
+  headerSize(): { hw: number; hh: number } {
+    return { hw: this.hw, hh: this.hh };
   }
 
   private viewport(): { width: number; height: number } {
@@ -304,7 +340,7 @@ export class Grid {
     const s = this.sheet;
     const { width, height } = this.viewport();
     const fw = s.colX(s.frozen.cols), fh = s.rowY(s.frozen.rows);
-    const vw = width - HEADER_W - fw, vh = height - HEADER_H - fh;
+    const vw = width - this.hw - fw, vh = height - this.hh - fh;
     if (p.col >= s.frozen.cols) {
       const x = s.colX(p.col) - fw, w = s.colWidth(p.col);
       if (x < this.scroll.scrollLeft) this.scroll.scrollLeft = x;
@@ -398,15 +434,15 @@ export class Grid {
     const { width, height } = this.viewport();
     const sl = this.scroll.scrollLeft, st = this.scroll.scrollTop;
     // Near the end: add rows / columns, like scrolling a long sheet.
-    if (st + height > HEADER_H + s.rowY(this.nRows) - 400) this.grow(this.nRows + 100, 0);
-    if (sl + width > HEADER_W + s.colX(this.nCols) - 200) this.grow(0, this.nCols + 5);
+    if (st + height > this.hh + s.rowY(this.nRows) - 400) this.grow(this.nRows + 100, 0);
+    if (sl + width > this.hw + s.colX(this.nCols) - 200) this.grow(0, this.nCols + 5);
     const totalW = s.colX(this.nCols), totalH = s.rowY(this.nRows);
-    this.spacer.setCssProps({ "--xlsx-w": `${HEADER_W + totalW}px`, "--xlsx-h": `${HEADER_H + totalH}px` });
+    this.spacer.setCssProps({ "--xlsx-w": `${this.hw + totalW}px`, "--xlsx-h": `${this.hh + totalH}px` });
     this.canvas.setCssProps({ "--xlsx-vw": `${width}px`, "--xlsx-vh": `${height}px` });
 
     const F = s.frozen.rows, C = s.frozen.cols;
     const fw = s.colX(C), fh = s.rowY(F);
-    const vw = Math.max(0, width - HEADER_W), vh = Math.max(0, height - HEADER_H);
+    const vw = Math.max(0, width - this.hw), vh = Math.max(0, height - this.hh);
     const frozenCols = this.visible("col", 0, fw, 0, C), frozenRows = this.visible("row", 0, fh, 0, F);
     const cols = this.visible("col", fw + sl, vw - fw, C, this.nCols), rows = this.visible("row", fh + st, vh - fh, F, this.nRows);
     const place = (el: HTMLElement, x: number, y: number, w: number, h: number) =>
@@ -430,10 +466,10 @@ export class Grid {
       pane(2, rows, frozenCols, 0, 0, fw, vh - fh),
       pane(3, rows, cols, 0, 0, vw - fw, vh - fh),
     ];
-    place(this.quads[0], HEADER_W, HEADER_H, fw, fh);
-    place(this.quads[1], HEADER_W + fw, HEADER_H, vw - fw, fh);
-    place(this.quads[2], HEADER_W, HEADER_H + fh, fw, vh - fh);
-    place(this.quads[3], HEADER_W + fw, HEADER_H + fh, vw - fw, vh - fh);
+    place(this.quads[0], this.hw, this.hh, fw, fh);
+    place(this.quads[1], this.hw + fw, this.hh, vw - fw, fh);
+    place(this.quads[2], this.hw, this.hh + fh, fw, vh - fh);
+    place(this.quads[3], this.hw + fw, this.hh + fh, vw - fw, vh - fh);
     // Quadrant offsets are relative to the quadrant's own origin.
     quads[1].ox = -sl - fw;
     quads[3].ox = -sl - fw;
@@ -444,18 +480,19 @@ export class Grid {
     // Thick dividers under frozen rows and right of frozen columns, like Sheets.
     this.frozenLines[0].toggle(F > 0);
     this.frozenLines[1].toggle(C > 0);
-    place(this.frozenLines[0], 0, HEADER_H + fh - 2, width, 4);
-    place(this.frozenLines[1], HEADER_W + fw - 2, 0, 4, height);
+    place(this.frozenLines[0], 0, this.hh + fh - 2, width, 4);
+    place(this.frozenLines[1], this.hw + fw - 2, 0, 4, height);
 
     // Headers.
     const sel = this.selection();
-    place(this.corner, 0, 0, HEADER_W, HEADER_H);
-    place(this.colHeads[0], HEADER_W, 0, fw, HEADER_H);
-    place(this.colHeads[1], HEADER_W + fw, 0, vw - fw, HEADER_H);
-    place(this.rowHeads[0], 0, HEADER_H, HEADER_W, fh);
-    place(this.rowHeads[1], 0, HEADER_H + fh, HEADER_W, vh - fh);
+    place(this.corner, 0, 0, this.hw, this.hh);
+    place(this.colHeads[0], this.hw, 0, fw, this.hh);
+    place(this.colHeads[1], this.hw + fw, 0, vw - fw, this.hh);
+    place(this.rowHeads[0], 0, this.hh, this.hw, fh);
+    place(this.rowHeads[1], 0, this.hh + fh, this.hw, vh - fh);
     const pal = this.palette();
     const font = `11px ${this.uiFont}`;
+    const gw = this.gutter("row"), gh = this.gutter("col");
     const headOps = (labels: { text: string; x: number; y: number; w: number; h: number; on: boolean }[], w: number, h: number) => {
       const ops: Op[] = [{ kind: "rect", x: 0, y: 0, w, h, color: pal.head }];
       for (const l of labels) {
@@ -467,14 +504,16 @@ export class Grid {
       return ops;
     };
     for (const [k, list, ox, w] of [[0, frozenCols, 0, fw], [1, cols, -sl - fw, vw - fw]] as const) {
-      const ops = headOps(list.map((c) => ({ text: colName(c), x: s.colX(c) + ox, y: 0, w: s.colWidth(c), h: HEADER_H, on: c >= sel.c1 && c <= sel.c2 })), Math.max(0, w), HEADER_H);
+      const ops = headOps(list.map((c) => ({ text: colName(c), x: s.colX(c) + ox, y: gh, w: s.colWidth(c), h: HEADER_H, on: c >= sel.c1 && c <= sel.c2 })), Math.max(0, w), this.hh);
+      ops.push(...this.gutterOps("col", ox, pal, font));
       this.ops.set(`colheads${k}`, ops);
-      paint(this.colHeads[k].querySelector("canvas")!, Math.max(0, w), HEADER_H, ops);
+      paint(this.colHeads[k].querySelector("canvas")!, Math.max(0, w), this.hh, ops);
     }
     for (const [k, list, oy, h] of [[0, frozenRows, 0, fh], [1, rows, -st - fh, vh - fh]] as const) {
-      const ops = headOps(list.map((r) => ({ text: String(r + 1), x: 0, y: s.rowY(r) + oy, w: HEADER_W, h: s.rowHeight(r), on: r >= sel.r1 && r <= sel.r2 })), HEADER_W, Math.max(0, h));
+      const ops = headOps(list.map((r) => ({ text: String(r + 1), x: gw, y: s.rowY(r) + oy, w: HEADER_W, h: s.rowHeight(r), on: r >= sel.r1 && r <= sel.r2 })), this.hw, Math.max(0, h));
+      ops.push(...this.gutterOps("row", oy, pal, font));
       this.ops.set(`rowheads${k}`, ops);
-      paint(this.rowHeads[k].querySelector("canvas")!, HEADER_W, Math.max(0, h), ops);
+      paint(this.rowHeads[k].querySelector("canvas")!, this.hw, Math.max(0, h), ops);
     }
 
     // The editor / keyboard sink sits on the active cell.
@@ -500,6 +539,47 @@ export class Grid {
     this.editorFont = Object.keys(editFont);
   }
 
+  /** Where a group's +/- button sits in its header strip: centre across (gutter) and along (sheet offset + `o`). */
+  private groupButton(axis: OutlineAxis, g: OutlineGroup, o: number): { across: number; along: number } | null {
+    const s = this.sheet;
+    const at = summaryIndex(s, axis, g);
+    if (at < 0) return null;
+    const pos = axis === "row" ? s.rowY(at) : s.colX(at), size = axis === "row" ? s.rowHeight(at) : s.colWidth(at);
+    return { across: (g.level - 1) * GUTTER + GUTTER / 2 + 2, along: pos + size / 2 + o };
+  }
+
+  /** Brackets and +/- buttons for the groups along one axis, in its header strip's coordinates. */
+  private gutterOps(axis: OutlineAxis, o: number, pal: ReturnType<Grid["palette"]>, font: string): Op[] {
+    const s = this.sheet;
+    const ops: Op[] = [];
+    const B = 11;
+    for (const g of this.outline()[axis]) {
+      const btn = this.groupButton(axis, g, o);
+      if (!btn) continue;
+      const a = btn.across;
+      if (!g.collapsed) {
+        const from = (axis === "row" ? s.rowY(g.start) : s.colX(g.start)) + o + 2;
+        const to = (axis === "row" ? s.rowY(g.end + 1) : s.colX(g.end + 1)) + o - 2;
+        const [lo, hi] = btn.along > to ? [from, btn.along] : [btn.along, to];
+        ops.push(axis === "row" ? { kind: "line", x1: a, y1: lo, x2: a, y2: hi, color: pal.headInk, width: 1 } : { kind: "line", x1: lo, y1: a, x2: hi, y2: a, color: pal.headInk, width: 1 });
+        // A tick at the far end, like a bracket.
+        const end = btn.along > to ? lo : hi;
+        ops.push(axis === "row" ? { kind: "line", x1: a, y1: end, x2: a + 4, y2: end, color: pal.headInk, width: 1 } : { kind: "line", x1: end, y1: a, x2: end, y2: a + 4, color: pal.headInk, width: 1 });
+      }
+      const [x, y] = axis === "row" ? [a - B / 2, btn.along - B / 2] : [btn.along - B / 2, a - B / 2];
+      ops.push({ kind: "rect", x, y, w: B, h: B, color: pal.headInk });
+      ops.push({ kind: "rect", x: x + 1, y: y + 1, w: B - 2, h: B - 2, color: pal.head });
+      ops.push({ kind: "text", x, y, w: B, h: B, text: g.collapsed ? "+" : "−", font, size: 11, color: pal.headInk, align: "center", valign: "center", wrap: false, underline: false, strike: false, pad: 0 });
+    }
+    return ops;
+  }
+
+  /** The group whose +/- button is at gutter offset `across` on row / column `index`. */
+  private groupAt(axis: OutlineAxis, across: number, index: number): OutlineGroup | undefined {
+    const level = Math.floor(Math.max(0, across - 2) / GUTTER) + 1;
+    return this.outline()[axis].find((g) => g.level === level && summaryIndex(this.sheet, axis, g) === index);
+  }
+
   /** The rectangle (sheet coordinates) a cell occupies, merged ranges included. */
   private cellBox(row: number, col: number): Rect {
     return this.sheet.mergeAt(row, col) ?? { r1: row, c1: col, r2: row, c2: col };
@@ -509,7 +589,7 @@ export class Grid {
   private boxOf(r: Rect, scroll = { left: this.scroll.scrollLeft, top: this.scroll.scrollTop }): { x: number; y: number; w: number; h: number } {
     const s = this.sheet;
     const sl = r.c1 >= s.frozen.cols ? scroll.left : 0, st = r.r1 >= s.frozen.rows ? scroll.top : 0;
-    return { x: HEADER_W + s.colX(r.c1) - sl, y: HEADER_H + s.rowY(r.r1) - st, w: s.colX(r.c2 + 1) - s.colX(r.c1), h: s.rowY(r.r2 + 1) - s.rowY(r.r1) };
+    return { x: this.hw + s.colX(r.c1) - sl, y: this.hh + s.rowY(r.r1) - st, w: s.colX(r.c2 + 1) - s.colX(r.c1), h: s.rowY(r.r2 + 1) - s.rowY(r.r1) };
   }
 
   /** Draw part of the sheet into `el` without selection or editing marks (for printing), painted at `scale`. */
@@ -772,17 +852,26 @@ export class Grid {
     // Client positions are on screen; the grid's own pixels are that divided by the zoom.
     const x = (clientX - box.left) / this.zoom, y = (clientY - box.top) / this.zoom;
     const fw = s.colX(s.frozen.cols), fh = s.rowY(s.frozen.rows);
-    const sx = x - HEADER_W < fw ? x - HEADER_W : x - HEADER_W + this.scroll.scrollLeft;
-    const sy = y - HEADER_H < fh ? y - HEADER_H : y - HEADER_H + this.scroll.scrollTop;
+    const sx = x - this.hw < fw ? x - this.hw : x - this.hw + this.scroll.scrollLeft;
+    const sy = y - this.hh < fh ? y - this.hh : y - this.hh + this.scroll.scrollTop;
     const col = Math.min(16383, s.colAt(Math.max(0, sx))), row = Math.min(1048575, s.rowAt(Math.max(0, sy)));
-    if (x < HEADER_W && y < HEADER_H) return { row: 0, col: 0, area: "corner" };
-    if (y < HEADER_H) {
+    if (x < this.hw && y < this.hh) return { row: 0, col: 0, area: "corner" };
+    const gw = this.gutter("row"), gh = this.gutter("col");
+    if (x < gw && y >= this.hh) {
+      const group = this.groupAt("row", x, row);
+      return { row, col, area: "outline", outline: group && { axis: "row", group } };
+    }
+    if (y < gh && x >= this.hw) {
+      const group = this.groupAt("col", y, col);
+      return { row, col, area: "outline", outline: group && { axis: "col", group } };
+    }
+    if (y < this.hh) {
       // Within 4px of a column's right edge (or the left edge of the next): resize that column.
       const right = s.colX(col + 1), left = s.colX(col);
       const resize = right - sx <= 4 ? col : sx - left <= 4 && col > 0 ? this.step("col", col, -1) : undefined;
       return { row, col, area: "colHeader", resize };
     }
-    if (x < HEADER_W) {
+    if (x < this.hw) {
       const bottom = s.rowY(row + 1), top = s.rowY(row);
       const resize = bottom - sy <= 3 ? row : sy - top <= 3 && row > 0 ? this.step("row", row, -1) : undefined;
       return { row, col, area: "rowHeader", resize };
@@ -796,9 +885,9 @@ export class Grid {
       // Scroll while dragging past the edge.
       const b = this.scroll.getBoundingClientRect();
       if (e.clientY > b.bottom - 10) this.scroll.scrollTop += 20;
-      else if (e.clientY < b.top + HEADER_H) this.scroll.scrollTop -= 20;
+      else if (e.clientY < b.top + this.hh) this.scroll.scrollTop -= 20;
       if (e.clientX > b.right - 10) this.scroll.scrollLeft += 20;
-      else if (e.clientX < b.left + HEADER_W) this.scroll.scrollLeft -= 20;
+      else if (e.clientX < b.left + this.hw) this.scroll.scrollLeft -= 20;
       move(e);
     };
     const onUp = (e: PointerEvent) => {
@@ -943,6 +1032,11 @@ export class Grid {
       return;
     }
 
+    if (hit.area === "outline") {
+      e.preventDefault();
+      if (hit.outline) this.host.toggleGroup?.(hit.outline.axis, hit.outline.group);
+      return;
+    }
     const extend = e.shiftKey;
     if (hit.area === "corner") {
       this.select({ row: 0, col: 0 }, { row: 1048575, col: 16383 });
@@ -1086,7 +1180,7 @@ export class Grid {
       return;
     }
     const { height } = this.viewport();
-    const pageRows = Math.max(1, Math.floor((height - HEADER_H) / this.sheet.rows.size) - 1);
+    const pageRows = Math.max(1, Math.floor((height - this.hh) / this.sheet.rows.size) - 1);
     switch (e.key) {
       case "Tab":
         e.preventDefault();

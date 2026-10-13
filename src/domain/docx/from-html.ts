@@ -20,11 +20,13 @@ export interface HtmlImageAttrs {
 }
 export interface FromHtmlContext {
   /** numId of a bullet or numbered list. */
-  list(kind: "bullet" | "ordered"): string;
+  list(kind: "bullet" | "ordered" | "task"): string;
   /** Image node attributes for a picture in the note, or null to leave it out. */
   image(img: HTMLImageElement): HtmlImageAttrs | null;
 }
 
+/** Font for task boxes: Windows' symbol font, which has ☐ and ☑ (fontStack falls back to Noto Sans Symbols 2). */
+const BOX_FONT = "Segoe UI Symbol";
 const CODE_FILL = "#F1F3F4";
 const CODE_FONT = "Consolas", INLINE_CODE_FONT = "Courier New", CODE_PT = 10;
 const BLOCKS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "BLOCKQUOTE", "PRE", "TABLE", "HR", "DIV", "SECTION", "LI", "FIGURE", "DETAILS"]);
@@ -78,7 +80,11 @@ export function htmlToDoc(root: HTMLElement, ctx: FromHtmlContext): PMNode {
         if (attrs) into.push(schema.nodes.image.create({ ...attrs, alt: attrs.alt ?? node.getAttribute("alt") ?? "" }));
       } else if (tag === "INPUT") {
         // A task list's checkbox.
-        if ((node as HTMLInputElement).type === "checkbox") into.push(schema.text((node as HTMLInputElement).checked || node.hasAttribute("checked") ? "☑ " : "☐ ", marks));
+        // The box gets a symbol font: body fonts lack both boxes, and fallback can pick an emoji font for ☑ only.
+        if ((node as HTMLInputElement).type === "checkbox") {
+          into.push(schema.text((node as HTMLInputElement).checked || node.hasAttribute("checked") ? "☑" : "☐", schema.marks.font.create({ font: BOX_FONT }).addToSet(marks)));
+          into.push(schema.text(" ", marks));
+        }
       } else if (node.classList.contains("frontmatter") || node.classList.contains("copy-code-button") || node.classList.contains("heading-collapse-indicator")) continue;
       else {
         let m = marks;
@@ -144,8 +150,15 @@ export function htmlToDoc(root: HTMLElement, ctx: FromHtmlContext): PMNode {
     else if (tag === "P") into.push(paragraph(el, attrs));
     else if (tag === "BLOCKQUOTE") blocks(el, into, { ...attrs, style: "Quote" }, depth);
     else if (tag === "UL" || tag === "OL") {
-      const numId = ctx.list(tag === "UL" ? "bullet" : "ordered");
-      for (const li of Array.from(el.children)) if (li.tagName === "LI") blocks(li as HTMLElement, into, { style: attrs.style, numId, ilvl: depth }, depth + 1);
+      // Task items (Obsidian's "- [x]") get a list without bullets, as Google Docs' checklists: the box is the marker.
+      const ids = new Map<string, string>();
+      const id = (kind: "bullet" | "ordered" | "task") => ids.get(kind) ?? (ids.set(kind, ctx.list(kind)), ids.get(kind)!);
+      const isTask = (li: Element) => tag === "UL" && (li.classList.contains("task-list-item") || !!li.querySelector(':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]'));
+      for (const li of Array.from(el.children)) {
+        if (li.tagName !== "LI") continue;
+        const numId = id(isTask(li) ? "task" : tag === "UL" ? "bullet" : "ordered");
+        blocks(li as HTMLElement, into, { style: attrs.style, numId, ilvl: depth }, depth + 1);
+      }
     } else if (tag === "PRE") {
       const marks = [schema.marks.font.create({ font: CODE_FONT }), schema.marks.size.create({ pt: CODE_PT }), schema.marks.noProof.create()];
       const lines = (el.querySelector("code") ?? el).textContent.replace(/\n$/, "").split("\n");

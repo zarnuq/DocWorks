@@ -105,3 +105,26 @@ describe("comments without paragraph ids", () => {
     expect(list.map((c) => [c.id, c.parentId])).toEqual([[a, undefined], [b, undefined]]);
   });
 });
+
+describe("task lists", () => {
+  it("makes a list without bullets, indented where a bullet would sit", async () => {
+    const { DocxDocument } = await import("../src/infrastructure/docx/docx-document");
+    const { blankDocx } = await import("../src/infrastructure/blank");
+    const docx = await DocxDocument.load(await blankDocx());
+    const id = docx.ensureList("task");
+    expect(docx.ensureList("task")).toBe(id);
+    expect(docx.ensureList("bullet")).not.toBe(id);
+    const lvl = docx.listLevel(id, 0)!;
+    const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    expect(lvl.getElementsByTagNameNS(W, "numFmt")[0].getAttributeNS(W, "val")).toBe("none");
+    expect(lvl.getElementsByTagNameNS(W, "lvlText")[0].getAttributeNS(W, "val")).toBe("");
+    expect(lvl.getElementsByTagNameNS(W, "suff")[0].getAttributeNS(W, "val")).toBe("nothing");
+  });
+});
+
+describe("symbol font fallbacks", () => {
+  it("falls back to fonts with both ballot boxes for Segoe UI Symbol", async () => {
+    const { fontStack } = await import("../src/core/utils/fonts");
+    expect(fontStack("Segoe UI Symbol")).toContain('"Noto Sans Symbols 2"');
+  });
+});

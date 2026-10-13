@@ -8,6 +8,8 @@ import { customGeometry, GeomPath, Geometry, Handle, presetGeometry, Rect, Site 
 import { Fill, fillCss, Line, readFill, readFillRef, readLine, readShadow, Shadow, ThemeStyles, themeStyles } from "./shape-style";
 import { cellRect, readTable, TableCell, TableModel } from "./table";
 import { Crop, readCrop } from "./slide-edit";
+import { cNvPrOf, linkAttrs, readLink } from "./links";
+import { PictureAdjust, readAdjust } from "./picture-adjust";
 
 export type { GeomPath, Rect } from "./geometry";
 
@@ -120,6 +122,10 @@ export interface ShapeModel {
   text: TextBody | null;
   /** Text box relative to the shape, when it differs from the shape (SmartArt txXfrm). */
   textRect: Rect | null;
+  /** Link on the whole shape (see links.ts), or null. */
+  link: string | null;
+  /** Pictures: transparency, brightness, contrast and recolor. */
+  adjust?: PictureAdjust;
 }
 
 export interface SlideModel {
@@ -143,7 +149,7 @@ export interface TextStyle {
   colors: ColorContext;
   fonts: { major: string; minor: string };
   /** Hyperlink relationships of the part the text lives in. */
-  links?: { target(rId: string): string | null; add(url: string): string };
+  links?: { target(rId: string): string | null; add(link: string): { id: string; action?: string } };
 }
 
 const DEFAULT_INSETS = { l: 91440, t: 45720, r: 91440, b: 45720 };
@@ -181,8 +187,9 @@ function mergeRunProps(props: Partial<RunProps>, rPr: Element | null, style: Tex
   if (props.spc === undefined && rPr.hasAttribute("spc")) props.spc = Number(rPr.getAttribute("spc")) / 100;
   if (props.kern === undefined && rPr.hasAttribute("kern")) props.kern = Number(rPr.getAttribute("kern")) / 100;
   if (props.cap === undefined && rPr.hasAttribute("cap")) props.cap = (["all", "small"] as const).find((c) => c === rPr.getAttribute("cap")) ?? "none";
-  const link = kid(rPr, NS.a, "hlinkClick")?.getAttributeNS(NS.r, "id");
-  if (props.link === undefined && link) props.link = style.links?.target(link) ?? null;
+  const h = kid(rPr, NS.a, "hlinkClick");
+  const links = style.links;
+  if (props.link === undefined && h && links) props.link = readLink(h, (id) => links.target(id));
   if (props.color === undefined) {
     const c = resolveColor(kid(rPr, NS.a, "solidFill"), style.colors);
     if (c) props.color = c;
@@ -537,7 +544,7 @@ class SlideParser {
         fontRefColor: null,
         colors: this.colors,
         fonts: this.fonts,
-        links: { target: (id) => this.doc.relTarget(table.part, id), add: (url) => this.doc.linkRel(table.part, url) },
+        links: { target: (id) => this.doc.relTarget(table.part, id), add: (link) => linkAttrs(this.doc, table.part, link) },
       };
       const inset = (attr: string, d: number) => num(tcPr, attr) ?? d;
       const anchor = tcPr?.getAttribute("anchor");
@@ -628,12 +635,14 @@ class SlideParser {
       table: null,
       text: null,
       textRect: null,
+      link: readLink(kid(cNvPrOf(el), NS.a, "hlinkClick"), (id) => this.doc.relTarget(part, id)),
     };
 
     if (el.localName === "pic") {
       model.kind = "pic";
       model.image = this.blipImage(part, kid(kid(el, ns, "blipFill"), NS.a, "blip"));
       model.crop = readCrop(el);
+      model.adjust = readAdjust(el, this.colors);
       model.media = readMedia(this.doc, part, el) ?? undefined;
       model.fill = null;
       return model;
@@ -682,7 +691,7 @@ class SlideParser {
         fontRefColor: resolveColor(kid(styleEl, NS.a, "fontRef"), this.colors),
         colors: this.colors,
         fonts: this.fonts,
-        links: { target: (id) => this.doc.relTarget(part, id), add: (url) => this.doc.linkRel(part, url) },
+        links: { target: (id) => this.doc.relTarget(part, id), add: (link) => linkAttrs(this.doc, part, link) },
       };
       const bodyPrs = [txBody, kid(layoutPh, NS.p, "txBody"), kid(masterPh, NS.p, "txBody")].map((b) => kid(b, NS.a, "bodyPr"));
       const pick = (attr: string) => bodyPrs.find((b) => b?.hasAttribute(attr))?.getAttribute(attr) ?? null;

@@ -5,6 +5,7 @@ import { itemRect, setItemRect, xfrmOf } from "../../domain/pptx/arrange";
 import { parseSlide, plainText } from "../../domain/pptx/slide-model";
 import { Fill, writeFill } from "../../domain/pptx/shape-style";
 import { TABLE_STYLES } from "../../domain/pptx/table";
+import { dropLinks } from "../../domain/pptx/links";
 import { OoxmlPackage, PackageSnapshot, parseXml, relsPathOf, ResourceBundle } from "../ooxml/ooxml-package";
 
 export interface SlideRef {
@@ -227,7 +228,9 @@ export class PptxDocument extends OoxmlPackage {
           if (master && !masters.has(master)) masters.set(master, await this.captureResources([master]));
           continue;
         }
-        rels.push({ id: rel.id, uri: rel.uri, target: rel.target, external: rel.external, resources: rel.external ? undefined : await this.captureResources([rel.target]) });
+        // A link to another slide stays a link (to that slide in this deck), never a copy of the slide.
+        const slideLink = rel.type === "slide";
+        rels.push({ id: rel.id, uri: rel.uri, target: rel.target, external: rel.external, resources: rel.external || slideLink ? undefined : await this.captureResources([rel.target]) });
       }
       const xml = this.xml(src.path)!.cloneNode(true) as Document;
       for (const link of Array.from(xml.getElementsByTagNameNS(P188, "commentRel"))) link.parentElement?.remove();
@@ -259,8 +262,12 @@ export class PptxDocument extends OoxmlPackage {
     };
     for (const slide of clip.slides) {
       const path = this.nextPartPath("ppt/slides/slide", ".xml");
-      this.parts.set(path, parseXml(slide.xml)!);
+      const xml = parseXml(slide.xml)!;
+      this.parts.set(path, xml);
       added.push(path);
+      // Links to slides of another deck (or slides deleted since copying) have nothing to point at here.
+      const lost = new Set(slide.rels.filter((r) => r.uri.endsWith("/slide") && (clip.doc !== this || !this.slides().some((s) => s.path === r.target))).map((r) => r.id));
+      if (lost.size) dropLinks(xml, lost);
       const rels = this.emptyRels();
       const add = (id: string, uri: string, target: string, external: boolean) => {
         const el = rels.createElementNS(NS.pkgRels, "Relationship");
@@ -276,6 +283,7 @@ export class PptxDocument extends OoxmlPackage {
       const layout = own ?? (slide.layout && clip.doc !== this ? layoutCopy(slide.layout) : null) ?? layouts.find((l) => l.name === slide.layout?.name)?.path ?? layouts.find((l) => l.type === slide.layout?.type)?.path ?? this.firstLayout();
       if (layout) add(this.layoutRelId(slide), `${REL_TYPE}slideLayout`, layout, false);
       for (const rel of slide.rels) {
+        if (lost.has(rel.id)) continue;
         if (rel.external || !rel.resources) add(rel.id, rel.uri, rel.target, rel.external);
         else {
           const paths = this.importResources(rel.resources);
@@ -342,6 +350,14 @@ export class PptxDocument extends OoxmlPackage {
     const notes = this.notesOf(slide.path);
     if (notes) this.removePart(notes);
     this.removePart(slide.path);
+    // Links to the deleted slide go with it.
+    for (const other of this.slides()) {
+      const ids = new Set(this.rels(other.path).filter((r) => r.type === "slide" && r.target === slide.path).map((r) => r.id));
+      if (!ids.size) continue;
+      dropLinks(this.parts.get(other.path)!, ids);
+      for (const id of ids) this.removeRel(other.path, id);
+      this.touch(other.path);
+    }
     done();
   }
 
@@ -491,6 +507,11 @@ export class PptxDocument extends OoxmlPackage {
   }
 
   /** Relationship id of a hyperlink from `part` to `url`, adding one if needed. */
+  /** A relationship from `part` to slide `slidePath` (for links to it), reusing one that exists. */
+  slideRel(part: string, slidePath: string): string {
+    return this.rels(part).find((r) => r.type === "slide" && !r.external && r.target === slidePath)?.id ?? this.addRel(part, "slide", slidePath);
+  }
+
   linkRel(part: string, url: string): string {
     return this.rels(part).find((r) => r.type === "hyperlink" && r.external && r.target === url)?.id ?? this.addRel(part, "hyperlink", url, true);
   }

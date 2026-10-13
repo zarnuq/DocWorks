@@ -41,6 +41,11 @@ export class App {
   vault = {
     readBinary: async (_f: TFile): Promise<ArrayBuffer> => new ArrayBuffer(0),
     modifyBinary: async (_f: TFile, _d: ArrayBuffer) => {},
+    read: async (_f: TFile): Promise<string> => "",
+    create: async (path: string, _data: string): Promise<TFile> => new TFile(path),
+    modify: async (_f: TFile, _data: string) => {},
+    getAbstractFileByPath: (_path: string): TFile | null => null,
+    getFiles: (): TFile[] => [],
     on: (_name: string, _cb: Fn) => ({}),
   };
 }
@@ -63,14 +68,22 @@ export class FileView {
 }
 
 export class Notice {
-  constructor(public message: string, _duration?: number) {}
+  /** Every message shown, for tests. */
+  static messages: string[] = [];
+  constructor(public message: string, _duration?: number) {
+    Notice.messages.push(message);
+  }
   hide() {}
 }
 
 export class Menu {
+  /** Items added, by title, so tests can run one. */
+  items: { title: string; run?: Fn }[] = [];
   addItem(cb: Fn) {
-    const item: any = { setTitle: () => item, setIcon: () => item, setSection: () => item, onClick: () => item, setChecked: () => item, setDisabled: () => item };
+    const entry: { title: string; run?: Fn } = { title: "" };
+    const item: any = { setTitle: (t: string) => ((entry.title = t), item), setIcon: () => item, setSection: () => item, onClick: (fn: Fn) => ((entry.run = fn), item), setChecked: () => item, setDisabled: () => item };
     cb(item);
+    this.items.push(entry);
     return this;
   }
   hideCallbacks: Fn[] = [];
@@ -90,6 +103,16 @@ export class Modal {
   constructor(public app: App) {}
   open() { this.modalEl.addClass("test-modal"); this.modalEl.append(this.titleEl,this.contentEl); document.body.append(this.modalEl); (this as any).onOpen?.(); }
   close() { this.modalEl.remove(); this.onClose(); }
+}
+
+export class FuzzySuggestModal<T> extends Modal {
+  getItems(): T[] { return []; }
+  getItemText(_item: T): string { return ""; }
+  onChooseItem(_item: T): void {}
+}
+
+export function normalizePath(path: string): string {
+  return path.replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
 }
 
 export class Setting {
@@ -117,6 +140,7 @@ export class Setting {
   addDropdown(cb: Fn) { return this.control(cb, "select"); }
   addSlider(cb: Fn) { return this.control(cb, "range"); }
   addText(cb: Fn) { return this.control(cb); }
+  addColorPicker(cb: Fn) { return this.control(cb, "color"); }
   addButton(cb: Fn) {
     const el = this.settingEl.createEl("button");
     const b: any = { setButtonText: (text: string) => { el.textContent = text; return b; }, setCta: () => b, onClick: (fn: () => void) => { el.addEventListener("click", fn); return b; } };

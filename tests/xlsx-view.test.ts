@@ -341,3 +341,82 @@ describe("XlsxView focus after menus", () => {
     expect(document.activeElement).toBe(v.grid.input);
   });
 });
+
+describe("XlsxView data tools", () => {
+  const click = (root: ParentNode, text: string) => Array.from(root.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === text)!.click();
+
+  it("groups selected rows from the row header menu and collapses them with the gutter button", async () => {
+    const { Menu } = await import("./obsidian-stub");
+    const { view } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 1, col: 0 }, { row: 2, col: 16383 });
+    v.contextMenu(new MouseEvent("contextmenu"), { area: "rowHeader", row: 1, col: 0 });
+    Menu.last!.items.find((i) => i.title === "Group rows 2 - 3")!.run!();
+    expect(v.sheet.rowLevels.get(1)).toBe(1);
+    const [g] = v.grid.outline().row;
+    v.grid.host.toggleGroup("row", g);
+    expect(v.sheet.hiddenRows.has(1) && v.sheet.hiddenRows.has(2)).toBe(true);
+    v.grid.select({ row: 1, col: 0 }, { row: 2, col: 16383 });
+    v.contextMenu(new MouseEvent("contextmenu"), { area: "rowHeader", row: 1, col: 0 });
+    Menu.last!.items.find((i) => i.title === "Ungroup rows 2 - 3")!.run!();
+    expect(v.sheet.rowLevels.size).toBe(0);
+  });
+
+  it("removes duplicates from the dialog and reports the counts", async () => {
+    const { Notice } = await import("./obsidian-stub");
+    const notices = Notice.messages;
+    const { view, type } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 10, col: 0 });
+    type("a");
+    type("a");
+    type("b");
+    v.grid.select({ row: 10, col: 0 }, { row: 12, col: 0 });
+    v.removeDuplicatesDialog();
+    const modal = document.querySelector<HTMLElement>(".test-modal")!;
+    click(modal, "Remove duplicates");
+    expect([v.sheet.cell("A11")?.value, v.sheet.cell("A12")?.value, v.sheet.cell("A13")?.value ?? null]).toEqual(["a", "b", null]);
+    expect(notices.at(-1)).toBe("1 duplicate row found and removed. 2 unique rows remain.");
+  });
+
+  it("splits text to columns with the detected separator", async () => {
+    const { view, type } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 10, col: 5 });
+    type("x;y");
+    v.grid.select({ row: 10, col: 5 });
+    v.splitTextDialog();
+    click(document.querySelector(".test-modal")!, "Split");
+    expect([v.sheet.cell("F11")!.value, v.sheet.cell("G11")!.value]).toEqual(["x", "y"]);
+  });
+
+  it("adds a named range for the selection", async () => {
+    const { view } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 1, col: 0 }, { row: 3, col: 0 });
+    v.namedRangesDialog();
+    const modal = document.querySelector<HTMLElement>(".test-modal")!;
+    const name = modal.querySelector<HTMLInputElement>('input[aria-label="New name"]')!;
+    expect(modal.querySelector<HTMLInputElement>('input[aria-label="New range"]')!.value).toBe("Data!A2:A4");
+    name.value = "Amounts";
+    name.dispatchEvent(new Event("change"));
+    click(modal, "Add");
+    expect(v.wb.names().map((n: any) => [n.name, n.formula])).toEqual([["Amounts", "Data!$A$2:$A$4"]]);
+    expect(modal.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("Amounts");
+  });
+
+  it("downloads the sheet as CSV next to the workbook and imports a CSV as a new tab", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    const written: [string, string][] = [];
+    v.app.vault.create = async (path: string, data: string) => { written.push([path, data]); return new TFile(path); };
+    (file as any).parent = { path: "folder" };
+    await v.downloadCsv();
+    expect(written[0][0]).toBe("folder/book - Data.csv");
+    expect(written[0][1].startsWith("Name,Notes,Double\r\n")).toBe(true);
+    v.app.vault.read = async () => "a,b\n1,2\n";
+    await v.importCsvFile(new TFile("in/prices.csv"));
+    expect(v.sheet.name).toBe("prices");
+    expect(v.sheet.cell("B2")!.value).toBe(2);
+  });
+});

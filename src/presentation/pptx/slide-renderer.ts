@@ -1,3 +1,4 @@
+import { pictureFilter } from "../../domain/pptx/picture-adjust";
 import { renderChart } from "./chart-renderer";
 import type { ShapeModel, SlideModel } from "../../domain/pptx/slide-model";
 import { fillCss } from "../../domain/pptx/shape-style";
@@ -215,6 +216,10 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     el.classList.toggle("pptx-chart", !!shape.chart);
     el.dataset.index = String(index);
     if (!shape.inherited) el.dataset.spids = shapeIds(shape.el).join(" ");
+    if (shape.link) {
+      el.dataset.link = shape.link;
+      el.addClass("has-link");
+    }
     Object.assign(el.style, { left: px(shape.rect.x), top: px(shape.rect.y), width: px(shape.rect.w), height: px(shape.rect.h) });
     if (shape.rot) el.style.transform = `rotate(${shape.rot}deg)`;
     const shadow = shadowCss(shape, scale);
@@ -254,7 +259,11 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
         const p = shape.paths[0];
         img.style.clipPath = `path("${scalePath(p.d, (shape.rect.w * scale) / (p.w || 1), (shape.rect.h * scale) / (p.h || 1))}")`;
       }
-      if (shadow) img.style.filter = shadow;
+      const adjust = shape.adjust;
+      if (adjust?.transparency) img.style.opacity = String(+(1 - adjust.transparency).toFixed(3));
+      const filter = adjust && pictureFilter(adjust);
+      const url = filter ? `url(#${svgFilter(el, filter)})` : "";
+      if (url || shadow) img.style.filter = [url, shadow].filter(Boolean).join(" ");
       drawGeometry(el, shape, scale, false);
     } else if (shape.paths) {
       const svg = drawGeometry(el, shape, scale, true);
@@ -299,4 +308,19 @@ export function renderSlide(host: HTMLElement, model: SlideModel, size: { cx: nu
     const textEl = shape.text ? textBox(el, shape, pxPerPt, scale, opts, "pptx-text") : null;
     return { shape, el, textEl, pxPerPt };
   });
+}
+
+let filterId = 0;
+
+/** Add an SVG filter made of `primitives` (markup we build ourselves) inside `parent`; returns its id. */
+function svgFilter(parent: HTMLElement, primitives: string): string {
+  const id = `dw-pic-filter-${++filterId}`;
+  const doc = new DOMParser().parseFromString(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true"><filter id="${id}" color-interpolation-filters="sRGB">${primitives}</filter></svg>`,
+    "image/svg+xml"
+  );
+  const svg = parent.ownerDocument.importNode(doc.documentElement, true) as unknown as SVGSVGElement;
+  svg.setAttribute("class", "pptx-filter-defs");
+  parent.appendChild(svg);
+  return id;
 }

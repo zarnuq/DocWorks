@@ -7,6 +7,8 @@ const FALLBACK: Record<string, string> = {
   arial: '"Liberation Sans", Arimo',
   "times new roman": '"Liberation Serif", Tinos',
   "courier new": '"Liberation Mono", Cousine',
+  // Both ballot boxes (☐ ☑) from one font, never an emoji font's ☑.
+  "segoe ui symbol": '"Noto Sans Symbols 2", "DejaVu Sans"',
 };
 
 /** Generic CSS family to fall back on when a document font isn't installed. */

@@ -111,6 +111,14 @@ export class Sheet {
   /** Hidden rows / columns (also size 0 in the axes). */
   hiddenRows = new Set<number>();
   hiddenCols = new Set<number>();
+  /** Outline (group) levels of rows / columns, and the indexes marked collapsed (the summary row / column). */
+  rowLevels = new Map<number, number>();
+  colLevels = new Map<number, number>();
+  collapsedRows = new Set<number>();
+  collapsedCols = new Set<number>();
+  /** Group summaries (and their +/- buttons) sit below / right of a group unless sheetPr outlinePr says otherwise. */
+  summaryBelow = true;
+  summaryRight = true;
 
   constructor(
     readonly wb: Workbook,
@@ -127,12 +135,19 @@ export class Sheet {
       const min = Number(col.getAttribute("min")) - 1, max = Math.min(Number(col.getAttribute("max")) - 1, 16383);
       const hidden = col.getAttribute("hidden") === "1" || col.getAttribute("hidden") === "true";
       const width = col.getAttribute("width");
+      const level = Number(col.getAttribute("outlineLevel") ?? 0);
+      const collapsed = col.getAttribute("collapsed") === "1" || col.getAttribute("collapsed") === "true";
       for (let c = min; c <= max; c++) {
+        if (level) this.colLevels.set(c, level);
+        if (collapsed) this.collapsedCols.add(c);
         if (hidden) this.hiddenCols.add(c);
         if (hidden) this.cols.set(c, 0);
         else if (width !== null) this.cols.set(c, Math.round(Number(width) * 7));
       }
     }
+    const outlinePr = this.first(this.first(root, "sheetPr"), "outlinePr");
+    this.summaryBelow = !/^(0|false)$/.test(outlinePr?.getAttribute("summaryBelow") ?? "");
+    this.summaryRight = !/^(0|false)$/.test(outlinePr?.getAttribute("summaryRight") ?? "");
     const sheetData = this.sheetData();
     const shared = new Map<string, { formula: string; row: number; col: number }>();
     const members: Cell[] = [];
@@ -141,6 +156,9 @@ export class Sheet {
     for (const rowEl of this.all(sheetData, "row")) {
       rowIndex = rowEl.hasAttribute("r") ? Number(rowEl.getAttribute("r")) - 1 : rowIndex + 1;
       this.rowEls.set(rowIndex, rowEl);
+      const level = Number(rowEl.getAttribute("outlineLevel") ?? 0);
+      if (level) this.rowLevels.set(rowIndex, level);
+      if (rowEl.getAttribute("collapsed") === "1" || rowEl.getAttribute("collapsed") === "true") this.collapsedRows.add(rowIndex);
       if (rowEl.getAttribute("hidden") === "1" || rowEl.getAttribute("hidden") === "true") {
         this.hiddenRows.add(rowIndex);
         this.rows.set(rowIndex, 0);

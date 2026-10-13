@@ -2,12 +2,16 @@ import { insertPivot, Pivot, pivotAt, readPivots, refreshPivot } from "../../dom
 import { formulaSparklines, readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
 import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
-import { App, FileView, Menu, Modal, Notice, Platform, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, FuzzySuggestModal, Menu, Modal, Notice, Platform, Scope, Setting, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { detectSeparator, removeDuplicates, splitSources, splitText } from "../../domain/xlsx/cleanup";
+import { importCsv, parseCsv, sheetToCsv } from "../../domain/xlsx/csv";
+import { addName, deleteName, listNames, renameName, setNameRange } from "../../domain/xlsx/names";
+import { groupRange, setGroupCollapsed, ungroupRange } from "../../domain/xlsx/outline";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { Edits } from "../../domain/xlsx/commands";
 import { FormulaSyntaxError } from "../../domain/xlsx/formula";
-import { Rect, cellName, colName, parseRange, rangeName } from "../../domain/xlsx/references";
+import { Rect, cellName, colName, parseRange, quoteSheet as quoteSheetName, rangeName } from "../../domain/xlsx/references";
 import { adjustDecimals, formatGeneral, parseInput } from "../../domain/xlsx/number-format";
 import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
 import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboard";
@@ -219,6 +223,7 @@ export class XlsxView extends FileView {
       openDropdown: (row, col, at) => this.openDropdown(row, col, at),
       charts: () => this.charts(),
       chartMenu: (key, e) => this.chartMenu(key, e),
+      toggleGroup: (axis, g) => this.change(() => setGroupCollapsed(this.edits!, this.sheet, axis, g, !g.collapsed)),
     });
     if (this.savedZoom() !== "1") this.grid.setZoom(Number(this.savedZoom()));
     const bottom = this.contentEl.createDiv({ cls: "xlsx-bottom" });
@@ -424,6 +429,174 @@ export class XlsxView extends FileView {
     menu.addItem((i) => i.setTitle("Delete chart").setIcon("trash").onClick(() => this.change(() => deleteChart(this.edits!, this.sheet, found.chart))));
     this.refocusAfter(menu);
     menu.showAtMouseEvent(e);
+  }
+
+  /** Google's "Group rows 2 - 5" / "Ungroup rows 2 - 5" on a header menu. */
+  private groupItems(menu: Menu, axis: "row" | "col", a: number, b: number): void {
+    const label = axis === "row" ? `rows ${a + 1} - ${b + 1}` : `columns ${colName(a)} - ${colName(b)}`;
+    menu.addItem((it) => it.setTitle(`Group ${label}`).setIcon("list-tree").onClick(() => this.change(() => groupRange(this.edits!, this.sheet, axis, a, b))));
+    const levels = axis === "row" ? this.sheet.rowLevels : this.sheet.colLevels;
+    let grouped = false;
+    for (const i of levels.keys()) if (i >= a && i <= b) grouped = true;
+    if (grouped) menu.addItem((it) => it.setTitle(`Ungroup ${label}`).setIcon("list-x").onClick(() => this.change(() => ungroupRange(this.edits!, this.sheet, axis, a, b))));
+  }
+
+  /** The selection, or the used area when a single cell is selected (as Sheets' data tools do). */
+  private dataRange(): Rect {
+    const sel = this.grid!.selection();
+    return sel.r1 === sel.r2 && sel.c1 === sel.c2 ? this.sheet.used() ?? sel : sel;
+  }
+
+  /** Data › Data cleanup › Remove duplicates. */
+  private removeDuplicatesDialog(): void {
+    if (!this.edits || !this.grid) return;
+    const r = this.dataRange();
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Remove duplicates");
+    modal.contentEl.createEl("p", { text: `Data range: ${this.sheet.name}!${rangeName(r)}` });
+    let header = false;
+    const picked = new Set<number>();
+    const list = modal.contentEl.createDiv();
+    const drawColumns = () => {
+      list.empty();
+      for (let col = r.c1; col <= r.c2; col++) {
+        const title = header && this.sheet.display(r.r1, col).text ? `${this.sheet.display(r.r1, col).text} (${colName(col)})` : `Column ${colName(col)}`;
+        new Setting(list).setName(title).addToggle((t) => t.setValue(picked.has(col)).onChange((on: boolean) => (on ? picked.add(col) : picked.delete(col))));
+      }
+    };
+    for (let col = r.c1; col <= r.c2; col++) picked.add(col);
+    new Setting(modal.contentEl).setName("Data has header row").addToggle((t) =>
+      t.setValue(header).onChange((v: boolean) => {
+        header = v;
+        drawColumns();
+      })
+    );
+    modal.contentEl.append(list);
+    drawColumns();
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Remove duplicates").setCta().onClick(() => {
+        if (!picked.size) return void new Notice("Pick at least one column to analyze.");
+        let result = { removed: 0, kept: 0 };
+        if (!this.change(() => (result = removeDuplicates(this.edits!, this.sheet, r, { header, cols: [...picked].sort((x, y) => x - y) })))) return;
+        modal.close();
+        const rows = (n: number, word: string) => `${n} ${word} ${n === 1 ? "row" : "rows"}`;
+        new Notice(result.removed ? `${rows(result.removed, "duplicate")} found and removed. ${rows(result.kept, "unique")} remain.` : "No duplicate rows found.");
+      }))
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.open();
+  }
+
+  /** Data › Split text to columns, with Sheets' separator choices. */
+  private splitTextDialog(): void {
+    if (!this.edits || !this.grid) return;
+    const sel = this.grid.selection();
+    if (sel.c1 !== sel.c2) return void new Notice("Select one column to split.");
+    const r = sel.r1 === sel.r2 ? { ...sel, r2: this.sheet.used()?.r2 ?? sel.r2 } : sel;
+    const texts = splitSources(this.sheet, r);
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Split text to columns");
+    const detected = detectSeparator(texts) ?? ",";
+    let choice = "auto", custom = "";
+    const NAMES: Record<string, string> = { ",": "Comma", ";": "Semicolon", ".": "Period", " ": "Space" };
+    new Setting(modal.contentEl).setName("Separator").addDropdown((d) =>
+      d.addOptions({ auto: `Detect automatically (${NAMES[detected]})`, ",": "Comma", ";": "Semicolon", ".": "Period", " ": "Space", custom: "Custom" }).setValue(choice).onChange((v: string) => (choice = v))
+    );
+    new Setting(modal.contentEl).setName("Custom separator").addText((t) => t.setValue(custom).onChange((v: string) => (custom = v)));
+    const sep = () => (choice === "auto" ? detected : choice === "custom" ? custom : choice);
+    const width = (s: string) => Math.max(0, ...texts.map((t) => t.split(s).length));
+    const filledRight = () => {
+      const w = width(sep());
+      return w > 1 && this.sheet.cellsIn({ r1: r.r1, r2: r.r2, c1: r.c1 + 1, c2: r.c1 + w - 1 }).some((c) => c.value !== null || c.formula !== undefined);
+    };
+    modal.contentEl.createEl("p", { cls: "pptx-props-hint", text: "Parts go into the columns to the right, replacing what is there." });
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Split").setCta().onClick(() => {
+        if (!sep()) return void new Notice("Enter a separator.");
+        if (filledRight()) new Notice("Existing data to the right was replaced.");
+        if (this.change(() => splitText(this.edits!, this.sheet, r, sep()))) modal.close();
+      }))
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.open();
+  }
+
+  /** Data › Named ranges: list, add, edit, rename and delete. */
+  private namedRangesDialog(): void {
+    if (!this.edits || !this.grid) return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Named ranges");
+    modal.modalEl.addClass("xlsx-names-modal");
+    const draw = () => {
+      modal.contentEl.empty();
+      for (const n of listNames(this.wb)) {
+        let name = n.name, range = n.range;
+        new Setting(modal.contentEl)
+          .addText((t) => {
+            t.inputEl.setAttribute("aria-label", "Name");
+            t.setValue(name).onChange((v: string) => (name = v.trim()));
+          })
+          .addText((t) => {
+            t.inputEl.setAttribute("aria-label", "Range");
+            t.setValue(range).onChange((v: string) => (range = v.trim()));
+          })
+          .addButton((b) => b.setButtonText("Save").onClick(() => {
+            const ok = this.change(() => {
+              if (range !== n.range) setNameRange(this.edits!, n.name, range);
+              if (name !== n.name) renameName(this.edits!, n.name, name);
+            });
+            if (ok) draw();
+          }))
+          .addButton((b) => b.setButtonText("Delete").onClick(() => {
+            if (this.change(() => deleteName(this.edits!, n.name))) draw();
+          }));
+      }
+      let name = "", range = `${quoteSheetName(this.sheet.name)}!${rangeName(this.grid!.selection())}`;
+      new Setting(modal.contentEl).setName("Add a range").setHeading();
+      new Setting(modal.contentEl)
+        .addText((t) => {
+          t.inputEl.setAttribute("aria-label", "New name");
+          t.setPlaceholder("Name").onChange((v: string) => (name = v.trim()));
+        })
+        .addText((t) => {
+          t.inputEl.setAttribute("aria-label", "New range");
+          t.setValue(range).onChange((v: string) => (range = v.trim()));
+        })
+        .addButton((b) => b.setButtonText("Add").setCta().onClick(() => {
+          if (this.change(() => addName(this.edits!, name, range))) draw();
+        }));
+    };
+    draw();
+    modal.open();
+  }
+
+  /** File › Import: pick a .csv in the vault for a new sheet. */
+  private pickCsv(): void {
+    const files = this.app.vault.getFiles().filter((f) => f.extension.toLowerCase() === "csv");
+    if (!files.length) return void new Notice("No .csv files in this vault.");
+    new FilePicker(this.app, files, (f) => void this.importCsvFile(f)).open();
+  }
+
+  private async importCsvFile(file: TFile): Promise<void> {
+    if (!this.edits) return;
+    const rows = parseCsv(await this.app.vault.read(file));
+    let name = "";
+    if (!this.change(() => (name = importCsv(this.edits!, rows, file.basename, this.sheetIndex)))) return;
+    this.showSheet(this.wb.sheets.findIndex((s) => s.name === name));
+  }
+
+  /** File › Download › CSV: the current sheet as "<workbook> - <sheet>.csv" in the workbook's folder. */
+  private async downloadCsv(): Promise<void> {
+    if (!this.file) return;
+    const folder = this.file.parent?.path ?? "";
+    const path = normalizePath(`${folder && folder !== "/" ? folder + "/" : ""}${this.file.basename} - ${this.sheet.name}.csv`);
+    const text = sheetToCsv(this.sheet);
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    try {
+      if (existing instanceof TFile) await this.app.vault.modify(existing, text);
+      else await this.app.vault.create(path, text);
+      new Notice(`Saved ${path}`);
+    } catch (err) {
+      new Notice(`Could not save ${path}: ${(err as Error).message}`);
+    }
   }
 
   /** Google's Insert › Pivot table: a new sheet with a pivot table over the selection, then its editor. */
@@ -833,6 +1006,20 @@ export class XlsxView extends FileView {
     tb.icon("arrow-down-az", "Sort ascending by this column", () => this.sort(false));
     tb.icon("arrow-up-za", "Sort descending by this column", () => this.sort(true));
     tb.icon("filter", "Create or remove a filter", () => this.toggleFilter());
+    const data = tb.iconSelect("database", "Data", [
+      ["Remove duplicates…", "dedupe"],
+      ["Split text to columns…", "split"],
+      ["Named ranges…", "names"],
+      ["Import CSV as new sheet…", "import"],
+      ["Download sheet as CSV", "export"],
+    ], (v) => {
+      data.value = "";
+      if (v === "dedupe") this.removeDuplicatesDialog();
+      else if (v === "split") this.splitTextDialog();
+      else if (v === "names") this.namedRangesDialog();
+      else if (v === "import") this.pickCsv();
+      else if (v === "export") void this.downloadCsv();
+    });
     tb.iconSelect("snowflake", "Freeze", [["No rows", "r0"], ["1 row", "r1"], ["2 rows", "r2"], ["Up to current row", "rc"], ["No columns", "c0"], ["1 column", "c1"], ["2 columns", "c2"], ["Up to current column", "cc"]], (v) =>
       this.freeze(v)
     );
@@ -1114,10 +1301,12 @@ export class XlsxView extends FileView {
       item(`Hide ${rows}`, "eye-off", () => this.change(() => ops.setHidden(ed, this.sheet, "row", r.r1, r.r2, true)));
       item("Unhide rows", "eye", () => this.change(() => ops.setHidden(ed, this.sheet, "row", Math.max(0, r.r1 - 1), r.r2 + 1, false)));
       item("Resize rows…", "move-vertical", () => void this.askSize("row", r.r1, r.r2));
+      this.groupItems(menu, "row", r.r1, r.r2);
     } else if (hit.area === "colHeader") {
       item(`Hide ${cols}`, "eye-off", () => this.change(() => ops.setHidden(ed, this.sheet, "col", r.c1, r.c2, true)));
       item("Unhide columns", "eye", () => this.change(() => ops.setHidden(ed, this.sheet, "col", Math.max(0, r.c1 - 1), r.c2 + 1, false)));
       item("Resize columns…", "move-horizontal", () => void this.askSize("col", r.c1, r.c2));
+      this.groupItems(menu, "col", r.c1, r.c2);
     } else {
       item("Sort range ascending", "arrow-down-az", () => this.sort(false));
       item("Sort range descending", "arrow-up-za", () => this.sort(true));
@@ -1462,6 +1651,22 @@ export class XlsxView extends FileView {
       }
     });
     return this.saving;
+  }
+}
+
+/** Pick one of `files` by fuzzy search. */
+class FilePicker extends FuzzySuggestModal<TFile> {
+  constructor(app: App, private files: TFile[], private choose: (f: TFile) => void) {
+    super(app);
+  }
+  getItems(): TFile[] {
+    return this.files;
+  }
+  getItemText(f: TFile): string {
+    return f.path;
+  }
+  onChooseItem(f: TFile): void {
+    this.choose(f);
   }
 }
 

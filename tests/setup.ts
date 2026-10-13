@@ -30,6 +30,11 @@ g.createEl = (tag: keyof HTMLElementTagNameMap, o?: Info | string) => create(tag
 g.createDiv = (o?: Info | string) => create("div", o);
 g.createSpan = (o?: Info | string) => create("span", o);
 g.createFragment = () => document.createDocumentFragment();
+g.createSvg = (tag: string, o?: { attr?: Record<string, string> }) => {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(o?.attr ?? {})) el.setAttribute(k, v);
+  return el;
+};
 Object.assign(Node.prototype, {
   createEl(this: Node, tag: keyof HTMLElementTagNameMap, o?: Info | string) {
     return create(tag, o, this);

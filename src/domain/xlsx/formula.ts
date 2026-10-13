@@ -309,6 +309,15 @@ export function renameSheetInFormula(src: string, from: string, to: string | nul
   });
 }
 
+/** A defined name renamed in a formula (names match case-insensitively). */
+export function renameNameInFormula(src: string, from: string, to: string): string {
+  try {
+    return tokenize(src).map((t) => (t.kind === "name" && t.text.toLowerCase() === from.toLowerCase() ? to : t.text)).join("");
+  } catch {
+    return src;
+  }
+}
+
 /** Every reference token (for dependency tracking and highlighting references while editing). */
 export function formulaRefs(src: string): RefToken[] {
   try {

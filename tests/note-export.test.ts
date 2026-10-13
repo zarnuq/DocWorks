@@ -12,7 +12,7 @@ const html = (s: string) => {
   return el;
 };
 const lists: string[] = [];
-const ctx = { list: (kind: "bullet" | "ordered") => (lists.push(kind), kind === "bullet" ? "1" : "2"), image: () => null };
+const ctx = { list: (kind: "bullet" | "ordered" | "task") => (lists.push(kind), kind === "bullet" ? "1" : kind === "task" ? "3" : "2"), image: () => null };
 const blocks = (s: string) => {
   const out: { type: string; text: string; attrs: Record<string, unknown>; marks: string[] }[] = [];
   htmlToDoc(html(s), ctx).forEach((n) => out.push({ type: n.type.name, text: n.textContent, attrs: n.attrs, marks: [] }));
@@ -76,7 +76,20 @@ describe("note export to .docx", () => {
 
   it("numbers lists by kind and nesting depth, and ticks task items", () => {
     const b = blocks(`<ul><li>a<ul><li>a1</li></ul></li><li class="task-list-item"><input type="checkbox" checked>done</li></ul><ol><li><p>one</p></li></ol>`);
-    expect(b.map((x) => [x.text, x.attrs.numId, x.attrs.ilvl])).toEqual([["a", "1", 0], ["a1", "1", 1], ["☑ done", "1", 0], ["one", "2", 0]]);
+    expect(b.map((x) => [x.text, x.attrs.numId, x.attrs.ilvl])).toEqual([["a", "1", 0], ["a1", "1", 1], ["☑ done", "3", 0], ["one", "2", 0]]);
+  });
+
+  it("draws task boxes without a bullet, in a symbol font so checked and unchecked boxes match", () => {
+    const nodes: ReturnType<typeof htmlToDoc>["firstChild"][] = [];
+    htmlToDoc(html(`<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox" checked>done</li><li class="task-list-item"><input type="checkbox">todo</li></ul>`), ctx).forEach((n) => nodes.push(n));
+    const [done, todo] = nodes.map((n) => n!);
+    for (const p of [done, todo]) {
+      expect(p.attrs.numId).toBe("3");
+      const box = p.content.content.find((n) => n.isText)!;
+      expect(box.text).toMatch(/^[☑☐]$/);
+      expect(box.marks.map((m) => [m.type.name, m.attrs.font])).toEqual([["font", "Segoe UI Symbol"]]);
+    }
+    expect([done.textContent, todo.textContent]).toEqual(["☑ done", "☐ todo"]);
   });
 
   it("puts code blocks in a shaded one-cell box, one paragraph per line, and tables in bordered tables", () => {

@@ -235,3 +235,28 @@ describe("decorations", () => {
     expect((list as unknown as { type: { attrs: Record<string, string> } }).type.attrs["data-list"]).toBe("•");
   });
 });
+
+describe("paint format", () => {
+  const m = schema.marks;
+  const rich = () => s.paragraph.create({ align: "center", spaceAfter: 12 }, schema.text("Source", [m.bold.create(), m.color.create({ color: "#FF0000" })]));
+
+  it("copies the marks at the cursor and paints them over the selected text, replacing its own", () => {
+    const src = state([rich(), s.paragraph.create(null, schema.text("target text", [m.italic.create()]))], 3);
+    const format = cmd.copyFormat(src);
+    const target = src.apply(src.tr.setSelection(TextSelection.create(src.doc, 9, 15)));
+    const st = run(target, cmd.paintFormat(format));
+    const marks = (pos: number) => st.doc.resolve(pos).marks().map((x) => x.type.name).sort();
+    expect(marks(11)).toEqual(["bold", "color"]);
+    expect(marks(17)).toEqual(["italic"]);
+    // Only part of the paragraph: its paragraph formatting stays.
+    expect(attrs(st, 1).align).toBeNull();
+  });
+
+  it("copies paragraph formatting too when the paint covers whole paragraphs", () => {
+    const src = state([rich(), para("whole")], 3);
+    const format = cmd.copyFormat(src);
+    const target = src.apply(src.tr.setSelection(TextSelection.create(src.doc, 9, 14)));
+    const st = run(target, cmd.paintFormat(format));
+    expect(attrs(st, 1)).toMatchObject({ align: "center", spaceAfter: 12 });
+  });
+});

@@ -280,3 +280,27 @@ describe("Slideshow animations", () => {
     }
   });
 });
+
+describe("Slideshow links to slides", () => {
+  afterEach(() => document.body.empty());
+
+  it("jumps to the linked slide instead of opening a page or advancing", () => {
+    const d: ShowDeck = {
+      ...deck(),
+      slidePaths: ["s1", "s2", "s3", "s4"],
+      render: (host, i) => {
+        host.textContent = `slide ${i}`;
+        host.createSpan({ cls: "go", attr: { "data-link": i === 0 ? "#slide:s3" : "#jump:firstslide" } });
+      },
+    };
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const show = new Slideshow(d, 0, vi.fn());
+    show.open();
+    document.querySelector<HTMLElement>(".dw-show .go")!.click();
+    expect(show.index).toBe(2);
+    document.querySelector<HTMLElement>(".dw-show .go")!.click();
+    expect(show.index).toBe(0);
+    expect(open).not.toHaveBeenCalled();
+    show.close();
+  });
+});

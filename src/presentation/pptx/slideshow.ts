@@ -3,6 +3,7 @@
  * slide, notes, timer). Plain DOM: the deck is supplied by the caller.
  */
 
+import { linkTarget } from "../../domain/pptx/links";
 import type { Step, Transition } from "../../domain/pptx/animation";
 import { playStep, playTransition, showState, stepDuration } from "./show-effects";
 
@@ -21,6 +22,8 @@ export interface ShowDeck {
   /** Draw slide `i` into `host` at `width` px. */
   render(host: HTMLElement, i: number, width: number): void;
   effects?(i: number): SlideEffects;
+  /** Slide part paths in order, for links to slides. */
+  slidePaths?: string[];
 }
 
 /** Next slide from `from` in direction `dir` that isn't hidden, or null past the end. */
@@ -60,7 +63,10 @@ export class Slideshow {
     o.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
       const link = target.closest<HTMLElement>("[data-link]")?.dataset.link;
-      if (link) window.open(link);
+      if (link?.startsWith("#")) {
+        const to = linkTarget(link, this.index, this.deck.slidePaths ?? []);
+        if (to !== null) this.goTo(to);
+      } else if (link) window.open(link);
       else if (!target.closest("button, audio, video, .dw-show-notes")) this.next();
     });
     o.addEventListener("wheel", (e) => (e.deltaY > 0 ? this.next() : this.prev()), { passive: true });

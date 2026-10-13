@@ -42,7 +42,7 @@ const sheetEls = (e: Edits) => Array.from(e.wb.pkg.workbook.getElementsByTagName
 const definedNames = (e: Edits) => Array.from(e.wb.pkg.workbook.getElementsByTagNameNS(NS_S, "definedName"));
 
 /** Apply `fn` to every formula text in the workbook: cells, names, validations, conditional formats and charts. */
-function rewriteFormulas(e: Edits, fn: (text: string, sheet: Sheet | null) => string): void {
+export function rewriteFormulas(e: Edits, fn: (text: string, sheet: Sheet | null) => string): void {
   for (const sheet of e.wb.sheets) {
     for (const f of Array.from(sheet.doc.getElementsByTagNameNS(NS_S, "f"))) if (f.textContent) f.textContent = fn(f.textContent, sheet);
     for (const tag of ["formula", "formula1", "formula2"]) {
@@ -232,9 +232,9 @@ export function validateSheetName(e: Edits, name: string, except?: Sheet): void 
   if (other && other !== except) throw new Error(`A sheet named "${name}" already exists.`);
 }
 
-/** Add an empty sheet after tab `after`; returns its name. */
-export function addSheet(e: Edits, after: number): string {
-  const name = uniqueName(e, (n) => `Sheet${n}`, e.wb.sheets.length + 1);
+/** Add an empty sheet after tab `after`, named "SheetN" or `base` ("base (2)" when taken); returns its name. */
+export function addSheet(e: Edits, after: number, base?: string): string {
+  const name = base ? uniqueName(e, (n) => (n === 1 ? base : `${base.slice(0, 28 - String(n).length)} (${n})`), 1) : uniqueName(e, (n) => `Sheet${n}`, e.wb.sheets.length + 1);
   e.structural(() => {
     e.wb.pkg.addSheet(name, `<worksheet xmlns="${NS_S}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetFormatPr defaultRowHeight="15"/><sheetData/></worksheet>`, after);
     renumberLocalNames(e, (i) => (i > after ? i + 1 : i));
@@ -332,7 +332,7 @@ export function setSheetHidden(e: Edits, sheet: Sheet, hidden: boolean): void {
 // ---------------------------------------------------------------------------
 
 /** Rewrite the <col> ranges covering columns c1..c2 (0-based) with `fn` applied to each column's element. */
-function editCols(sheet: Sheet, c1: number, c2: number, fn: (col: Element) => void): void {
+export function editCols(sheet: Sheet, c1: number, c2: number, fn: (col: Element) => void): void {
   const cols = child(sheet, "cols", true)!;
   const pieces: Element[] = [];
   const covered = new Set<number>();

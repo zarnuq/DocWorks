@@ -316,3 +316,38 @@ describe("grid accessibility", () => {
     expect(grid.selection()).toEqual({r1: 1, c1: 0, r2: 2, c2: 2});
   });
 });
+
+describe("group gutter", () => {
+  const grouped = () =>
+    xlsx({
+      sheets: [
+        sheetXml(
+          Array.from({ length: 8 }, (_, i) => `<row r="${i + 1}"${i >= 2 && i <= 4 ? ' outlineLevel="1"' : ""}><c r="A${i + 1}"><v>${i}</v></c></row>`).join(""),
+          { before: `<cols><col min="2" max="3" width="9" outlineLevel="1"/></cols>`, after: "" }
+        ),
+      ],
+    });
+
+  it("widens the headers by a gutter and draws a - button on each group's summary row / column", async () => {
+    const { grid } = await mount(await grouped());
+    // Cells start right of the row gutter and below the column gutter.
+    expect(grid.hit(HEADER_W + 10, HEADER_H + 30)).toMatchObject({ area: "rowHeader" });
+    const { hw, hh } = grid.headerSize();
+    expect([hw > HEADER_W, hh > HEADER_H]).toEqual([true, true]);
+    expect(grid.hit(hw + 5, hh + 5)).toMatchObject({ row: 0, col: 0, area: "cell" });
+    const minus = (k: string) => textOps(grid, k).filter((o) => o.text === "−");
+    expect(minus("rowheads1")).toHaveLength(1);
+    expect(minus("colheads1")).toHaveLength(1);
+  });
+
+  it("hits the button on the summary row and asks the host to toggle the group", async () => {
+    const { grid, host } = await mount(await grouped());
+    host.toggleGroup = vi.fn();
+    const { hh } = grid.headerSize();
+    const rowY = hh + 5 * 20 + 10; // row 6 (index 5) is below rows 3-5
+    const hit = grid.hit(7, rowY);
+    expect(hit).toMatchObject({ area: "outline", outline: { axis: "row", group: { level: 1, start: 2, end: 4, collapsed: false } } });
+    grid.el.querySelector(".xlsx-canvas")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 7, clientY: rowY, button: 0 }));
+    expect(host.toggleGroup).toHaveBeenCalledWith("row", { level: 1, start: 2, end: 4, collapsed: false });
+  });
+});

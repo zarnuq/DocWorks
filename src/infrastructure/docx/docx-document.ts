@@ -6,7 +6,7 @@ import { wVal } from "../../domain/docx/docx-reader";
 import { numberingLevel } from "../../domain/docx/docx-styles";
 import { deobfuscateFont } from "../fonts/odttf";
 
-export type ListKind = "bullet" | "ordered";
+export type ListKind = "bullet" | "ordered" | "task";
 
 const DEFAULT_MAIN = "word/document.xml";
 const NUMBERING_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
@@ -30,6 +30,9 @@ function bytesToBase64(bytes: Uint8Array): string {
 /** Nine list levels, 0.5" apart, cycling bullet glyphs or decimal / letter / roman. */
 function abstractNumXml(id: number, kind: ListKind): string {
   const levels = Array.from({ length: 9 }, (_, i) => {
+    // Task lists: no marker; the text starts with its box at the hanging indent, where a bullet would be.
+    if (kind === "task")
+      return `<w:lvl w:ilvl="${i}"><w:start w:val="1"/><w:numFmt w:val="none"/><w:suff w:val="nothing"/><w:lvlText w:val=""/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="${720 * (i + 1)}" w:hanging="360"/></w:pPr></w:lvl>`;
     const fmt = kind === "bullet" ? "bullet" : ORDERED_FORMATS[i % 3];
     const text = kind === "bullet" ? BULLETS[i % 3] : `%${i + 1}.`;
     return (
@@ -524,6 +527,28 @@ export class DocxDocument extends OoxmlPackage {
     return this.rels(this.mainPath).find((r) => r.type === "hyperlink" && r.external && r.target === href)?.id ?? this.addRel(this.mainPath, "hyperlink", href, true);
   }
 
+  /** Store image bytes in word/media; returns the media path. */
+  storeMedia(bytes: Uint8Array, ext: string): string {
+    return this.storeImage("word", bytes, ext);
+  }
+
+  /** A picture relationship from `part` to media `path`, reusing one that exists. */
+  imageRel(part: string, path: string): string {
+    return this.rels(part).find((r) => r.type === "image" && !r.external && r.target === path)?.id ?? this.addRel(part, "image", path);
+  }
+
+  /** Every header (or footer) part the sections use, each once. */
+  headerFooterPaths(kind: "header" | "footer"): string[] {
+    const out = new Set<string>();
+    this.sections().forEach((_, i) => {
+      for (const type of ["default", "first", "even"] as const) {
+        const path = this.headerFooterPath(kind, type, i);
+        if (path) out.add(path);
+      }
+    });
+    return [...out];
+  }
+
   /** Store an image and relate it to the document. Returns the rId. */
   addImage(bytes: Uint8Array, ext: string, part = this.mainPath): string {
     return this.addRel(part, "image", this.storeImage("word", bytes, ext));
@@ -581,7 +606,7 @@ export class DocxDocument extends OoxmlPackage {
       this.addOverride(path, NUMBERING_CT);
       this.addRel(this.mainPath, "numbering", path);
     }
-    const wanted = kind === "bullet" ? "bullet" : "decimal";
+    const wanted = kind === "bullet" ? "bullet" : kind === "task" ? "none" : "decimal";
     const nums = Array.from(numbering.getElementsByTagNameNS(NS.w, "num"));
     // Only reuse multi-level definitions: single-level template lists can't be nested.
     const reuse = nums.find((n) => {

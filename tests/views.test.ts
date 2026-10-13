@@ -7,6 +7,7 @@ import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { readAnimations, readTransition } from "../src/domain/pptx/animation";
 import { addSlideComment } from "../src/domain/pptx/comments";
+import { writeFill } from "../src/domain/pptx/shape-style";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 import { fixture } from "./helpers";
@@ -867,6 +868,154 @@ describe("editor accessibility", () => {
     expect(document.getElementById(pm.getAttribute("aria-labelledby")!)?.textContent).toBe("Document content");
     for (const input of Array.from(view.contentEl.querySelectorAll('input[type="color"]'))) expect(input.getAttribute("aria-label")).toBeTruthy();
     expect(view.contentEl.querySelector('[aria-label="Light paper"]')?.getAttribute("aria-pressed")).toBe("true");
+    await view.onUnloadFile(file);
+  });
+});
+
+describe("PptxView links", () => {
+  it("links the selected shape to a slide from the link dialog, and follows it with Ctrl+click", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "links.pptx");
+    const v = view as any;
+    const shape = v.rendered.find((r: any) => !r.shape.inherited && r.shape.kind === "sp").shape.el;
+    v.setSelection([shape]);
+    v.activeText = null;
+    const done = v.editLink();
+    const modal = document.querySelector<HTMLElement>(".test-modal")!;
+    expect(modal.textContent).toContain("Slides in this presentation");
+    Array.from(modal.querySelectorAll("button")).find((b) => b.textContent === "Last slide")!.click();
+    await done;
+    const link = v.rendered.find((r: any) => r.shape.el.isEqualNode?.(shape) || r.shape.link)?.shape.link;
+    expect(link).toBe("#jump:lastslide");
+    const el = v.rendered.find((r: any) => r.shape.link).el as HTMLElement;
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));
+    expect(v.index).toBe(v.doc.slides().length - 1);
+    await view.onUnloadFile(file);
+  });
+});
+
+describe("PptxView grid view", () => {
+  it("toggles a grid of slides from the toolbar and Ctrl+Alt+1; double-clicking a slide opens it", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "grid.pptx");
+    const v = view as any;
+    const toggle = view.contentEl.querySelector<HTMLElement>('[aria-label="Grid view (Ctrl+Alt+1)"]')!;
+    toggle.click();
+    expect(view.contentEl.classList.contains("pptx-grid-view")).toBe(true);
+    const key = v.scope.keys.find((k: any) => k.key === "1" && k.mods.join() === "Mod,Alt");
+    key.fn();
+    expect(view.contentEl.classList.contains("pptx-grid-view")).toBe(false);
+    key.fn();
+    const thumbs = view.contentEl.querySelectorAll<HTMLElement>(".pptx-thumb");
+    thumbs[1].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(v.index).toBe(1);
+    expect(view.contentEl.classList.contains("pptx-grid-view")).toBe(false);
+    await view.onUnloadFile(file);
+  });
+});
+
+describe("PptxView paint format", () => {
+  it("copies the selected shape's format and paints it onto the next shape clicked", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "paint.pptx");
+    const v = view as any;
+    const own = () => v.rendered.filter((r: any) => !r.shape.inherited && r.shape.kind === "sp" && r.shape.el.localName === "sp");
+    const [a, b] = own();
+    v.mutate(() => {
+      writeFill(a.shape.el.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "spPr")[0], { type: "solid", color: "#123456" });
+    }, "slide");
+    const src = own()[0];
+    v.setSelection([src.shape.el]);
+    const brush = view.contentEl.querySelector<HTMLElement>('[aria-label="Paint format (double-click to keep painting)"]')!;
+    brush.click();
+    expect(brush.classList.contains("is-active")).toBe(true);
+    const target = own().find((r: any) => r.shape.el !== src.shape.el && r.shape.el.isEqualNode(b.shape.el)) ?? own()[1];
+    target.el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    expect(own().find((r: any) => r.shape.fill?.color === "#123456" && r !== own()[0])).toBeTruthy();
+    expect(brush.classList.contains("is-active")).toBe(false);
+    await view.onUnloadFile(file);
+  });
+});
+
+describe("DocxView watermark", () => {
+  it("adds a text watermark from the dialog, saves it in the header and draws it on the pages", async () => {
+    const { readWatermark } = await import("../src/domain/docx/watermark");
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "wm.docx");
+    const v = view as any;
+    v.watermarkDialog();
+    const modal = document.querySelector<HTMLElement>(".test-modal")!;
+    const text = modal.querySelector<HTMLInputElement>('input[aria-label="Watermark text"]')!;
+    text.value = "DRAFT";
+    text.dispatchEvent(new Event("input"));
+    Array.from(modal.querySelectorAll("button")).find((b) => b.textContent === "Apply")!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(readWatermark(v.docx)).toMatchObject({ kind: "text", text: "DRAFT", diagonal: true });
+    const head = v.renderHF("header", 1, 1, 0) as HTMLElement;
+    expect(head.querySelector(".docx-watermark")!.textContent).toBe("DRAFT");
+    v.watermarkDialog();
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".test-modal button")).find((b) => b.textContent === "Remove watermark")!.click();
+    expect(readWatermark(v.docx)).toBeNull();
+    await view.onUnloadFile(file);
+  });
+});
+
+describe("DocxView update style to match", () => {
+  it("moves the paragraph's own formatting into its style and clears it from the paragraph", async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "style.docx");
+    const v = view as any;
+    const ed = v.editor;
+    let at = -1;
+    ed.state.doc.descendants((n: any, pos: number) => {
+      if (at < 0 && n.type.name === "paragraph" && n.textContent.length > 3) at = pos;
+      return at < 0;
+    });
+    const para = ed.state.doc.nodeAt(at);
+    const style = para.attrs.style ?? "Normal";
+    const tr = ed.state.tr.setNodeMarkup(at, undefined, { ...para.attrs, align: "center" }).addMark(at + 1, at + 1 + para.content.size, ed.state.schema.marks.italic.create());
+    ed.dispatch(tr.setSelection(TextSelection.create(tr.doc, at + 2)));
+    const select = view.contentEl.querySelector<HTMLSelectElement>('select[aria-label="Paragraph style"]')!;
+    expect(Array.from(select.options).map((o) => o.text)).toContainEqual(expect.stringMatching(/^Update '.+' to match$/));
+    select.value = "update";
+    select.dispatchEvent(new Event("change"));
+    const after = ed.state.doc.nodeAt(at);
+    expect(after.attrs.align).toBeNull();
+    let italic = false;
+    after.descendants((n: any) => void (italic ||= n.marks.some((m: any) => m.type.name === "italic")));
+    expect(italic).toBe(false);
+    const st = Array.from(v.docx.stylesXml().getElementsByTagNameNS(W, "style") as HTMLCollectionOf<Element>).find((s) => s.getAttributeNS(W, "styleId") === style)!;
+    expect(st.getElementsByTagNameNS(W, "jc")[0].getAttributeNS(W, "val")).toBe("center");
+    expect(st.getElementsByTagNameNS(W, "i")).toHaveLength(1);
+    await view.onUnloadFile(file);
+  });
+});
+
+describe("DocxView paint format", () => {
+  it("copies with the brush and paints the next selection made with the mouse", async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "paint.docx");
+    const v = view as any;
+    const ed = v.editor;
+    const texts: number[] = [];
+    ed.state.doc.descendants((n: any, pos: number) => {
+      if (n.type.name === "paragraph" && n.textContent.length > 4 && texts.length < 2) texts.push(pos);
+      return texts.length < 2;
+    });
+    const [a, b] = texts;
+    let tr = ed.state.tr.addMark(a + 1, a + 4, ed.state.schema.marks.italic.create());
+    ed.dispatch(tr.setSelection(TextSelection.create(tr.doc, a + 2)));
+    const brush = view.contentEl.querySelector<HTMLElement>('[aria-label="Paint format (double-click to keep painting)"]')!;
+    brush.click();
+    expect(brush.classList.contains("is-active")).toBe(true);
+    tr = ed.state.tr.setSelection(TextSelection.create(ed.state.doc, b + 1, b + 4));
+    ed.dispatch(tr);
+    ed.dom.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ed.state.doc.resolve(b + 2).marks().some((m: any) => m.type.name === "italic")).toBe(true);
+    expect(brush.classList.contains("is-active")).toBe(false);
     await view.onUnloadFile(file);
   });
 });

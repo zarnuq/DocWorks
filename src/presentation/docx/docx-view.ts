@@ -14,7 +14,11 @@ import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
 import { FONTS, PaperTheme, promptText, showValue, Toolbar, shieldEditingKeys } from "../common/toolbar";
 import { pickImage } from "../common/images";
-import { cmd, commentRanges, docxPlugins, EditorContext, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
+import { readWatermark, setWatermark, TextWatermark, Watermark } from "../../domain/docx/watermark";
+import { directFormat, updateStyleToMatch } from "../../domain/docx/style-edit";
+import { fontStack } from "../../core/utils/fonts";
+import { IMAGE_MIME } from "../../core/utils/images";
+import { cmd, commentRanges, docxPlugins, EditorContext, PaintFormat, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
@@ -201,6 +205,7 @@ export class DocxView extends FileView {
     });
     this.origins = origins;
     this.readAllHF();
+    await this.loadWatermark();
 
     const ctx: EditorContext = {
       styles: new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml()),
@@ -212,7 +217,7 @@ export class DocxView extends FileView {
       },
       listKind: (numId) => {
         const fmt = docx.listFormat(numId, 0);
-        return fmt ? (fmt === "bullet" ? "bullet" : "ordered") : null;
+        return fmt ? (fmt === "bullet" || fmt === "none" ? "bullet" : "ordered") : null;
       },
     };
 
@@ -285,9 +290,20 @@ export class DocxView extends FileView {
       },
       handleKeyDown: (_view, event) => {
         this.lastKey = event.key;
+        if (event.key === "Escape" && this.painter) {
+          this.stopPainting();
+          return true;
+        }
         return false;
       },
       handleDOMEvents: {
+        // Paint format: the selection made with the mouse takes the copied formatting.
+        mouseup: (view) => {
+          if (!this.painter) return false;
+          // After the mouse selection settles.
+          window.setTimeout(() => this.paintSelection(view), 0);
+          return false;
+        },
         click: (_view, event) => {
           // Ctrl / Cmd + click follows a link.
           const a = (event.target as HTMLElement).closest<HTMLAnchorElement>("a.docx-link");
@@ -493,7 +509,10 @@ export class DocxView extends FileView {
     btn("↶", "Undo (Ctrl+Z)", undo);
     btn("↷", "Redo (Ctrl+Y)", redo);
     sep();
-    this.styleSelect = tb.select("Paragraph style", "Style", STYLES, (v) => run(cmd.setStyle(v === "Normal" ? null : v)));
+    this.styleSelect = tb.select("Paragraph style", "Style", [...STYLES, ["Update style to match", "update"]], (v) => {
+      if (v === "update") return this.updateStyle();
+      run(cmd.setStyle(v === "Normal" ? null : v));
+    });
     this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => run(cmd.setMark(m.font, { font })));
     this.sizeSelect = tb.select("Font size", "Size", FONT_SIZES.map((s) => [`${s} pt`, String(s)]), (v) => run(cmd.setMark(m.size, { pt: Number(v) })));
     sep();
@@ -537,11 +556,14 @@ export class DocxView extends FileView {
     action("Equation", "Insert an equation", () => this.equationDialog(null));
     sep();
     action("Header & footer", "Edit the header and footer", () => this.headerFooterDialog());
+    action("Watermark", "Add, change or remove a watermark", () => this.watermarkDialog());
     const pagesBtn = tb.icon("book-open", "Page view: show page breaks, headers and footers", () => {
       this.setPageView(!this.pageView);
       this.app.saveLocalStorage(PAGE_VIEW_KEY, this.pageView ? "on" : "off");
     });
     pagesBtn.toggleClass("is-active", this.pageView);
+    this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
+    this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
     tb.icon("search", "Find and replace (Ctrl+F)", () => this.openFind());
     const tocBtn = action("Contents ▾", "Table of contents", () => {
       const menu = new Menu();
@@ -618,7 +640,12 @@ export class DocxView extends FileView {
     const paraStyle = ($from.parent.attrs.style as string | null) ?? null;
     const font = (marks.find((x) => x.type === m.font)?.attrs.font as string | undefined) ?? this.ctx.styles.fontFor(paraStyle, tableStyle);
     const size = (marks.find((x) => x.type === m.size)?.attrs.pt as number | undefined) ?? this.ctx.styles.sizeFor(paraStyle, tableStyle);
-    if (this.styleSelect) showValue(this.styleSelect, paraStyle ?? "Normal");
+    if (this.styleSelect) {
+      showValue(this.styleSelect, paraStyle ?? "Normal");
+      const update = Array.from(this.styleSelect.options).find((o) => o.value === "update");
+      const name = STYLES.find(([, id]) => id === (paraStyle ?? "Normal"))?.[0] ?? paraStyle ?? "Normal";
+      if (update) update.text = `Update '${name}' to match`;
+    }
     showValue(this.fontSelect, font);
     showValue(this.sizeSelect, size === null ? null : String(size));
   }
@@ -1063,13 +1090,18 @@ export class DocxView extends FileView {
     const type: HFType = first ? "first" : docx.differentOddEven() && page % 2 === 0 ? "even" : "default";
     const path = docx.headerFooterPath(kind, type, index);
     const doc = path ? this.hfByPath.get(path) : undefined;
-    if (!doc || !doc.textContent.trim() && !doc.content.size) return null;
+    // The watermark sits outside the header's own stacking context, so it can go behind the page's text.
+    const mark = kind === "header" && path ? this.watermarkEl() : null;
+    if (!doc || !doc.textContent.trim() && !doc.content.size) return mark;
     const frag = DOMSerializer.fromSchema(schema).serializeFragment(doc.content);
     const wrap = createDiv({ cls: `docx-hf docx-hf-${kind}` });
     wrap.appendChild(frag);
     if (this.ctx) styleRenderedParagraphs(wrap, doc, this.ctx.styles);
     wrap.querySelectorAll<HTMLElement>("[data-field]").forEach((f) => f.setText(String(f.dataset.field === "NUMPAGES" ? total : page)));
-    return wrap;
+    if (!mark) return wrap;
+    const both = createDiv({ cls: "docx-hf-holder" });
+    both.append(mark, wrap);
+    return both;
   }
 
   private pagesPlugin(): Plugin {
@@ -1098,35 +1130,213 @@ export class DocxView extends FileView {
     if (editor) writeBody(docx.body, editor.state.doc, this.origins, docx);
     // The section the cursor is in (headers and footers belong to sections).
     const section = editor ? sectionOfPos(editor.state.doc, editor.state.selection.from).index : 0;
-    const modal = new HeaderFooterModal(this.app, this.ctx, docx, section, (part) => this.hfReadContext(part, section), () => (this.suggesting ? this.settings.author : null), () => {
-      this.readAllHF();
-      const last = docx.body.lastElementChild;
-      if (this.editor && last?.localName === "sectPr") {
-        const sectPr = new XMLSerializer().serializeToString(last);
-        if (sectPr !== this.editor.state.doc.attrs.sectPr) this.editor.dispatch(this.editor.state.tr.setDocAttribute("sectPr", sectPr).setMeta("addToHistory", false));
-      }
-      // Sections ended by a paragraph keep their w:sectPr on it: bring those up to date too.
-      if (this.editor) {
-        const sections = docx.sections().slice(0, -1).map((e) => new XMLSerializer().serializeToString(e));
-        const tr = this.editor.state.tr;
-        let k = 0;
-        this.editor.state.doc.descendants((node, pos) => {
-          if (node.type !== schema.nodes.paragraph) return true;
-          if (node.attrs.sectPr) {
-            const now = sections[k++];
-            if (now && now !== node.attrs.sectPr) tr.setNodeMarkup(pos, undefined, { ...node.attrs, sectPr: now });
-          }
-          return false;
-        });
-        if (tr.docChanged) this.editor.dispatch(tr.setMeta("addToHistory", false));
-      }
-      this.dirty = true;
-      void this.saveNow();
-      if (this.editor) repaginate(this.editor);
-      this.renderReview();
-    });
+    const modal = new HeaderFooterModal(this.app, this.ctx, docx, section, (part) => this.hfReadContext(part, section), () => (this.suggesting ? this.settings.author : null), () => this.afterHeaderChange());
     modal.open();
   }
+
+  /** Paint format: what was copied, and whether it stays on after one paint (double-click). */
+  private painter: { format: PaintFormat; sticky: boolean } | null = null;
+  private brushBtn: HTMLElement | null = null;
+
+  private startPainting(sticky: boolean): void {
+    const editor = this.editor;
+    if (!editor) return;
+    // A second click turns it off (a double-click's first click already turned it on).
+    if (this.painter && !sticky) return this.stopPainting();
+    this.painter = { format: cmd.copyFormat(editor.state), sticky };
+    this.brushBtn?.addClass("is-active");
+    this.hostEl?.addClass("is-painting");
+    editor.focus();
+  }
+
+  private stopPainting(): void {
+    this.painter = null;
+    this.brushBtn?.removeClass("is-active");
+    this.hostEl?.removeClass("is-painting");
+  }
+
+  private paintSelection(view: EditorView): void {
+    const painter = this.painter;
+    if (!painter || view.state.selection.empty) return;
+    cmd.paintFormat(painter.format)(view.state, view.dispatch);
+    if (!painter.sticky) this.stopPainting();
+  }
+
+  /**
+   * Google Docs' "Update '<style>' to match": the cursor paragraph's own formatting becomes its style's. The same
+   * formatting is then cleared from the selected paragraphs of that style, which now get it from the style.
+   */
+  private updateStyle(): void {
+    const editor = this.editor, docx = this.docx, ctx = this.ctx;
+    if (!editor || !docx || !ctx) return;
+    const { $from, from, to } = editor.state.selection;
+    const para = $from.parent;
+    if (para.type !== schema.nodes.paragraph) return;
+    const styleId = attrsOf<ParagraphAttrs>(para).style ?? "Normal";
+    const { attrs, marks } = directFormat(para);
+    updateStyleToMatch(docx, styleId, para);
+    ctx.styles = new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml());
+    const tr = editor.state.tr;
+    editor.state.doc.nodesBetween(from, Math.max(to, from + 1), (node, pos) => {
+      if (node.type !== schema.nodes.paragraph) return true;
+      const a = attrsOf<ParagraphAttrs>(node);
+      if ((a.style ?? "Normal") !== styleId) return false;
+      const next: Record<string, unknown> = { ...node.attrs };
+      for (const [k, v] of Object.entries(attrs)) if (v !== null && next[k] === v) next[k] = k === "indent" ? 0 : null;
+      tr.setNodeMarkup(pos, undefined, next);
+      for (const m of marks) tr.removeMark(pos + 1, pos + 1 + node.content.size, m);
+      return false;
+    });
+    editor.dispatch(tr);
+    refreshText(editor);
+    this.markDirty();
+    this.updateFormatControls();
+  }
+
+  /** After header / footer parts or section header references changed: reread them, sync the editor's sections, save. */
+  private afterHeaderChange(): void {
+    const docx = this.docx;
+    if (!docx) return;
+    this.readAllHF();
+    const last = docx.body.lastElementChild;
+    if (this.editor && last?.localName === "sectPr") {
+      const sectPr = new XMLSerializer().serializeToString(last);
+      if (sectPr !== this.editor.state.doc.attrs.sectPr) this.editor.dispatch(this.editor.state.tr.setDocAttribute("sectPr", sectPr).setMeta("addToHistory", false));
+    }
+    // Sections ended by a paragraph keep their w:sectPr on it: bring those up to date too.
+    if (this.editor) {
+      const sections = docx.sections().slice(0, -1).map((e) => new XMLSerializer().serializeToString(e));
+      const tr = this.editor.state.tr;
+      let k = 0;
+      this.editor.state.doc.descendants((node, pos) => {
+        if (node.type !== schema.nodes.paragraph) return true;
+        if (node.attrs.sectPr) {
+          const now = sections[k++];
+          if (now && now !== node.attrs.sectPr) tr.setNodeMarkup(pos, undefined, { ...node.attrs, sectPr: now });
+        }
+        return false;
+      });
+      if (tr.docChanged) this.editor.dispatch(tr.setMeta("addToHistory", false));
+    }
+    this.dirty = true;
+    void this.saveNow();
+    if (this.editor) repaginate(this.editor);
+    this.renderReview();
+  }
+  /** The document's watermark (drawn on every page), and a URL for a picture watermark. */
+  private watermark: Watermark | null = null;
+  private watermarkUrl: string | null = null;
+
+  private async loadWatermark(): Promise<void> {
+    const docx = this.docx;
+    this.watermark = docx ? readWatermark(docx) : null;
+    const path = this.watermark?.kind === "image" ? this.watermark.path : null;
+    this.watermarkUrl = null;
+    if (docx && path) {
+      const mime = IMAGE_MIME[path.split(".").pop()?.toLowerCase() ?? ""] ?? "image/png";
+      const bytes = await docx.media(path);
+      this.watermarkUrl = await dataUrl(new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: mime }));
+    }
+  }
+
+  /** The watermark drawn centred on the page's text area, behind the text (the page head is the page's top). */
+  private watermarkEl(): HTMLElement | null {
+    const wm = this.watermark, st = this.setup;
+    if (!wm || !st) return null;
+    const el = createDiv({ cls: "docx-watermark", attr: { "aria-hidden": "true" } });
+    const w = (wm.width * 4) / 3, h = (wm.height * 4) / 3;
+    el.setCssProps({
+      "--x": `${st.left + this.pageWidth / 2}px`,
+      "--y": `${st.top + (st.height - st.top - st.bottom) / 2}px`,
+      "--w": `${w}px`,
+      "--h": `${h}px`,
+      "--docx-wm-rot": wm.kind === "text" && wm.diagonal ? "-45deg" : "0deg",
+    });
+    if (wm.kind === "text") {
+      // Word stretches the text to its box (a VML text path that fits the shape).
+      const svg = el.appendChild(createSvg("svg", { attr: { viewBox: `0 0 ${w} ${h}`, width: String(w), height: String(h) } }));
+      const t = svg.appendChild(createSvg("text"));
+      t.textContent = wm.text;
+      for (const [k, v] of Object.entries({ x: "0", y: String(h * 0.8), "font-size": String(h), textLength: String(w), lengthAdjust: "spacingAndGlyphs", fill: wm.color, "fill-opacity": String(wm.opacity), "font-family": fontStack(wm.font) })) t.setAttribute(k, v);
+    } else if (this.watermarkUrl) {
+      const img = el.createEl("img", { attr: { src: this.watermarkUrl, alt: "" } });
+      img.toggleClass("is-washout", wm.washout);
+    }
+    return el;
+  }
+
+  /** Google Docs' Insert › Watermark: text or a picture behind the text on every page. */
+  private watermarkDialog(): void {
+    const docx = this.docx;
+    if (!docx) return;
+    const current = this.watermark;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Watermark");
+    const t: TextWatermark = current?.kind === "text" ? { ...current } : { kind: "text", text: "CONFIDENTIAL", font: "Calibri", width: 0, height: 0, color: "#C0C0C0", opacity: 0.5, diagonal: true };
+    let kind: "text" | "image" = current?.kind ?? "text";
+    let size = "auto";
+    let picture: { data?: Uint8Array; ext?: string; path?: string; w: number; h: number } | null =
+      current?.kind === "image" ? { path: current.path, w: current.width, h: current.height } : null;
+    let scale = "auto", washout = current?.kind === "image" ? current.washout : true;
+    const body = modal.contentEl.createDiv();
+    const draw = () => {
+      body.empty();
+      new Setting(body).setName("Type").addDropdown((d) => d.addOptions({ text: "Text", image: "Image" }).setValue(kind).onChange((v: string) => ((kind = v as typeof kind), draw())));
+      if (kind === "text") {
+        new Setting(body).setName("Text").addText((c) => {
+          c.inputEl.setAttribute("aria-label", "Watermark text");
+          c.setValue(t.text);
+          c.inputEl.addEventListener("input", () => (t.text = c.inputEl.value));
+        });
+        new Setting(body).setName("Font").addDropdown((d) => d.addOptions(Object.fromEntries(FONTS.map((f) => [f, f]))).setValue(t.font).onChange((v: string) => (t.font = v)));
+        new Setting(body).setName("Size").addDropdown((d) => d.addOptions({ auto: "Auto", ...Object.fromEntries(["36", "54", "72", "96", "120", "144"].map((x) => [x, `${x} pt`])) }).setValue(size).onChange((v: string) => (size = v)));
+        new Setting(body).setName("Color").addColorPicker((c) => c.setValue(t.color).onChange((v: string) => (t.color = v.toUpperCase())));
+        new Setting(body).setName("Transparency").addSlider((c) => c.setLimits(0, 90, 5).setValue(Math.round((1 - t.opacity) * 100)).onChange((v: number) => (t.opacity = 1 - v / 100)));
+        new Setting(body).setName("Layout").addDropdown((d) => d.addOptions({ diagonal: "Diagonal", horizontal: "Horizontal" }).setValue(t.diagonal ? "diagonal" : "horizontal").onChange((v: string) => (t.diagonal = v === "diagonal")));
+      } else {
+        new Setting(body).setName("Picture").setDesc(picture ? "Chosen" : "None yet").addButton((b) =>
+          b.setButtonText("Choose image…").onClick(() =>
+            pickImage((file) => void (async () => {
+              const src = await dataUrl(file);
+              const { w, h } = await naturalSize(src);
+              const ext = file.name.includes(".") ? file.name.split(".").pop()! : "png";
+              picture = { data: new Uint8Array(await file.arrayBuffer()), ext, w: w * 0.75, h: h * 0.75 };
+              draw();
+            })())
+          )
+        );
+        new Setting(body).setName("Scale").addDropdown((d) => d.addOptions({ auto: "Auto", "0.5": "50%", "1": "100%", "1.5": "150%", "2": "200%" }).setValue(scale).onChange((v: string) => (scale = v)));
+        new Setting(body).setName("Faded").addToggle((c) => c.setValue(washout).onChange((v: boolean) => (washout = v)));
+      }
+    };
+    draw();
+    const apply = (wm: Watermark | null) => {
+      const editor = this.editor;
+      // Headers may be created for sections: bring the body (and its sections) up to date first.
+      if (editor) writeBody(docx.body, editor.state.doc, this.origins, docx);
+      setWatermark(docx, wm);
+      void this.loadWatermark().then(() => this.afterHeaderChange());
+      modal.close();
+    };
+    const buttons = new Setting(modal.contentEl).addButton((b) =>
+      b.setButtonText("Apply").setCta().onClick(() => {
+        const room = this.pageWidth * 0.75;
+        if (kind === "text") {
+          if (!t.text.trim()) return void new Notice("Enter the watermark text.");
+          const box = textBox(t.text, t.font, size === "auto" ? null : Number(size), room);
+          apply({ ...t, width: box.w, height: box.h });
+        } else {
+          if (!picture) return void new Notice("Choose a picture.");
+          const s = scale === "auto" ? Math.min(1, room / picture.w) : Number(scale);
+          apply({ kind: "image", data: picture.data, ext: picture.ext, path: picture.data ? undefined : picture.path, width: picture.w * s, height: picture.h * s, washout });
+        }
+      })
+    );
+    if (current) buttons.addButton((b) => b.setButtonText("Remove watermark").onClick(() => apply(null)));
+    buttons.addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.open();
+  }
+
 
   /** Google Docs' Format › Columns: number, spacing and a line between. */
   private columnsDialog(): void {
@@ -1534,4 +1744,17 @@ function sectionOfPos(doc: PMNode, pos: number): { index: number; start: number 
     return true;
   });
   return { index, start };
+}
+
+/** A text watermark's box in points: as wide as the text area for "Auto", else the text's width at `size`. */
+function textBox(text: string, font: string, size: number | null, room: number): { w: number; h: number } {
+  const ctx = createEl("canvas").getContext("2d");
+  let ratio = 0.6 * Math.max(1, text.length); // width per unit of height, when there is nothing to measure with
+  if (ctx) {
+    ctx.font = `100px ${fontStack(font)}`;
+    const width = ctx.measureText(text).width;
+    if (width > 0) ratio = width / 100;
+  }
+  if (size === null) return { w: +room.toFixed(2), h: +(room / ratio).toFixed(2) };
+  return { w: +(size * ratio).toFixed(2), h: size };
 }

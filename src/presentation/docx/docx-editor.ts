@@ -450,7 +450,47 @@ export function linkHref(state: EditorState): string | null {
 
 const isEquation = (node: PMNode | null | undefined): node is PMNode => node?.type === schema.nodes.opaque && /^<m:oMath/.test(node.attrs.xml as string);
 
+/** Character marks paint format copies (links, comments and tracked changes aren't formatting). */
+const PAINT_MARKS = ["bold", "italic", "underline", "strike", "subscript", "superscript", "font", "size", "color", "highlight"];
+/** Paragraph formatting paint format copies onto whole paragraphs. */
+const PAINT_ATTRS = ["style", "align", "lineSpacing", "spaceBefore", "spaceAfter", "firstLine", "indent", "rightIndent"] as const;
+
+export interface PaintFormat {
+  marks: readonly Mark[];
+  para: Record<string, unknown> | null;
+}
+
 export const cmd = {
+  /** Google Docs' paint format, first click: the formatting at the cursor (or the selection's start). */
+  copyFormat(state: EditorState): PaintFormat {
+    const { $from, empty } = state.selection;
+    const marks = (empty ? state.storedMarks ?? $from.marks() : state.doc.resolve(Math.min($from.pos + 1, $from.end())).marks()).filter((m) => PAINT_MARKS.includes(m.type.name));
+    const para = $from.parent.type === schema.nodes.paragraph ? Object.fromEntries(PAINT_ATTRS.map((k) => [k, $from.parent.attrs[k]])) : null;
+    return { marks, para };
+  },
+
+  /** Paint format onto the selection: its marks replace the text's own; paragraphs it covers whole take the paragraph formatting. */
+  paintFormat:
+    (format: PaintFormat): Command =>
+    (state, dispatch) => {
+      const { from, to, empty } = state.selection;
+      if (empty) return false;
+      if (!dispatch) return true;
+      const tr = state.tr;
+      for (const name of PAINT_MARKS) tr.removeMark(from, to, schema.marks[name]);
+      for (const m of format.marks) tr.addMark(from, to, m);
+      if (format.para) {
+        state.doc.nodesBetween(from, to, (node, pos) => {
+          if (node.type !== schema.nodes.paragraph) return true;
+          const start = pos + 1, end = pos + 1 + node.content.size;
+          if (from <= start && to >= end) tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...format.para });
+          return false;
+        });
+      }
+      dispatch(tr.scrollIntoView());
+      return true;
+    },
+
   /** LaTeX of the equation at `pos`, or null when there is none. */
   equationAt(state: EditorState, pos: number): string | null {
     const node = state.doc.nodeAt(pos);

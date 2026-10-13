@@ -283,3 +283,47 @@ describe("table panel", () => {
     expect(model().table!.cols[1]).toBe(1828800);
   });
 });
+
+describe("picture adjustments panel", () => {
+  const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+  it("sets transparency, brightness, contrast and recolor, and resets them", async () => {
+    const { addPicture } = await import("../src/domain/pptx/slide-edit");
+    const doc = await PptxDocument.load(await blankPptx());
+    const path = doc.slides()[0].path;
+    const el = addPicture(doc.xml(path)!, { x: 0, y: 0, w: 914400, h: 914400 }, doc.addImage(path, PNG, "png"), "Photo");
+    const host = document.createElement("div");
+    const model = () => parseSlide(doc, path).shapes.find((s) => s.el === el)!;
+    const ctl: PanelControl = { lockAspect: false, edit(fn) { fn(el); buildShapePanel(host, model(), ctl); } };
+    buildShapePanel(host, model(), ctl);
+    const change = (name: string, value: string) => {
+      const f = host.querySelector<HTMLInputElement>(`[data-field="${name}"]`)!;
+      f.value = value;
+      f.dispatchEvent(new Event("change"));
+    };
+    change("Picture transparency %", "30");
+    change("Brightness %", "10");
+    change("Contrast %", "-20");
+    const recolor = host.querySelector<HTMLSelectElement>('[data-field="Recolor"]')!;
+    expect(Array.from(recolor.options).map((o) => o.text)).toContain("Accent 2 light");
+    change("Recolor", "dark:accent3");
+    expect(model().adjust).toMatchObject({ transparency: 0.3, brightness: 0.1, contrast: -0.2, recolor: "dark:accent3" });
+    Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "Reset adjustments")!.click();
+    expect(model().adjust).toMatchObject({ transparency: 0, brightness: 0, contrast: 0, recolor: "none" });
+  });
+});
+
+describe("eyedropper", () => {
+  it("adds a pick-from-screen button to color fields that sets the color", async () => {
+    (window as any).EyeDropper = class { async open() { return { sRGBHex: "#12ab34" }; } };
+    try {
+      const { model, field } = await setup();
+      const color = field<HTMLInputElement>("Color");
+      const pick = color.parentElement!.querySelector<HTMLButtonElement>('[aria-label="Pick color from screen"]')!;
+      pick.click();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(model().fill).toEqual({ type: "solid", color: "#12AB34" });
+    } finally {
+      delete (window as any).EyeDropper;
+    }
+  });
+});

@@ -3,6 +3,7 @@
  * rotation, flips and stacking order. Plain DOM; every change goes through
  * `ctl.edit` so the view can snapshot it for undo and redraw.
  */
+import { ACCENTS, NO_ADJUST, PictureAdjust, setPictureAdjust } from "../../domain/pptx/picture-adjust";
 import type { ShapeModel } from "../../domain/pptx/slide-model";
 import { Fill, Line, writeFill, writeLine, writeShadow } from "../../domain/pptx/shape-style";
 import { reorder, setCrop, setRect, setTransform, writeBodyPr, ZOrder } from "../../domain/pptx/slide-edit";
@@ -88,7 +89,7 @@ const withAlpha = (c: string, a: number) =>
 const round2 = (n: number) => String(Math.round(n * 100) / 100);
 
 /** Sections open until closed (and closed ones stay closed) while the panel is rebuilt after each edit. */
-const openSections = new Set(["Fill", "Line", "Crop", "Table", "Cell fill", "Table fill", "Borders"]);
+const openSections = new Set(["Fill", "Line", "Crop", "Adjustments", "Table", "Cell fill", "Table fill", "Borders"]);
 
 /** A collapsible section, like Google Slides' format options. */
 function sectionIn(host: HTMLElement, title: string): HTMLElement {
@@ -117,9 +118,35 @@ function select(parent: HTMLElement, label: string, options: [string, string][],
 }
 
 function input(parent: HTMLElement, label: string, type: string, value: string, onChange: (v: string) => void, attrs: Record<string, string> = {}, text = label): HTMLInputElement {
-  const i = row(parent, label, text).createEl("input", { type, value, attr: { "data-field": label, ...attrs } });
+  const r = row(parent, label, text);
+  const i = r.createEl("input", { type, value, attr: { "data-field": label, ...attrs } });
   i.addEventListener("change", () => onChange(i.value));
+  if (type === "color") eyedropper(r, i);
   return i;
+}
+
+interface EyeDropperApi {
+  open(): Promise<{ sRGBHex: string }>;
+}
+
+/** A pipette next to a color field, picking any pixel on screen (Chromium's EyeDropper; hidden without it). */
+function eyedropper(parent: HTMLElement, field: HTMLInputElement): void {
+  const Api = (window as unknown as { EyeDropper?: new () => EyeDropperApi }).EyeDropper;
+  if (!Api) return;
+  const b = parent.createEl("button", { cls: "pptx-eyedropper clickable-icon", attr: { type: "button", "aria-label": "Pick color from screen" } });
+  // Lucide's "pipette" (ISC license), drawn inline: this module stays free of Obsidian imports.
+  const svg = new DOMParser().parseFromString(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></svg>`,
+    "image/svg+xml"
+  ).documentElement;
+  b.appendChild(document.importNode(svg, true));
+  b.addEventListener("click", (e) => {
+    e.preventDefault();
+    new Api().open().then(({ sRGBHex }) => {
+      field.value = sRGBHex.toLowerCase();
+      field.dispatchEvent(new Event("change"));
+    }, () => undefined); // Esc cancels
+  });
 }
 
 /** A number field; `text` is a shorter visible label (the field keeps `label` as its name). */
@@ -278,6 +305,21 @@ export function buildShapePanel(host: HTMLElement, shape: ShapeModel, ctl: Panel
       number(s, label, crop[key] * 100, (v) => edit((el) => setCrop(el, { ...crop, [key]: v / 100 })), "1");
     }
     s.createEl("button", { text: "Reset crop" }).addEventListener("click", () => edit((el) => setCrop(el, { l: 0, t: 0, r: 0, b: 0 })));
+  }
+
+  // --- Adjustments (pictures) ---------------------------------------------------
+  if (shape.kind === "pic" && !shape.media && shape.adjust) {
+    const s = section("Adjustments");
+    const adj = shape.adjust;
+    const set = (patch: Partial<PictureAdjust>) => edit((el) => setPictureAdjust(el, { ...adj, ...patch }));
+    number(s, "Picture transparency %", adj.transparency * 100, (v) => set({ transparency: Math.max(0, Math.min(100, v)) / 100 }), "1", "Transparency %");
+    number(s, "Brightness %", adj.brightness * 100, (v) => set({ brightness: Math.max(-100, Math.min(100, v)) / 100 }), "1");
+    number(s, "Contrast %", adj.contrast * 100, (v) => set({ contrast: Math.max(-100, Math.min(100, v)) / 100 }), "1");
+    const options: [string, string][] = [["No recolor", "none"], ["Grayscale", "gray"]];
+    ACCENTS.forEach((a, i) => options.push([`Accent ${i + 1} dark`, `dark:${a}`], [`Accent ${i + 1} light`, `light:${a}`]));
+    if (adj.recolor === "duotone") options.push(["As saved", "duotone"]);
+    select(s, "Recolor", options, adj.recolor, (v) => set({ recolor: v }));
+    s.createEl("button", { text: "Reset adjustments" }).addEventListener("click", () => edit((el) => setPictureAdjust(el, NO_ADJUST)));
   }
 
   // --- Table -----------------------------------------------------------------

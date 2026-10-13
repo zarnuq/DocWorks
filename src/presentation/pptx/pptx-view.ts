@@ -3,9 +3,12 @@ import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from ".
 import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
 import { chartPalette, ChartFormat, setChartFormat } from "../../domain/pptx/chart-format";
 import { chartFormatForm, defaultChartFormat } from "../common/chart-form";
-import { Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { App, Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastructure/pptx/pptx-document";
-import { Align, Rect, RunProps, SlideModel, parseSlide, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
+import { Align, Rect, RunProps, ShapeModel, SlideModel, parseSlide, plainText, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
+import { JUMPS, linkLabel, linkTarget, setShapeLink } from "../../domain/pptx/links";
+import { NS } from "../../core/utils/xml";
+import { applyFormat, copyFormat, ShapeFormat } from "../../domain/pptx/paint-format";
 import {
   CONNECTORS,
   Glue,
@@ -45,6 +48,7 @@ import { readAnimations, readTransition, writeTransition } from "../../domain/pp
 import { updateAnimationPart, addAnimation, animationEntries, moveAnimation, removeAnimation, updateAnimation } from "../../domain/pptx/animation-edit";
 import { buildMotionPanel } from "./motion-panel";
 import { canExportPdf, exportPdf } from "../common/pdf";
+import { exportPng } from "../common/png";
 import { RenderedShape, renderSlide } from "./slide-renderer";
 import { rangeInParagraph } from "./text-html";
 import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
@@ -54,6 +58,8 @@ export const VIEW_TYPE_PPTX = "doc-works-pptx-view";
 const THUMB_WIDTH = 168;
 /** Panel padding (2 × 8), slide number column (14) and gap (6), thumbnail border (2 × 2). */
 const THUMB_CHROME = 40;
+/** Slide width in grid view. */
+const GRID_THUMB_WIDTH = 240;
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 72, 96];
 const MIN_SIZE_EMU = 91440;
 const EMU_PER_PT = 12700;
@@ -149,6 +155,7 @@ export class PptxView extends FileView {
 
   private thumbsEl!: HTMLElement;
   private thumbObserver: ResizeObserver | null = null;
+  private fitThumbs: (() => void) | null = null;
   private stageEl!: HTMLElement;
   private slideHostEl!: HTMLElement;
   private notesEl!: HTMLTextAreaElement;
@@ -193,6 +200,11 @@ export class PptxView extends FileView {
       this.openFind();
       return false;
     });
+    // Google's grid view shortcut.
+    this.scope.register(["Mod", "Alt"], "1", () => {
+      this.setGridView(!this.gridView);
+      return false;
+    });
     // On the thumbnails, copy / cut / paste act on whole slides.
     const slideKeys: Record<string, () => void> = { c: () => void this.copySlide(false), x: () => void this.copySlide(true), v: () => void this.pasteSlides() };
     for (const [mods, key, run] of keys) {
@@ -228,6 +240,7 @@ export class PptxView extends FileView {
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
     if (canExportPdf()) menu.addItem((i) => i.setTitle("Export to PDF").setIcon("file-output").setSection("action").onClick(() => void this.exportPdf()));
+    if (canExportPdf()) menu.addItem((i) => i.setTitle("Download current slide as PNG").setIcon("image-down").setSection("action").onClick(() => void this.exportPng()));
   }
 
   getViewType(): string {
@@ -275,10 +288,18 @@ export class PptxView extends FileView {
     this.thumbsEl.id = `dw-slides-${crypto.randomUUID()}`;
     // Delete / Backspace on the thumbnails deletes the current slide (a deck keeps at least one).
     this.thumbsEl.addEventListener("keydown", (e) => {
-      if (e.target === this.thumbsEl && this.doc && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+      if (e.target === this.thumbsEl && this.doc && ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
         e.preventDefault();
         const last = this.doc.slides().length - 1;
-        this.goTo(e.key === "Home" ? 0 : e.key === "End" ? last : Math.max(0, Math.min(last, this.index + (e.key === "ArrowDown" ? 1 : -1))));
+        // In the grid, up / down move a whole row.
+        const perRow = this.gridView ? Math.max(1, Math.floor(this.thumbsEl.clientWidth / (GRID_THUMB_WIDTH + 40))) : 1;
+        const step = { ArrowDown: perRow, ArrowUp: -perRow, ArrowRight: 1, ArrowLeft: -1 }[e.key as "ArrowDown"] ?? 0;
+        this.goTo(e.key === "Home" ? 0 : e.key === "End" ? last : Math.max(0, Math.min(last, this.index + step)));
+        return;
+      }
+      if (e.target === this.thumbsEl && this.gridView && (e.key === "Enter" || e.key === "Escape")) {
+        e.preventDefault();
+        this.setGridView(false);
         return;
       }
       if ((e.key !== "Delete" && e.key !== "Backspace") || e.target !== this.thumbsEl || !this.doc) return;
@@ -294,12 +315,12 @@ export class PptxView extends FileView {
     // Thumbnails are drawn THUMB_WIDTH wide; shrink them to the room the panel leaves (scroll bar, narrow windows).
     // Measured from the panel (its scroll bar space is always reserved), not the thumbnails: scaling them must not
     // change what's measured, or the scroll bar coming and going makes them flicker.
-    const fitThumbs = () => {
+    const fitThumbs = (this.fitThumbs = () => {
       const width = this.thumbsEl.clientWidth;
-      if (!width) return;
+      if (!width || this.gridView) return;
       const room = width - THUMB_CHROME;
       this.thumbsEl.setCssProps({ "--pptx-thumb-zoom": String(Math.min(1, Math.max(0.3, room / THUMB_WIDTH))) });
-    };
+    });
     this.thumbObserver?.disconnect();
     this.thumbObserver = new ResizeObserver(fitThumbs);
     this.thumbObserver.observe(this.thumbsEl);
@@ -452,6 +473,61 @@ export class PptxView extends FileView {
     this.renderCurrent();
   }
 
+  /** Paint format: the copied format, and whether it stays on after painting once (double-click). */
+  private painter: { format: ShapeFormat; sticky: boolean } | null = null;
+  private brushBtn: HTMLElement | null = null;
+
+  private startPainting(sticky: boolean): void {
+    // A second click turns it off (the dblclick's first click already turned it on).
+    if (this.painter && !sticky) return this.stopPainting();
+    const source = this.selected?.shape ?? this.rendered.find((r) => r.shape.el === this.items[0])?.shape;
+    if (!source) {
+      new Notice("Select a shape to copy its format.");
+      return;
+    }
+    this.painter = { format: copyFormat(source), sticky };
+    this.brushBtn?.addClass("is-active");
+    this.stageEl.addClass("is-painting");
+  }
+
+  private stopPainting(): void {
+    this.painter = null;
+    this.brushBtn?.removeClass("is-active");
+    this.stageEl?.removeClass("is-painting");
+  }
+
+  /** Paint the copied format onto a shape (the whole top-level item for shapes in groups). */
+  private paintOnto(shape: ShapeModel): void {
+    const painter = this.painter;
+    if (!painter) return;
+    const el = shape.el;
+    this.mutate((doc) => {
+      const part = this.editPart ?? doc.slides()[this.index].path;
+      const model = parseSlide(doc, part).shapes.find((s) => s.el === el);
+      if (model) applyFormat(model, painter.format);
+      doc.touch(part);
+    }, "slide");
+    if (!painter.sticky) this.stopPainting();
+  }
+
+  /** Google's grid view: the slides fill the window as a grid, for reordering; double-click opens one. */
+  private gridView = false;
+  private gridBtn: HTMLElement | null = null;
+
+  private setGridView(on: boolean): void {
+    this.gridView = on;
+    this.contentEl.toggleClass("pptx-grid-view", on);
+    this.gridBtn?.toggleClass("is-active", on);
+    if (!this.thumbsEl) return;
+    this.thumbsEl.setCssProps({ "--pptx-thumb-zoom": on ? String(GRID_THUMB_WIDTH / THUMB_WIDTH) : "" });
+    if (on) this.thumbsEl.focus();
+    else {
+      this.fitThumbs?.();
+      this.stageEl?.focus({ preventScroll: true });
+      this.renderCurrent();
+    }
+  }
+
   private renderThumbs(): void {
     if (!this.doc) return;
     this.thumbsEl.empty();
@@ -486,6 +562,11 @@ export class PptxView extends FileView {
         // Copy / paste on the thumbnails act on slides.
         this.thumbsEl.focus();
       };
+      item.addEventListener("dblclick", () => {
+        if (!this.gridView) return;
+        this.setGridView(false);
+        this.goTo(i);
+      });
       item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         this.goTo(i);
@@ -505,9 +586,10 @@ export class PptxView extends FileView {
   private wireThumbDrag(item: HTMLElement, i: number): void {
     item.draggable = true;
     const clear = () => this.thumbsEl.querySelectorAll(".drop-before, .drop-after").forEach((t) => t.removeClass("drop-before", "drop-after"));
+    // In the grid, slides sit side by side: before / after is left / right.
     const below = (e: DragEvent) => {
       const r = item.getBoundingClientRect();
-      return e.clientY > r.top + r.height / 2;
+      return this.gridView ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
     };
     item.addEventListener("dragstart", (e) => {
       this.dragFrom = i;
@@ -709,8 +791,19 @@ export class PptxView extends FileView {
     const { el, textEl, shape } = rs;
     if (shape.inherited) return;
 
+    // Ctrl / Cmd + click follows a shape's own link (text links are followed by the text's handler).
+    if (shape.link) el.addEventListener("click", (e) => {
+      if (isMod(e) && shape.link) this.followLink(shape.link);
+    });
+
     el.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 || this.drawing) return;
+      if (this.painter) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.paintOnto(shape);
+        return;
+      }
       const item = topLevel(shape.el);
       // Shift+click in another cell of the same table extends the cell range.
       if (shape.kind === "cell" && e.shiftKey && this.tableCell?.frame === item && shape.cell) {
@@ -780,7 +873,10 @@ export class PptxView extends FileView {
         caretIntoEmptyLine(textEl);
         // Ctrl / Cmd + click follows a link.
         const link = (e.target as HTMLElement).closest<HTMLElement>("[data-link]")?.dataset.link;
-        if (link && isMod(e)) window.open(link);
+        if (link && isMod(e)) {
+          e.stopPropagation();
+          this.followLink(link);
+        }
       });
       textEl.addEventListener("input", () => {
         textEl.toggleClass("is-empty", !textEl.textContent);
@@ -1657,21 +1753,54 @@ export class PptxView extends FileView {
     this.withText((_, el) => updateParagraphs(el, fn), false);
   }
 
+  /** Slide titles for the link dialog: the title placeholder's text, else "Slide N". */
+  private slideTitles(): string[] {
+    const doc = this.doc!;
+    return doc.slides().map((s, i) => {
+      const title = parseSlide(doc, s.path).shapes.find((sh) => sh.placeholder && !sh.inherited && sh.text && /title/i.test(sh.el.getElementsByTagNameNS(NS.p, "ph")[0]?.getAttribute("type") ?? ""));
+      const text = title?.text ? plainText(title.text.el).trim() : "";
+      return text ? `Slide ${i + 1}: ${text}` : `Slide ${i + 1}`;
+    });
+  }
+
+  /** Follow a link from the editor (Ctrl+click): slides in this deck open here, web addresses in the browser. */
+  private followLink(link: string): void {
+    if (!link.startsWith("#")) return void window.open(link);
+    const to = linkTarget(link, this.index, this.doc?.slides().map((s) => s.path) ?? []);
+    if (to !== null) this.goTo(to);
+  }
+
+  /**
+   * Google's Insert link: while editing text it links the selected text, otherwise the selected shapes. A web
+   * address or a slide of this deck.
+   */
   private async editLink(): Promise<void> {
-    const rs = this.activeText ?? (this.selected?.textEl ? this.selected : null);
+    if (!this.doc) return;
+    const rs = this.activeText;
+    const slides = this.doc.slides().map((s) => s.path);
     if (!rs?.textEl) {
-      new Notice("Select some text first.");
+      const items = this.items;
+      if (!items.length) {
+        new Notice("Select a shape or some text first.");
+        return;
+      }
+      const part = this.editPart ?? slides[this.index];
+      const current = this.rendered.find((r) => r.shape.el === items[0])?.shape.link ?? "";
+      const link = await linkDialog(this.app, current, slides, this.slideTitles());
+      if (link === undefined) return;
+      this.mutate((doc) => {
+        for (const item of items) setShapeLink(doc, part, item, link);
+      }, "slide");
       return;
     }
     const current = selectionRunProps(rs.textEl, rs.pxPerPt, this.defaultsFor(rs))?.link ?? "";
     // The prompt takes focus and the text may be redrawn meanwhile: remember the selection as character offsets.
     const offsets = this.savedRange && rs.textEl.contains(this.savedRange.commonAncestorContainer) ? textOffsets(rs.textEl, this.savedRange) : null;
-    const url = await promptText(this.app, "Link address (empty removes the link)", current || "https://");
-    if (url === null) return;
+    const link = await linkDialog(this.app, current, slides, this.slideTitles());
+    if (link === undefined) return;
     const live = this.rendered.find((r) => r.shape.el === rs.shape.el) ?? rs;
     this.activeText = live;
     this.savedRange = offsets && live.textEl ? rangeAt(live.textEl, offsets) : null;
-    const link = url.trim() && url.trim() !== "https://" ? url.trim() : null;
     this.withText((r, el) => applyRunStyle(el, { link }, r.pxPerPt));
   }
 
@@ -1773,6 +1902,8 @@ export class PptxView extends FileView {
       e.preventDefault();
       if (key === "y" || e.shiftKey) this.redo();
       else this.undo();
+    } else if (e.key === "Escape" && this.painter) {
+      this.stopPainting();
     } else if (e.key === "Escape" && (this.drawing || this.galleryEl)) {
       this.cancelDrawing();
       this.closeGallery();
@@ -1804,7 +1935,21 @@ export class PptxView extends FileView {
     this.index = i;
     this.editPart = null; this.showTheme = false;
     this.renderCurrent();
-    this.stageEl.focus({ preventScroll: true });
+    (this.gridView ? this.thumbsEl : this.stageEl).focus({ preventScroll: true });
+  }
+
+  /** Google's Download › PNG: the current slide, as large as the window allows, saved next to the deck. */
+  async exportPng(): Promise<void> {
+    const doc = this.doc;
+    if (!doc || !this.file) return;
+    this.flushCommit();
+    const { cx, cy } = doc.slideSize;
+    const width = Math.floor(Math.min(window.innerWidth, (window.innerHeight * cx) / cy, 1920));
+    const height = Math.floor((width * cy) / cx);
+    const i = this.index;
+    await exportPng(this.app, this.file, i + 1, { width, height }, (host) =>
+      renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1 })
+    );
   }
 
   /** Save the slides (not hidden ones) as a PDF, one slide per page. */
@@ -1836,6 +1981,7 @@ export class PptxView extends FileView {
       count,
       isHidden: (i: number) => hidden[i],
       notes: (i: number) => doc.notesText(i),
+      slidePaths: doc.slides().map((s) => s.path),
       render: (host: HTMLElement, i: number, width: number) =>
         renderSlide(host, parseSlide(doc, doc.slides()[i].path), doc.slideSize, { width, editable: false, imageUrl: this.imageUrl, slideNumber: i + 1, playMedia: true }),
       effects: (i: number) => {
@@ -2440,6 +2586,9 @@ export class PptxView extends FileView {
     btn("Theme", "Edit theme colors, fonts, master and custom layouts", () => { this.showMotion = false; this.showTheme = true; this.showProps = true; this.setSelection([]); });
     btn("Motion", "Add slide transitions and object animations", () => this.openMotion());
     sep();
+    this.gridBtn = tb.icon("layout-grid", "Grid view (Ctrl+Alt+1)", () => this.setGridView(!this.gridView));
+    this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
+    this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
     const panelBtn = tb.icon("panel-right", "Show or hide the format panel", () => {
       this.showProps = !this.showProps;
       this.app.saveLocalStorage(PROPS_KEY, this.showProps ? "shown" : "hidden");
@@ -2531,4 +2680,42 @@ function placeCaret(el: HTMLElement, offset: number): void {
   range.collapse(false);
   sel.removeAllRanges();
   sel.addRange(range);
+}
+
+/**
+ * Google's link box: a web address, or a slide of this deck (next, previous, first, last or a specific one).
+ * Resolves the new link, null to remove it, or undefined when cancelled.
+ */
+function linkDialog(app: App, current: string, slides: string[], titles: string[]): Promise<string | null | undefined> {
+  return new Promise((resolve) => {
+    let result: string | null | undefined;
+    const modal = new Modal(app);
+    modal.titleEl.setText("Link");
+    const done = (link: string | null) => {
+      result = link;
+      modal.close();
+    };
+    if (current) modal.contentEl.createEl("p", { cls: "pptx-props-hint", text: `Current link: ${linkLabel(current, slides)}` });
+    const url = modal.contentEl.createEl("input", { type: "text", cls: "pptx-link-url", attr: { "aria-label": "Link address", placeholder: "Paste a link" } });
+    if (current && !current.startsWith("#")) url.value = current;
+    url.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      if (url.value.trim()) done(url.value.trim());
+    });
+    new Setting(modal.contentEl).addButton((b) => b.setButtonText("Apply").setCta().onClick(() => url.value.trim() && done(url.value.trim())));
+    modal.contentEl.createEl("h4", { text: "Slides in this presentation" });
+    const list = modal.contentEl.createDiv({ cls: "pptx-link-slides" });
+    const option = (text: string, link: string) => {
+      const b = list.createEl("button", { text });
+      b.toggleClass("is-active", link === current);
+      b.addEventListener("click", () => done(link));
+    };
+    for (const jump of JUMPS) option(linkLabel(`#jump:${jump}`, slides), `#jump:${jump}`);
+    slides.forEach((path, i) => option(titles[i] ?? `Slide ${i + 1}`, `#slide:${path}`));
+    if (current) new Setting(modal.contentEl).addButton((b) => b.setButtonText("Remove link").onClick(() => done(null)));
+    modal.onClose = () => resolve(result);
+    modal.open();
+    window.setTimeout(() => url.focus());
+  });
 }
