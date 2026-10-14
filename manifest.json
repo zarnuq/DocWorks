@@ -1,7 +1,7 @@
 {
   "id": "doc-works",
   "name": "Doc Works",
-  "version": "0.9.5",
+  "version": "1.0.0",
   "minAppVersion": "1.8.7",
   "description": "View and edit Word (.docx), PowerPoint (.pptx) and Excel (.xlsx) files, with faithful rendering, live formulas and lossless saving.",
   "author": "zarnuq",
