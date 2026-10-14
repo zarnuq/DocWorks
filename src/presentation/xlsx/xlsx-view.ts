@@ -23,6 +23,7 @@ import { numText } from "../../domain/xlsx/formula-evaluator";
 import { SaveStatus } from "../common/save-status";
 import { runEditCommand } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
+import { insertCheckboxes, toggleCheckboxes } from "../../domain/xlsx/checkbox";
 import { COMMON_SHORTCUTS, registerShortcutsKey, SHEETS_SHORTCUTS, shortcutsDialog } from "../common/shortcuts";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
@@ -244,6 +245,7 @@ export class XlsxView extends FileView {
       openDropdown: (row, col, at) => this.openDropdown(row, col, at),
       charts: () => this.charts(),
       chartMenu: (key, e) => this.chartMenu(key, e),
+      toggleCheckboxes: (r) => this.change(() => toggleCheckboxes(this.edits!, this.sheet, r)),
       movePicture: (key, box) => this.change(() => movePicture(this.edits!, this.sheet, key, box)),
       pictureMenu: (key, e) => this.pictureMenu(key, e),
       deletePicture: (key) => this.change(() => deletePicture(this.edits!, this.sheet, key)),
@@ -1201,6 +1203,7 @@ export class XlsxView extends FileView {
       });
       m.addSeparator();
       menuItem(m, "Link", () => void this.editLink());
+      menuItem(m, "Checkbox", () => this.grid && this.change(() => insertCheckboxes(this.edits!, this.sheet, this.grid!.selection())));
       menuItem(m, "Comment", () => this.commentDialog(this.sel.r1, this.sel.c1));
       menuItem(m, "Note", () => void this.editNote(this.sel.r1, this.sel.c1));
       menuItem(m, "Dropdown", () => this.validationDialog());

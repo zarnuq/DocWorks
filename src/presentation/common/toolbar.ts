@@ -34,7 +34,7 @@ const MENU_ICONS: Record<string, string> = {
   "Word count": "whole-word", "Sort A → Z": "arrow-down-az", "Sort Z → A": "arrow-down-za", "Create a filter": "filter",
   "Remove filter": "filter-x", "Data validation": "list-checks", "Remove duplicates…": "list-x", "Split text to columns…": "columns-2",
   "Named ranges…": "tag", "Import CSV as new sheet…": "file-input", Bold: "bold", Italic: "italic", Underline: "underline",
-  "Keyboard shortcuts": "keyboard", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
+  "Keyboard shortcuts": "keyboard", Checkbox: "square-check", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
 };
 /** Set while a menu bar menu is being built: its items get MENU_ICONS. */
 let menuBarIcons = false;

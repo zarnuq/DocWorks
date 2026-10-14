@@ -8,6 +8,9 @@ import { NS_S } from "../../infrastructure/xlsx/xlsx-workbook";
 import { builtinFormat } from "./number-format";
 
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+/** Excel's cell feature mapping (checkboxes): an extension on a cellXfs record. */
+export const NS_FPB = "http://schemas.microsoft.com/office/spreadsheetml/2022/featurepropertybag";
+export const XF_COMPLEMENT = "{C7286773-470A-42A8-94C5-96B5CB345126}";
 
 // Legacy 64-color palette for indexed="n".
 const INDEXED = (
@@ -52,6 +55,8 @@ export interface StyleChange {
   vAlign?: "top" | "center" | "bottom";
   wrap?: boolean;
   borders?: Partial<Record<Side, BorderStyle>>;
+  /** Excel's xfComplement (a feature property bag mapping, e.g. a cell checkbox); null removes it. */
+  complement?: number | null;
 }
 
 export interface Format {
@@ -128,6 +133,19 @@ export class Styles {
     const n = (a: string) => Number(el?.getAttribute(a) ?? 0);
     return { el, numFmtId: n("numFmtId"), fontId: n("fontId"), fillId: n("fillId"), borderId: n("borderId") };
   }
+
+  /** The record's xfComplement index (Excel's cell checkboxes and the like), or null. */
+  complement(index: number): number | null {
+    let i = this.complements.get(index);
+    if (i === undefined) {
+      const ext = Array.from(this.child(this.xf(index).el, "extLst")?.children ?? []).find((x) => x.getAttribute("uri") === XF_COMPLEMENT);
+      const at = ext?.getElementsByTagNameNS(NS_FPB, "xfComplement")[0]?.getAttribute("i");
+      i = at === undefined || at === null ? null : Number(at);
+      this.complements.set(index, i);
+    }
+    return i;
+  }
+  private complements = new Map<number, number | null>();
 
   numFmt(index: number): string {
     let code = this.codes.get(index);
@@ -383,6 +401,17 @@ export class Styles {
       set("wrapText", change.wrap === undefined ? undefined : change.wrap ? "1" : "0", "0");
       if (!align.attributes.length) align.remove();
       xf.setAttribute("applyAlignment", "1");
+    }
+    if (change.complement !== undefined) {
+      let ext = this.child(xf, "extLst");
+      Array.from(ext?.children ?? []).find((x) => x.getAttribute("uri") === XF_COMPLEMENT)?.remove();
+      if (change.complement !== null) {
+        ext ??= xf.appendChild(this.el("extLst"));
+        const item = ext.appendChild(this.el("ext", { uri: XF_COMPLEMENT }));
+        item.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:xfpb", NS_FPB);
+        item.appendChild(xf.ownerDocument.createElementNS(NS_FPB, "xfpb:xfComplement")).setAttribute("i", String(change.complement));
+      }
+      if (ext && !ext.childElementCount) ext.remove();
     }
     if (change.locked !== undefined) {
       let p = this.child(xf, "protection");

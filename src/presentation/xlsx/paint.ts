@@ -29,10 +29,14 @@ export type Op =
       pad: number;
     }
   | { kind: "corner"; x: number; y: number; color: string }
+  /** A cell checkbox centred in the cell box; `color` fills it when checked. */
+  | { kind: "checkbox"; x: number; y: number; w: number; h: number; checked: boolean; color: string }
   /** A sparkline in the cell box. */
   | { kind: "spark"; x: number; y: number; w: number; h: number; s: Sparkline };
 
 const PAD = 3;
+/** A cell checkbox's side, in px. */
+export const CHECKBOX = 14;
 
 /** A sparkline: a line through the values, columns, or win/loss blocks (up for positive, down for negative). */
 function drawSpark(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "spark" }>): void {
@@ -199,6 +203,24 @@ export function paint(canvas: HTMLCanvasElement, w: number, h: number, ops: Op[]
       ctx.lineTo(op.x, op.y + 6);
       ctx.closePath();
       ctx.fill();
+    } else if (op.kind === "checkbox") {
+      // Google's: a rounded square outline, filled with a white tick when checked.
+      const size = CHECKBOX, x = Math.round(op.x + (op.w - size) / 2) + 0.5, y = Math.round(op.y + (op.h - size) / 2) + 0.5;
+      ctx.beginPath();
+      ctx.roundRect(x, y, size, size, 2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = op.color;
+      ctx.stroke();
+      if (op.checked) {
+        ctx.fillStyle = op.color;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x + 3, y + size / 2);
+        ctx.lineTo(x + size / 2 - 1, y + size - 4);
+        ctx.lineTo(x + size - 3, y + 4);
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+      }
     } else if (op.kind === "spark") drawSpark(ctx, op);
     else drawText(ctx, op);
   }

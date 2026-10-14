@@ -223,16 +223,21 @@ export class PptxView extends FileView {
       this.openFind();
       return false;
     });
-    // Google's shortcuts for comments and lists, by key position (Shift changes the digit's character).
-    this.contentEl.addEventListener("keydown", (e) => {
-      if (!isMod(e)) return;
-      const run = e.altKey && !e.shiftKey && e.code === "KeyM" ? () => this.commentsDialog()
-        : !e.altKey && !e.shiftKey && e.code === "KeyK" ? () => void this.editLink()
-        : e.shiftKey && !e.altKey && (e.code === "Digit7" || e.code === "Digit8") ? () => this.toggleList(e.code === "Digit7") : null;
-      if (!run) return;
-      e.preventDefault();
-      run();
-    });
+    // Google's shortcuts for links, comments and lists. Shift+7 / Shift+8 arrive as "&" / "*" on most layouts.
+    const google: [Modifier[], string, () => void][] = [
+      [["Mod"], "k", () => void this.editLink()],
+      [["Mod", "Alt"], "m", () => this.commentsDialog()],
+      [["Mod", "Shift"], "8", () => this.toggleList(false)],
+      [["Mod", "Shift"], "*", () => this.toggleList(false)],
+      [["Mod", "Shift"], "7", () => this.toggleList(true)],
+      [["Mod", "Shift"], "&", () => this.toggleList(true)],
+    ];
+    for (const [mods, key, run] of google) {
+      this.scope.register(mods, key, () => {
+        run();
+        return false;
+      });
+    }
     registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS]));
     // Google's grid view shortcut.
     this.scope.register(["Mod", "Alt"], "1", () => {

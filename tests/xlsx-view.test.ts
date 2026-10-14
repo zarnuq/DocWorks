@@ -485,7 +485,7 @@ describe("XlsxView menus", () => {
     const { view, file } = await mount();
     expect(Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent)).toEqual(["File", "Edit", "View", "Insert", "Format", "Data", "Tools", "Help"]);
     expect(menuTitles(view, "File")).toEqual(["Export…"]);
-    expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Image", "Chart", "Pivot table", "Function", "Link", "Comment", "Note", "Dropdown", "Special characters"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Image", "Chart", "Pivot table", "Function", "Link", "Checkbox", "Comment", "Note", "Dropdown", "Special characters"]);
     expect(menuTitles(view, "Format")).toEqual(["Number", "Text", "Alignment", "Wrap text", "Merge cells", "Conditional formatting", "Clear formatting"]);
     expect(menuTitles(view, "Data")).toEqual(["Sort A → Z", "Sort Z → A", "Create a filter", "Data validation", "Remove duplicates…", "Split text to columns…", "Named ranges…", "Group rows 2 - 2", "Group columns A - A", "Import CSV as new sheet…"]);
     for (const l of ["Data", "Freeze", "Insert pivot table", "Conditional formatting", "Find and replace (Ctrl+F)"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).toBeNull();
@@ -611,6 +611,28 @@ describe("XlsxView menus", () => {
     const text = modal.textContent ?? "";
     for (const s of ["Fill down", "Ctrl+D", "Insert date", "Edit cell", "F2"]) expect(text).toContain(s);
     modal.remove();
+    await view.onUnloadFile(file);
+  });
+
+  it("Insert › Checkbox draws checkboxes; Space and a click on the box check / uncheck them", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 2, col: 10 }, { row: 3, col: 10 });
+    runMenu(view, "Insert", "Checkbox");
+    v.grid.render();
+    const boxes = () => [...v.grid.ops.values()].flat().filter((o: any) => o.kind === "checkbox");
+    expect(boxes()).toHaveLength(2);
+    expect(boxes().every((o: any) => !o.checked)).toBe(true);
+    v.grid.input.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    expect([v.sheet.at(2, 10).value, v.sheet.at(3, 10).value]).toEqual([true, true]);
+    v.grid.render();
+    expect(boxes().every((o: any) => o.checked)).toBe(true);
+    expect(v.grid.edit).toBeNull();
+    // A click on row 3's box unchecks just it.
+    const x = v.grid.hw + v.sheet.colX(10) + v.sheet.colWidth(10) / 2, y = v.grid.hh + v.sheet.rowY(3) + v.sheet.rowHeight(3) / 2;
+    v.grid.el.querySelector(".xlsx-canvas")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: x, clientY: y, button: 0 }));
+    window.dispatchEvent(new PointerEvent("pointerup", { clientX: x, clientY: y }));
+    expect([v.sheet.at(2, 10).value, v.sheet.at(3, 10).value]).toEqual([true, false]);
     await view.onUnloadFile(file);
   });
 

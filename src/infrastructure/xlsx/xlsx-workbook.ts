@@ -235,6 +235,16 @@ export class XlsxWorkbook extends OoxmlPackage {
     return path;
   }
 
+  /** Excel's feature property bags part (cell checkboxes live there), its path; made when `create` and missing. */
+  featureBags(create = false): string | null {
+    const existing = this.rels(this.workbookPath).find(r => r.type === "FeaturePropertyBag" && !r.external);
+    if (existing || !create) return existing?.target ?? null;
+    const path = "xl/featurePropertyBag/featurePropertyBag.xml";
+    this.putXml(path, parseXml('<FeaturePropertyBags xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/featurepropertybag"/>')!, "application/vnd.ms-excel.featurepropertybag+xml");
+    this.addRel(this.workbookPath, "http://schemas.microsoft.com/office/2022/11/relationships/FeaturePropertyBag", path);
+    return path;
+  }
+
   // --- Notes (Excel's legacy comments) --------------------------------------------
 
   /** The sheet's comments part, if it has one. */

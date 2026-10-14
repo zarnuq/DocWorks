@@ -14,7 +14,8 @@ import type { CfStyle } from "../../domain/xlsx/conditional";
 import type { Sparkline } from "../../domain/xlsx/sparklines";
 import { fontStack } from "../../core/utils/fonts";
 import { OutlineAxis, OutlineGroup, outlineGroups, summaryIndex } from "../../domain/xlsx/outline";
-import { Op, paint } from "./paint";
+import { CHECKBOX, Op, paint } from "./paint";
+import { isCheckbox } from "../../domain/xlsx/checkbox";
 
 export const HEADER_W = 46;
 export const HEADER_H = 24;
@@ -30,6 +31,9 @@ export interface Pos {
 
 export interface Hit extends Pos {
   area: "cell" | "colHeader" | "rowHeader" | "corner" | "outline";
+  /** On a cell: the pointer in sheet pixels. */
+  x?: number;
+  y?: number;
   /** Pointer on a header boundary: resizing this column / row. */
   resize?: number;
   /** In the group gutter: the group whose +/- button is under the pointer, if any. */
@@ -84,6 +88,8 @@ export interface GridHost {
   openLink?(row: number, col: number): boolean;
   /** Ctrl+K: Insert › Link. */
   editLink?(): void;
+  /** Check / uncheck the checkboxes in `r` (Space, or a click on a box). */
+  toggleCheckboxes?(r: Rect): void;
 }
 
 /** Text to edit for a cell: "=formula", or the value written so that typing it back gives the same value. */
@@ -690,6 +696,10 @@ export class Grid {
       if (stale) texts.push({ kind: "corner", x: x + w - 1, y, color: "#e37400" });
       else if (this.host.invalid?.(row, col)) texts.push({ kind: "corner", x: x + w - 1, y, color: "#d93025" });
       const px = (fmt.fontSize * 4) / 3;
+      if ((cell.value === null || typeof cell.value === "boolean") && isCheckbox(s.wb, cell.style)) {
+        texts.push({ kind: "checkbox", x, y, w, h, checked: cell.value === true, color: fmt.color ?? (this.dark ? "#9aa0a6" : "#5f6368") });
+        return;
+      }
       if (cf?.icon) texts.push({ kind: "text", x, y, w, h, text: cf.icon.glyph, font: `${px}px sans-serif`, size: px, color: cf.icon.color, align: "left", valign: "center", wrap: false, underline: false, strike: false, pad: 0 });
       if (!shown.text || cf?.hideValue) return;
       const isNum = typeof cell.value === "number";
@@ -902,7 +912,7 @@ export class Grid {
       const resize = bottom - sy <= 3 ? row : sy - top <= 3 && row > 0 ? this.step("row", row, -1) : undefined;
       return { row, col, area: "rowHeader", resize };
     }
-    return { row, col, area: "cell" };
+    return { row, col, area: "cell", x: sx, y: sy };
   }
 
   private track(move: (e: PointerEvent) => void, up: (e: PointerEvent) => void, pointer: PointerEvent): void {
@@ -1024,6 +1034,17 @@ export class Grid {
       return;
     }
     if (this.edit && !this.commitEdit()) return;
+
+    // A click on a cell's checkbox checks / unchecks it (the rest of the cell just selects it).
+    if (hit.area === "cell" && !e.shiftKey && this.host.toggleCheckboxes && hit.x !== undefined && hit.y !== undefined && isCheckbox(s.wb, s.at(hit.row, hit.col)?.style ?? 0)) {
+      const cx = s.colX(hit.col) + s.colWidth(hit.col) / 2, cy = s.rowY(hit.row) + s.rowHeight(hit.row) / 2;
+      if (Math.abs(hit.x - cx) <= CHECKBOX / 2 + 2 && Math.abs(hit.y - cy) <= CHECKBOX / 2 + 2) {
+        this.select(hit, hit);
+        this.host.toggleCheckboxes({ r1: hit.row, c1: hit.col, r2: hit.row, c2: hit.col });
+        this.input.focus({ preventScroll: true });
+        return;
+      }
+    }
 
     if (target.classList.contains("xlsx-handle")) {
       const src = this.selection();
@@ -1220,6 +1241,15 @@ export class Grid {
       this.picked = null;
       this.render();
       return;
+    }
+    // Space checks / unchecks the selected checkboxes, as in Sheets (elsewhere it types a space).
+    if (e.key === " " && !mod && !e.altKey && this.host.toggleCheckboxes) {
+      const sel = this.selection();
+      if (this.sheet.cellsIn(sel).some((c) => isCheckbox(this.sheet.wb, c.style))) {
+        e.preventDefault();
+        this.host.toggleCheckboxes(sel);
+        return;
+      }
     }
     if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k" && this.host.editLink) {
       e.preventDefault();

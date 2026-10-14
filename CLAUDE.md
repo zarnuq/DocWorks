@@ -43,6 +43,13 @@ GPL-3.0.
 - Spreadsheet writes go through `Sheet.setCell` / `setCached` (journaled, `touch`ed) or `Edits.structural` (whole parts); never edit sheet XML elsewhere or undo and dirty-only saving miss it.
 - TDD: add a failing test (fixtures via `tests/fixtures/make_*_fixture.py`) before changing parser/writer behaviour.
 
+## Known gaps (not in the README)
+
+- Pivot table report filters (kept in the file, refreshed in Excel).
+- GOOGLEFINANCE / IMPORTRANGE need the network; their saved results are shown.
+- SmartArt items can't be added to cycle or hierarchy layouts.
+- Complex floating objects don't match Office's layout exactly.
+
 ## Live testing in Obsidian
 
 Vault: `~/notes`, plugin dir `~/notes/.obsidian/plugins/doc-works/`, scratch files in `~/notes/doc-works-test/`.

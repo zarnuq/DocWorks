@@ -21,31 +21,60 @@ If it saves you a trip to Office, please ⭐ the repo.
 
 ## Features
 
-**Word:** styles, fonts and formatting, paragraph borders and shading, lists, links, tables (merge, borders, header rows), draggable floating pictures with wrapping (on both sides of a picture mid-column), text spacing and cropping, shapes, lines and text boxes, code boxes, page view (true page size per section, so landscape sections get landscape pages, breaks inside tables and paragraphs, including column sections, headers and footers with pictures and page numbers, per section or linked to the previous one), comment replies and resolve/reopen, footnotes, table of contents, suggestion mode and tracked changes (accept / reject), including new paragraphs, joined paragraphs, table columns, merged cells and header / footer edits, document outline, ruler for margins, indents and tab stops, find and replace, word count.
+### Documents (.docx)
 
-Choose **Suggesting** from the editing mode menu to record proposed text and formatting edits. Use the review panel to accept or reject changes and reply to or resolve comments. The outline and ruler buttons toggle navigation and page controls; drag ruler handles to adjust margins and indents, or click the ruler to add a tab stop. Floating pictures have a move handle and text spacing control. Pages fit the available space when sidebars are open.
+- Word-accurate pages: real page sizes per section, Word's line heights and font widths, columns
+- Styles, fonts, lists, paragraph spacing, borders and shading
+- Tables with merged cells, borders, shading and header rows that break across pages
+- Pictures with wrapping and dragging; shapes, text boxes, charts and equations
+- Headers and footers per section, with pictures, page numbers and watermarks
+- Suggesting mode and tracked changes from Word (accept / reject)
+- Comments with replies and resolve / reopen
+- Footnotes, table of contents, links
+- Document outline and a ruler for margins, indents and tab stops
+- Fonts embedded in the file are used
 
-**PowerPoint:** text editing on the slide, all 187 preset shapes, connectors, group / align / distribute with snapping, tables with table styles, picture crop, layouts, backgrounds, slide size, sections, speaker notes, comment threads (reply, resolve, as PowerPoint's modern comments), slideshow with presenter view, slide transitions and object animations, find and replace, zoom, fonts embedded in the deck (e.g. from Google Slides).
+### Presentations (.pptx)
 
-**Search:** Ctrl+F searches the open Office file, including slide speaker notes, Word and slide comments, and spreadsheet cell notes and comments. Replies and resolved threads are included. Source checkboxes narrow the search; speaker-note matches highlight directly in the notes box, while comments and cell notes show a preview and an action to open them. Spreadsheets can search all sheets. Replace applies to document, slide and cell content.
+- Faithful slides: themes, masters, layouts, backgrounds, SmartArt and all 187 preset shapes
+- Fonts embedded in the deck are used, including Google Slides' exports
+- Text editing on the slide with bullets, numbering and autofit
+- Shapes, connectors, group / align / distribute with snapping
+- Tables with table styles, pictures with crop and colour adjustments, charts
+- Custom themes and layouts, slide size, sections, hidden slides
+- Transitions and object animations
+- Slideshow with presenter view and speaker notes
+- Comment threads, audio and video
+- Copy, cut and paste slides between decks, keeping their look
 
-Click **Motion** to add a slide transition or animate a selected object with appear / disappear, fade in / out, fly in / out, zoom in / out or spin. Choose on-click, with-previous or after-previous playback, animate text by paragraph, set duration and delay, reorder or remove effects, and use **Play preview** to check them in present mode. Changes save into the presentation and support undo/redo. Imported compound steps retain their original effects; expand individual effects to edit timing or motion paths. The **Slide** dropdown includes New slide and the other slide actions.
+### Spreadsheets (.xlsx)
 
-**Excel:** a fast grid that stays smooth on sheets with 100,000+ cells, frozen rows and columns, merged cells, number formats (currency, percent, dates, custom codes with colors), fonts, fills, borders, alignment and wrapping, pictures, hidden rows / columns / sheets. Type values or formulas (click cells to insert references), and dependent cells recalculate across sheets with about 90 common functions (SUM, IF, VLOOKUP, XLOOKUP, INDEX / MATCH, SUMIFS, COUNTIFS, TEXT, DATE, ...). Copy and paste within the grid and to other apps, fill handle with number series, sort, filters, insert / delete / hide / resize rows and columns, freeze panes, merge, add / rename / duplicate / move / hide sheets, find and replace, name box, Export to PDF. Conditional formatting is drawn (colour scales, data bars, value / text / blank / custom formula rules, top / bottom, duplicates) and edited in a rules dialog; dropdowns (data validation lists, from items or a range) show an arrow with a menu of choices, and number / custom formula rules refuse or flag bad input. Charts are drawn from the sheet's current values, inserted from a selection, dragged and resized with the mouse, and edited in a chart editor (type, data range, title, legend, labels, axes, colours). Notes and threaded comments, icon sets (including Excel 2010 custom ones) and date rules (today, last 7 days, this month, ...), sparklines (line, column, win/loss), pivot tables (insert from a selection, refresh, and Google's editor for rows, columns and values), Google Sheets functions (ARRAYFORMULA, QUERY, REGEXMATCH / REGEXEXTRACT / REGEXREPLACE, SPARKLINE, and Google-only formulas in exported files), sheet protection with locked cells (password-protected sheets unlock with their password), structured table references, dynamic arrays (SEQUENCE, FILTER, SORT, UNIQUE, TRANSPOSE), zoom, and print settings (paper, orientation, fit to width, margins, gridlines) for Export to PDF. Formulas using functions it can't calculate keep the file's result and are marked; Excel recalculates them on open.
+- Fast grid that stays smooth on sheets with 100,000+ cells
+- Formulas with about 90 functions, recalculated live across sheets
+- Google Sheets functions and Google exports (QUERY, ARRAYFORMULA, REGEX…)
+- Number formats, fonts, fills, borders, alignment, merges, frozen panes
+- Conditional formatting, icon sets, data bars, dropdowns and validation
+- Charts, pictures, sparklines and pivot tables
+- Notes and threaded comments
+- Sort, filters, row / column groups, named ranges
+- Sheet protection with locked cells and passwords
+- Formulas it can't calculate keep the file's saved result
 
-**Not yet in spreadsheets:** pivot tables with report filters (kept, refreshed in Excel), and GOOGLEFINANCE / IMPORTRANGE (they need the network; their saved results are shown).
+### Everywhere
 
-**All:** New presentation / New document / New spreadsheet commands, undo / redo, autosave, light and dark themes. Works on Obsidian mobile too (Export to PDF needs the desktop app). **Export current note to .docx** (command, or the file menu on a note) writes a Word document next to it: headings, lists, tasks, quotes and callouts, code blocks, tables, editable equations, vault pictures, and clickable links back to Obsidian. Embedded notes are included recursively, including heading and block embeds. Choose the paper size, orientation, margins, text/picture scale and optional filename title before exporting. **Export to Markdown** in a Word file's menu (or **Export current document to Markdown** in the command palette) creates a note beside it with headings, lists, formatting, links, tables, code boxes, equations and footnotes. Pictures go in a dedicated attachment folder; existing notes are never overwritten. Notes exported with Doc Works also retain frontmatter, code languages, task states, callout types/titles/folding, table column alignment, and horizontal rules when brought back to Markdown. Page layout and comments stay in the Word document. Embed a file in a note for a read-only preview: `![[report.docx]]`, `![[deck.pptx#3]]` (slide 3, with previous / next), `![[budget.xlsx#Sheet2]]` (that sheet, with tabs). Settings choose the default paper size and which file types Doc Works opens.
+- Saves only what you change; the rest of the file is kept byte for byte
+- Google Docs / Slides / Sheets-style menus and toolbars
+- Undo / redo, autosave with retry, light and dark page themes
+- Find and replace, including speaker notes, comments and cell notes
+- Export to PDF; slides to PNG, sheets to CSV
+- New document / presentation / spreadsheet commands
+- No Office or other software needed; works offline and on mobile
 
-**Theme** edits theme colors/fonts and opens the master or layout canvas. Create custom layouts and add title/body placeholders, then apply them from the slide layout selector.
+### Notes and Markdown
 
-**Chart** inserts column, bar, stacked and 100% stacked, line, area, pie, doughnut, combo (columns and lines) or scatter charts with an editable data grid. Select a chart and click **Edit chart** to change its type, title, legend position, data labels, gridlines, axis titles and range, series colours, and its categories, series names and values; embedded workbook cells are updated too. Formatting the editor doesn't cover is preserved. Externally linked workbooks and named/multi-level ranges need conversion to embedded cell ranges in Office first. Charts and SmartArt can be copied between presentations with their linked resources, and whole slides can be copied, cut and pasted between decks (thumbnail menu or Ctrl+C / Ctrl+V on the thumbnails), keeping their original look.
-
-**Audio/video** embeds MP4, WebM, MP3, WAV, Ogg or M4A files. Media a deck links to instead of embedding plays in present mode when the file is in your vault (next to the deck, or at its relative path); web videos and files outside the vault are never loaded. Select media to choose automatic playback or looping; present mode provides playback controls. Playback depends on the codecs supported by the device.
-
-SmartArt text is edited with **Edit diagram text**, which also adds and removes top-level items in row and column layouts; 3-D charts are drawn flat and become flat charts when their type changes.
-
-**Not yet:** adding SmartArt items to cycle or hierarchy layouts, and complete Office layout fidelity for complex floating objects.
+- **Export current note to .docx:** headings, lists, tasks, callouts, code, tables, equations, pictures and links back to Obsidian
+- **Export to Markdown** from a Word file, keeping frontmatter, tasks, callouts and code languages from notes exported here
+- Embed a file in a note: `![[report.docx]]`, `![[deck.pptx#3]]`, `![[budget.xlsx#Sheet2]]`
 
 ## Install
 

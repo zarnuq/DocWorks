@@ -784,7 +784,8 @@ describe("DocxView zoom and panels", () => {
   it("Slides: Ctrl+Alt+M opens the slide's comments", async () => {
     const view = mount(PptxView, "sample.pptx");
     const file = await open(view, "keys.pptx");
-    view.contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "m", code: "KeyM", ctrlKey: true, altKey: true, bubbles: true, cancelable: true }));
+    const scope = view.scope as unknown as { keys: { mods: string[]; key: string; fn: () => boolean }[] };
+    scope.keys.find((k) => k.key === "m" && k.mods.join() === "Mod,Alt")!.fn();
     expect(document.querySelector(".test-modal")?.textContent).toContain("Comments on slide 1");
     await view.onUnloadFile(file);
   });
@@ -912,7 +913,8 @@ describe("DocxView zoom and panels", () => {
     const view = mount(PptxView, "sample.pptx");
     const file = await open(view, "link-key.pptx");
     const link = vi.spyOn(view as any, "editLink").mockResolvedValue(undefined);
-    view.contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true }));
+    const scope = view.scope as unknown as { keys: { mods: string[]; key: string; fn: () => boolean }[] };
+    scope.keys.find((k) => k.key === "k" && k.mods.join() === "Mod")!.fn();
     expect(link).toHaveBeenCalled();
     await view.onUnloadFile(file);
   });
