@@ -27,7 +27,7 @@ export class TFolder {}
 /** The vault's local storage behind App.loadLocalStorage / saveLocalStorage, shared by every App. */
 export const localData = new Map<string, unknown>();
 /** Desktop by default; tests flip it to check the mobile app. */
-export const Platform = { isDesktopApp: true, isMobile: false };
+export const Platform = { isDesktopApp: true, isMobile: false, isMacOS: false };
 
 export class App {
   scope = new Scope();
@@ -79,13 +79,13 @@ export class Notice {
 
 export class Menu {
   /** Items added, by title, so tests can run one. Separators are `{ title: "---" }`. */
-  items: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu }[] = [];
+  items: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu; icon?: string }[] = [];
   /** Obsidian's (unlisted) MenuItem.setSubmenu; tests turn it off to check the fallback. */
   static noSubmenus = false;
   addItem(cb: Fn) {
-    const entry: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu } = { title: "" };
+    const entry: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu; icon?: string } = { title: "" };
     const item: any = {
-      setTitle: (t: string) => ((entry.title = t), item), setIcon: () => item, setSection: () => item, setWarning: () => item,
+      setTitle: (t: string) => ((entry.title = t), item), setIcon: (icon: string) => ((entry.icon = icon), item), setSection: () => item, setWarning: () => item,
       onClick: (fn: Fn) => ((entry.run = fn), item),
       setChecked: (c: boolean | null) => ((entry.checked = c), item),
       setDisabled: (d: boolean) => ((entry.disabled = d), item),

@@ -32,6 +32,18 @@ const select = (node: Node, start: number, endNode: Node, end: number) => {
   sel.addRange(r);
 };
 
+describe("bullet colour", () => {
+  it("follows the paragraph's first run (PowerPoint's default), or the bullet's own a:buClr", () => {
+    renderParagraphs(host, [
+      para([run("red", { color: "#FF0000" }), run(" black")], { bullet: "•" }),
+      para([run("red", { color: "#FF0000" })], { bullet: "•", bulletColor: "#00AA00" }),
+    ], PX_PER_PT);
+    const ps = host.querySelectorAll("p");
+    expect(ps[0].style.getPropertyValue("--pptx-bullet-color")).toBe("#FF0000");
+    expect(ps[1].style.getPropertyValue("--pptx-bullet-color")).toBe("#00AA00");
+  });
+});
+
 describe("renderParagraphs / readParagraphs", () => {
   it("round-trips formatted runs", () => {
     const paras = [

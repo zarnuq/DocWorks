@@ -1,5 +1,10 @@
 import { readDrawing, newDrawing, writeDrawing } from "../../domain/docx/drawings";
 import { DrawingView } from "./docx-drawing-view";
+import { ChartView } from "./docx-chart-view";
+import { chartAt, chartRun, docxChartColors, editedChartRun } from "../../domain/docx/chart";
+import { chartPalette } from "../../domain/pptx/chart-format";
+import { chartDialog, NEW_CHART_TYPES, newChartFormat } from "../common/chart-form";
+import type { ChartKind } from "../../domain/pptx/chart-format";
 import { drawingEditor } from "./drawing-editor";
 import { App, FileView, Menu, Modal, Notice, Scope, Setting, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { Command, EditorState, NodeSelection, Plugin, TextSelection } from "prosemirror-state";
@@ -19,6 +24,8 @@ import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, sh
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { pickImage } from "../common/images";
 import { electronSpeller, runEditCommand, Speller } from "../common/spelling";
+import { specialCharacters } from "../common/special-chars";
+import { COMMON_SHORTCUTS, DOCS_SHORTCUTS, registerShortcutsKey, shortcutsDialog } from "../common/shortcuts";
 import { recrop, Wrap } from "../../domain/docx/drawing";
 import { readWatermark, setWatermark, TextWatermark, Watermark } from "../../domain/docx/watermark";
 import { directFormat, updateStyleToMatch } from "../../domain/docx/style-edit";
@@ -164,6 +171,7 @@ export class DocxView extends FileView {
       this.openFind();
       return false;
     });
+    registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...DOCS_SHORTCUTS]));
     this.scope.register(["Mod"], "h", () => {
       this.openFind();
       return false;
@@ -288,7 +296,7 @@ export class DocxView extends FileView {
     });
     this.editor = new EditorView(host, {
       attributes: { role: "textbox", "aria-labelledby": host.createDiv({ cls: "dw-sr-only", text: "Document content", attr: { id: `docx-content-name-${Math.random().toString(36).slice(2)}` } }).id, "aria-multiline": "true" },
-      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true) }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize)] }),
+      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true), "Mod-Alt-m": () => (void this.addComment(), true), "Mod-Shift-8": cmd.toggleList(ctx, "bullet"), "Mod-Shift-7": cmd.toggleList(ctx, "ordered") }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize)] }),
       nodeViews: {
         image: (node, view, getPos) =>
           new DocxImageView(node, view, getPos, {
@@ -303,6 +311,7 @@ export class DocxView extends FileView {
         // Text boxes are edited in place; other run content is drawn as usual.
         opaque: (node, view, getPos) => {
           const xml=node.attrs.xml as string;
+          if (chartAt(docx, xml)) return new ChartView(node, view, getPos, (x) => chartAt(docx, x), (pos) => this.editChart(pos));
           return readDrawing(xml) && !/txBox="1"/.test(xml) ? new DrawingView(node,view,getPos,pos=>this.drawingDialog(pos)) : new TextBoxView(node, view, getPos, ctx, { imageSrc: (id) => urls.get(id) ?? null, hyperlinkHref: (id) => docx.hyperlinkHref(id) }, docx);
         },
       },
@@ -548,8 +557,8 @@ export class DocxView extends FileView {
     };
 
     // --- The row: everyday controls, as Google Docs' toolbar ---
-    btn("↶", "Undo (Ctrl+Z)", undo);
-    btn("↷", "Redo (Ctrl+Y)", redo);
+    tb.icon("undo-2", "Undo (Ctrl+Z)", () => run(undo));
+    tb.icon("redo-2", "Redo (Ctrl+Y)", () => run(redo));
     tb.pin();
     sep();
     this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [zoomLabel(z), z]), (z) => this.setZoom(z));
@@ -569,17 +578,17 @@ export class DocxView extends FileView {
     tb.color("A", "Text color", "#000000", (color) => run(cmd.setMark(m.color, { color })));
     tb.color("HL", "Highlight color", "#FFFF00", (color) => run(cmd.setMark(m.highlight, { color })));
     sep();
-    tb.icon("link", "Add, change or remove a link (Ctrl+K; Ctrl+click follows it)", () => void this.editLink());
-    tb.icon("message-square-plus", "Comment on the selected text", () => void this.addComment());
+    tb.icon("link", "Insert link (Ctrl+K)", () => void this.editLink());
+    tb.icon("message-square-plus", "Add comment (Ctrl+Alt+M)", () => void this.addComment());
     tb.icon("image", "Insert image", () => pickImage((f) => void this.insertImage(f)));
     sep();
     tb.iconSelect("align-left", "Align", ALIGNS.map(([label, a]) => [label, a]), (v) => run(cmd.setAlign(v as Align)));
     tb.iconSelect("unfold-vertical", "Line spacing", LINE_SPACINGS, (v) => run(cmd.setLineSpacing(v)));
     sep();
-    tb.icon("list", "Bulleted list", () => run(cmd.toggleList(ctx, "bullet")));
-    tb.icon("list-ordered", "Numbered list", () => run(cmd.toggleList(ctx, "ordered")));
-    tb.icon("outdent", "Decrease indent / list level (Shift+Tab)", () => run(cmd.shiftLevel(-1)));
-    tb.icon("indent", "Increase indent / list level (Tab)", () => run(cmd.shiftLevel(1)));
+    tb.icon("list", "Bulleted list (Ctrl+Shift+8)", () => run(cmd.toggleList(ctx, "bullet")));
+    tb.icon("list-ordered", "Numbered list (Ctrl+Shift+7)", () => run(cmd.toggleList(ctx, "ordered")));
+    tb.icon("outdent", "Decrease indent (Shift+Tab)", () => run(cmd.shiftLevel(-1)));
+    tb.icon("indent", "Increase indent (Tab)", () => run(cmd.shiftLevel(1)));
     sep();
     this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
     this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
@@ -645,7 +654,9 @@ export class DocxView extends FileView {
       menuItem(mn, "Image", () => pickImage((f) => void this.insertImage(f)));
       subMenu(mn, "Table", (s) => this.fillTableMenu(s));
       menuItem(mn, "Drawing", () => this.drawingDialog(null));
+      subMenu(mn, "Chart", (s) => NEW_CHART_TYPES.forEach(([label, kind]) => menuItem(s, label, () => this.editChart(null, kind))));
       menuItem(mn, "Equation", () => this.equationDialog(null));
+      menuItem(mn, "Special characters", () => specialCharacters(this.app, (ch) => this.editor?.dispatch(this.editor.state.tr.insertText(ch).scrollIntoView())));
       menuItem(mn, "Horizontal line", () => run(cmd.insertRule));
       // As Google Docs' Insert › Break.
       subMenu(mn, "Break", (s) => {
@@ -701,6 +712,7 @@ export class DocxView extends FileView {
       menuItem(mn, "Word count", () => this.wordCountDialog());
       menuItem(mn, "Find and replace", () => this.openFind());
     });
+    tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...DOCS_SHORTCUTS])));
 
     mode.parentElement?.addClass("dw-push");
     const end = tb.end();
@@ -1763,6 +1775,24 @@ export class DocxView extends FileView {
       modal.close();editor.focus();
     });
     const cancel=modal.contentEl.createEl("button",{text:"Cancel"});cancel.addEventListener("click",()=>modal.close());modal.open();
+  }
+
+  /** Insert a chart (`pos` null) or edit the one at `pos`: a native Word chart, with the Slides / Sheets chart editor. */
+  private editChart(pos: number | null, kind: ChartKind = "column"): void {
+    const editor = this.editor, docx = this.docx;
+    if (!editor || !docx) return;
+    const original = pos === null ? null : editor.state.doc.nodeAt(pos);
+    const found = original ? chartAt(docx, original.attrs.xml as string) : null;
+    if (pos !== null && !found) return;
+    chartDialog(this.app, {
+      path: found?.path, data: found?.model.data, format: found?.model.format ?? newChartFormat(kind), palette: chartPalette(docxChartColors(docx)),
+      apply: async (data, format) => {
+        const xml = original && found ? await editedChartRun(docx, original.attrs.xml as string, data, format) : await chartRun(docx, data, format);
+        if (this.editor !== editor || (pos !== null && editor.state.doc.nodeAt(pos) !== original)) throw new Error("The chart changed while this dialog was open. Reopen it to continue.");
+        editor.dispatch(pos === null ? editor.state.tr.replaceSelectionWith(schema.nodes.opaque.create({ xml, text: "" })) : editor.state.tr.setNodeAttribute(pos, "xml", xml));
+        editor.focus();
+      },
+    });
   }
 
   /** Insert an equation (`pos` null) or edit the one at `pos`, typed as LaTeX with a live preview. */

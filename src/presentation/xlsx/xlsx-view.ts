@@ -22,6 +22,8 @@ import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
 import { SaveStatus } from "../common/save-status";
 import { runEditCommand } from "../common/spelling";
+import { specialCharacters } from "../common/special-chars";
+import { COMMON_SHORTCUTS, registerShortcutsKey, SHEETS_SHORTCUTS, shortcutsDialog } from "../common/shortcuts";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
 import { FONTS, menuItem, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems } from "../common/toolbar";
@@ -142,6 +144,7 @@ export class XlsxView extends FileView {
       if (this.grid?.edit) this.grid.commitEdit();
       return [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.nameBox?.parentElement, this.grid?.input, this.tabsEl, this.findEl];
     });
+    registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS]));
     this.scope.register(["Mod"], "f", () => {
       this.openFind();
       return false;
@@ -170,7 +173,6 @@ export class XlsxView extends FileView {
     super.onPaneMenu(menu, source);
     addFileItems(this, menu, source);
     menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
-    menu.addItem((i) => i.setTitle("Download sheet as CSV…").setIcon("file-spreadsheet").setSection("action").onClick(() => void this.exportAs("csv")));
   }
 
   private get wb(): Workbook {
@@ -792,6 +794,21 @@ export class XlsxView extends FileView {
     modal.open();
   }
 
+  /** Special characters: typed into the open cell editor at its caret, else into the active cell after its content. */
+  private typeChar(ch: string): void {
+    const grid = this.grid;
+    if (!grid) return;
+    if (!grid.edit) grid.beginEdit(null, false);
+    const input = grid.input;
+    input.setRangeText(ch, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, "end");
+    input.dispatchEvent(new Event("input"));
+  }
+
+  /** Format › Clear formatting: the selection back to the default style. */
+  private clearFormatting(): void {
+    if (this.grid) this.change(() => this.edits!.restyle(this.sheet, this.grid!.selection(), () => 0));
+  }
+
   /** Insert › Image: the picture at its own size (at most 400 px wide), over the cells at the active cell. */
   private async insertImageFile(file: File): Promise<void> {
     if (!this.grid || !this.edits) return;
@@ -1095,17 +1112,15 @@ export class XlsxView extends FileView {
     // --- The row: everyday controls, as Google Sheets' toolbar ---
     tb.icon("undo-2", "Undo (Ctrl+Z)", () => this.undo());
     tb.icon("redo-2", "Redo (Ctrl+Y)", () => this.redo());
-    const brush = (this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false)));
-    brush.addEventListener("dblclick", () => this.startPainting(true));
     tb.pin();
     tb.gap();
     const zoom = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [`${Math.round(Number(z) * 100)}%`, z]), zoomTo);
     zoom.value = this.savedZoom();
     tb.gap();
-    tb.button("$", "Format as currency", () => this.format({ numFmt: '"$"#,##0.00' }));
-    tb.button("%", "Format as percent", () => this.format({ numFmt: "0%" }));
-    tb.button(".0←", "Decrease decimal places", () => this.decimals(-1));
-    tb.button(".00→", "Increase decimal places", () => this.decimals(1));
+    tb.icon("dollar-sign", "Format as currency", () => this.format({ numFmt: '"$"#,##0.00' }));
+    tb.icon("percent", "Format as percent", () => this.format({ numFmt: "0%" }));
+    tb.icon("decimals-arrow-left", "Decrease decimal places", () => this.decimals(-1));
+    tb.icon("decimals-arrow-right", "Increase decimal places", () => this.decimals(1));
     this.formatSelect = tb.select("Number format", "123", NUMBER_FORMATS, (code) => this.format({ numFmt: code }));
     tb.gap();
     this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (fontName) => this.format({ fontName }));
@@ -1118,8 +1133,11 @@ export class XlsxView extends FileView {
     this.toggles.set("underline", tb.button("U", "Underline (Ctrl+U)", () => this.toggle("underline"), "underline"));
     tb.color("A", "Text color", "#000000", (color) => this.format({ color }));
     tb.gap();
+    tb.icon("link", "Insert link (Ctrl+K)", () => void this.editLink());
+    tb.icon("message-square-plus", "Add comment (Ctrl+Alt+M)", () => this.commentDialog(this.sel.r1, this.sel.c1));
+    tb.gap();
     tb.color("▇", "Fill color", "#FFFF00", (fill) => this.format({ fill }));
-    tb.button("No fill", "Remove fill color", () => this.format({ fill: null }));
+    tb.icon("droplet-off", "Remove fill color", () => this.format({ fill: null }));
     tb.iconSelect("square-dashed", "Borders", [["All borders", "all"], ["Outer borders", "outer"], ["Top", "top"], ["Bottom", "bottom"], ["Left", "left"], ["Right", "right"], ["No borders", "none"]], (v) =>
       this.borders(v as "all")
     );
@@ -1129,8 +1147,10 @@ export class XlsxView extends FileView {
     tb.iconSelect("align-vertical-justify-center", "Vertical align", V_ALIGNS, (v) => this.format({ vAlign: v as "top" }));
     this.toggles.set("wrap", tb.icon("wrap-text", "Wrap text", () => this.toggle("wrap")));
     tb.gap();
-    tb.icon("link", "Insert link (Ctrl+K)", () => void this.editLink());
-    tb.icon("message-square-plus", "Insert comment", () => this.commentDialog(this.sel.r1, this.sel.c1));
+    const brush = (this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false)));
+    brush.addEventListener("dblclick", () => this.startPainting(true));
+    tb.button("Tx", "Clear formatting", () => this.clearFormatting());
+    tb.gap();
     tb.icon("chart-column", "Insert chart", () => this.insertChart());
     tb.icon("filter", "Create or remove a filter", () => this.toggleFilter());
     tb.iconSelect("sigma", "Functions", FUNCTIONS.map((f) => [f, f]), (f) => this.insertFunction(f));
@@ -1143,7 +1163,6 @@ export class XlsxView extends FileView {
       });
     tb.fileMenu(this, (m) => {
       menuItem(m, "Export…", () => void this.exportAs());
-      menuItem(m, "Download sheet as CSV…", () => void this.exportAs("csv"));
     });
     menu("Edit", (m) => {
       menuItem(m, "Undo", () => this.undo());
@@ -1185,6 +1204,7 @@ export class XlsxView extends FileView {
       menuItem(m, "Comment", () => this.commentDialog(this.sel.r1, this.sel.c1));
       menuItem(m, "Note", () => void this.editNote(this.sel.r1, this.sel.c1));
       menuItem(m, "Dropdown", () => this.validationDialog());
+      menuItem(m, "Special characters", () => specialCharacters(this.app, (ch) => this.typeChar(ch)));
     });
     menu("Format", (m) => {
       subMenu(m, "Number", (s) => {
@@ -1203,7 +1223,7 @@ export class XlsxView extends FileView {
       m.addSeparator();
       menuItem(m, "Conditional formatting", () => this.conditionalDialog());
       m.addSeparator();
-      menuItem(m, "Clear formatting", () => this.grid && this.change(() => this.edits!.restyle(this.sheet, this.grid!.selection(), () => 0)));
+      menuItem(m, "Clear formatting", () => this.clearFormatting());
     });
     menu("Data", (m) => {
       const r = this.sel;
@@ -1225,6 +1245,7 @@ export class XlsxView extends FileView {
       menuItem(m, "Paint format", () => this.startPainting(false));
       menuItem(m, "Find and replace", () => this.openFind());
     });
+    menu("Help", (m) => menuItem(m, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS])));
 
     this.saveStatus = tb.end().status;
   }

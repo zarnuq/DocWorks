@@ -21,6 +21,18 @@ async function textBox() {
   return { doc, path, el, model };
 }
 
+describe("bullet colour", () => {
+  it("reads a:buClr; a:buClrTx or none follows the text", () => {
+    const [own, follow, none] = readModel(body(
+      `<a:p><a:pPr><a:buClr><a:srgbClr val="00AA00"/></a:buClr><a:buChar char="•"/></a:pPr><a:r><a:t>x</a:t></a:r></a:p>` +
+      `<a:p><a:pPr><a:buClrTx/><a:buChar char="•"/></a:pPr><a:r><a:t>x</a:t></a:r></a:p>` +
+      `<a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:t>x</a:t></a:r></a:p>`), style);
+    expect(own.bulletColor).toBe("#00AA00");
+    expect(follow.bulletColor).toBeNull();
+    expect(none.bulletColor).toBeNull();
+  });
+});
+
 describe("numbered lists", () => {
   it("reads buAutoNum as a numbering scheme with its start", () => {
     const [p] = readModel(body(`<a:p><a:pPr><a:buAutoNum type="alphaLcParenR" startAt="3"/></a:pPr><a:r><a:t>x</a:t></a:r></a:p>`), style);

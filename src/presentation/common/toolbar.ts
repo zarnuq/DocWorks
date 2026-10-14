@@ -13,12 +13,40 @@ export function showBelow(menu: Menu, anchor: HTMLElement): void {
   menu.showAtPosition(lastAt);
 }
 
+/** Menu bar items' icons, by title, as Google's menus show them. */
+const MENU_ICONS: Record<string, string> = {
+  "Export…": "file-output", Undo: "undo-2", Redo: "redo-2", Cut: "scissors", Copy: "copy", Paste: "clipboard-paste",
+  "Paste without formatting": "clipboard-type", "Paste values only": "clipboard-type", "Select all": "text-select", Delete: "trash-2",
+  "Find and replace": "replace", Editing: "pencil", Suggesting: "file-pen", "Page view": "file-text", Ruler: "ruler",
+  Outline: "list-tree", "Review panel": "messages-square", Zoom: "zoom-in", Light: "sun", Dark: "moon", Present: "play",
+  "Present from start": "presentation", "Grid view": "layout-grid", "Format panel": "panel-right", Freeze: "snowflake",
+  Image: "image", Table: "table", Drawing: "pen-tool", Chart: "chart-column", Equation: "sigma", "Special characters": "omega",
+  "Horizontal line": "minus", Break: "separator-horizontal", Footnote: "superscript", Comment: "message-square-plus", Link: "link",
+  "Table of contents": "book-open-text", "Header & footer": "panel-top", Watermark: "droplet", "Text box": "square-dashed-text",
+  "Audio or video": "film", Shape: "shapes", Field: "braces", "New slide": "square-plus", Sheet: "sheet", "Pivot table": "table-2",
+  Function: "sigma", Note: "sticky-note", Dropdown: "circle-chevron-down", Text: "type", "Paragraph style": "pilcrow",
+  Align: "align-left", "Line spacing": "unfold-vertical", "Paragraph…": "pilcrow", "Columns…": "columns-2", "Bulleted list": "list",
+  "Numbered list": "list-ordered", "Clear formatting": "remove-formatting", "Character spacing": "move-horizontal", Number: "hash",
+  Alignment: "align-left", "Wrap text": "wrap-text", "Merge cells": "table-cells-merge", "Conditional formatting": "palette",
+  "Duplicate slide": "copy", "Copy slide": "copy", "Cut slide": "scissors", "Delete slide": "trash-2", "Hide slide": "eye-off",
+  "Move up": "arrow-up", "Move down": "arrow-down", "Add section here": "between-horizontal-start", "Theme…": "palette", "Motion…": "sparkles",
+  Order: "layers", Distribute: "align-horizontal-space-around", Group: "group", Ungroup: "ungroup", "Paint format": "paintbrush",
+  "Word count": "whole-word", "Sort A → Z": "arrow-down-az", "Sort Z → A": "arrow-down-za", "Create a filter": "filter",
+  "Remove filter": "filter-x", "Data validation": "list-checks", "Remove duplicates…": "list-x", "Split text to columns…": "columns-2",
+  "Named ranges…": "tag", "Import CSV as new sheet…": "file-input", Bold: "bold", Italic: "italic", Underline: "underline",
+  "Keyboard shortcuts": "keyboard", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
+};
+/** Set while a menu bar menu is being built: its items get MENU_ICONS. */
+let menuBarIcons = false;
+const menuIcon = (title: string) => (menuBarIcons ? MENU_ICONS[title] ?? (/^Ungroup /.test(title) ? "ungroup" : /^Group /.test(title) ? "group" : undefined) : undefined);
+
 export function menuItem(m: Menu, title: string, run: () => void, opts: { checked?: boolean; disabled?: boolean; icon?: string } = {}): void {
   m.addItem((i) => {
     i.setTitle(title).onClick(run);
     if (opts.checked !== undefined) i.setChecked(opts.checked);
     if (opts.disabled) i.setDisabled(true);
-    if (opts.icon) i.setIcon(opts.icon);
+    const icon = opts.icon ?? menuIcon(title);
+    if (icon) i.setIcon(icon);
   });
 }
 
@@ -29,6 +57,8 @@ type SubmenuItem = MenuItem & { setSubmenu?: () => Menu };
 export function subMenu(m: Menu, title: string, build: (m: Menu) => void): void {
   m.addItem((i: SubmenuItem) => {
     i.setTitle(title);
+    const icon = menuIcon(title);
+    if (icon) i.setIcon(icon);
     if (typeof i.setSubmenu === "function") return build(i.setSubmenu());
     // FALLBACK(submenu): only for an Obsidian without setSubmenu. To drop it, delete from here to the end of this
     // function, `lastAt` below, its assignment in showBelow and the fallback test in tests/toolbar.test.ts.
@@ -75,20 +105,38 @@ export class Toolbar {
     return b;
   }
 
-  /** A select whose first option is a placeholder; `onChange` only fires for real values. */
+  /**
+   * A dropdown showing its value (Font, Size, Zoom…): a button opening the app's menu with the value ticked. The
+   * options live in a hidden select, which callers get back and set (`value`, `showValue`); the button follows it.
+   */
   select(title: string, placeholder: string, options: [label: string, value: string][], onChange: (value: string) => void): HTMLSelectElement {
-    return fillSelect(this.group.createEl("select", { cls: "dropdown dw-select", attr: { "aria-label": title } }), placeholder, options, onChange);
+    const btn = this.group.createEl("button", { cls: "dw-btn dw-select", attr: { "aria-label": title, "aria-haspopup": "menu" } });
+    const label = btn.createSpan({ cls: "dw-select-label" });
+    btn.createSpan({ cls: "dw-caret", text: "▾" });
+    const select = optionsMenu(btn, fillSelect(btn.createEl("select", { attr: { "aria-label": title } }), placeholder, options, onChange), true);
+    const sync = () => label.setText(select.selectedOptions[0]?.text ?? placeholder);
+    const value = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!;
+    Object.defineProperty(select, "value", {
+      get: () => value.get!.call(select) as string,
+      set: (v: string) => {
+        value.set!.call(select, v);
+        sync();
+      },
+    });
+    select.addEventListener("change", sync);
+    sync();
+    return select;
   }
 
-  /** A select drawn as an icon button; clicking it opens the native menu. */
+  /** An icon button opening a menu of actions, the same kind of menu as the menu bar's (see `select`). */
   iconSelect(icon: string, title: string, options: [label: string, value: string][], onChange: (value: string) => void): HTMLSelectElement {
-    const wrap = this.group.createEl("label", { cls: "dw-btn dw-icon-select", attr: { "aria-label": title } });
-    const glyph = wrap.createSpan();
+    const btn = this.group.createEl("button", { cls: "dw-btn dw-icon-select", attr: { "aria-label": title, "aria-haspopup": "menu" } });
+    const glyph = btn.createSpan();
     setIcon(glyph, icon);
     if (!glyph.querySelector("svg")) glyph.setText(title);
-    wrap.createSpan({ cls: "dw-caret", text: "▾" });
-    // Shown as an icon, so its value is never seen: it's a list of actions, and picking the same one again must work.
-    const select = fillSelect(wrap.createEl("select", { attr: { "aria-label": title } }), title, options, onChange);
+    btn.createSpan({ cls: "dw-caret", text: "▾" });
+    // A list of actions, never showing a value: picking the same one again must work.
+    const select = optionsMenu(btn, fillSelect(btn.createEl("select", { attr: { "aria-label": title } }), title, options, onChange), false);
     select.addEventListener("change", () => (select.value = ""));
     return select;
   }
@@ -124,7 +172,12 @@ export class Toolbar {
     b.addEventListener("click", (e) => {
       if (open?.(e)) return;
       const menu = new Menu();
-      build(menu);
+      menuBarIcons = true;
+      try {
+        build(menu);
+      } finally {
+        menuBarIcons = false;
+      }
       showBelow(menu, b);
     });
     b.addEventListener("keydown", (e) => {
@@ -263,6 +316,24 @@ export function showValue(s: HTMLSelectElement, value: string | null): void {
   const listed = value !== null && Array.from(s.options).some((o) => o.value === value && o.value !== "");
   s.options[0].text = listed || value === null ? (s.dataset.placeholder ?? "") : value;
   s.value = listed ? value : "";
+}
+
+/** `btn` opens the app's menu of `select`'s options (hidden); picking one sets it and fires its change. */
+function optionsMenu(btn: HTMLElement, select: HTMLSelectElement, tick: boolean): HTMLSelectElement {
+  select.hidden = true;
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    const menu = new Menu();
+    for (const o of Array.from(select.options).filter((o) => o.value !== "")) {
+      menuItem(menu, o.text, () => {
+        select.value = o.value;
+        select.dispatchEvent(new Event("change"));
+      }, tick ? { checked: select.value === o.value } : {});
+    }
+    showBelow(menu, btn);
+  });
+  return select;
 }
 
 function fillSelect(s: HTMLSelectElement, placeholder: string, options: [label: string, value: string][], onChange: (value: string) => void): HTMLSelectElement {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Menu } from "./obsidian-stub";
-import { menuItem, subMenu, Toolbar } from "../src/presentation/common/toolbar";
+import { menuItem, showValue, subMenu, Toolbar } from "../src/presentation/common/toolbar";
 
 afterEach(() => document.body.empty());
 const titles = (m: Menu | null) => m!.items.map((i) => i.title);
@@ -228,6 +228,42 @@ describe("review fixes", () => {
     }
     expect(picked).toEqual(["crop", "crop"]);
     expect(s.value).toBe("");
+  });
+
+  it("icon dropdowns open the app's menu (like the menu bar), not the browser's list", () => {
+    const tb = new Toolbar(document.body.createDiv());
+    const picked: string[] = [];
+    const s = tb.iconSelect("align-left", "Align", [["Left", "left"], ["Center", "center"]], (v) => picked.push(v));
+    const btn = s.closest<HTMLElement>(".dw-icon-select")!;
+    expect(btn.tagName).toBe("BUTTON");
+    Menu.last = null;
+    btn.click();
+    expect(Menu.last!.items.map((i) => i.title)).toEqual(["Left", "Center"]);
+    Menu.last!.items[1].run!();
+    expect(picked).toEqual(["center"]);
+  });
+
+  it("value dropdowns (Font, Zoom…) are buttons showing the value that open the app's menu with it ticked", () => {
+    const tb = new Toolbar(document.body.createDiv());
+    const picked: string[] = [];
+    const s = tb.select("Font", "Font", [["Arial", "Arial"], ["Calibri", "Calibri"]], (v) => picked.push(v));
+    const btn = s.closest<HTMLElement>(".dw-select")!;
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn.textContent).toContain("Font");
+    showValue(s, "Calibri");
+    expect(btn.textContent).toContain("Calibri");
+    s.value = "Arial";
+    expect(btn.textContent).toContain("Arial");
+    showValue(s, "Comic Sans");
+    expect(btn.textContent).toContain("Comic Sans");
+    Menu.last = null;
+    btn.click();
+    expect(Menu.last!.items.map((i) => [i.title, !!i.checked])).toEqual([["Arial", false], ["Calibri", false]]);
+    Menu.last!.items[1].run!();
+    expect(picked).toEqual(["Calibri"]);
+    expect(btn.textContent).toContain("Calibri");
+    btn.click();
+    expect(Menu.last!.items[1].checked).toBe(true);
   });
 
   it("refits when the end area changes (e.g. Couldn't save + Retry appears)", async () => {

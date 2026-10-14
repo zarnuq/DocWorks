@@ -740,6 +740,183 @@ describe("DocxView zoom and panels", () => {
     await view.onUnloadFile(file);
   });
 
+  it("puts Paint format just left of Clear formatting in Docs and Slides", async () => {
+    for (const [View, sample] of [[DocxView, "sample.docx"], [PptxView, "sample.pptx"]] as const) {
+      const view = mount(View as any, sample);
+      const file = await open(view, `order.${sample.split(".")[1]}`);
+      const labels = Array.from(view.contentEl.querySelectorAll(".dw-toolbar button")).map((b) => b.getAttribute("aria-label"));
+      expect(labels[labels.indexOf("Clear formatting") - 1]).toBe("Paint format (double-click to keep painting)");
+      await view.onUnloadFile(file);
+    }
+  });
+
+  it("names toolbar buttons as Google does in Docs and Slides, with link and comment right after the colours", async () => {
+    for (const [View, sample] of [[DocxView, "sample.docx"], [PptxView, "sample.pptx"]] as const) {
+      const view = mount(View as any, sample);
+      const file = await open(view, `names.${sample.split(".")[1]}`);
+      const labels = Array.from(view.contentEl.querySelectorAll(".dw-toolbar button, .dw-toolbar label.dw-color")).map((b) => b.getAttribute("aria-label"));
+      for (const l of ["Insert link (Ctrl+K)", "Add comment (Ctrl+Alt+M)", "Insert image", "Bulleted list (Ctrl+Shift+8)", "Numbered list (Ctrl+Shift+7)", "Decrease indent (Shift+Tab)", "Increase indent (Tab)"]) expect(labels, `${sample}: ${l}`).toContain(l);
+      expect(labels.slice(labels.indexOf("Highlight color") + 1, labels.indexOf("Highlight color") + 4)).toEqual(["Insert link (Ctrl+K)", "Add comment (Ctrl+Alt+M)", "Insert image"]);
+      if (View === PptxView) for (const l of ["Insert text box", "Insert a shape or line"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`)!.classList.contains("dw-icon"), l).toBe(true);
+      await view.onUnloadFile(file);
+    }
+  });
+
+  it("Docs: Ctrl+Alt+M adds a comment, Ctrl+Shift+8 / 7 make bulleted / numbered lists", async () => {
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "keys.docx");
+    const v = view as any;
+    const key = (key: string, keyCode: number, extra: KeyboardEventInit) =>
+      v.editor.dom.dispatchEvent(new KeyboardEvent("keydown", { key, keyCode, ctrlKey: true, bubbles: true, cancelable: true, ...extra }));
+    const para = () => v.editor.state.selection.$from.parent;
+    key("*", 56, { shiftKey: true });
+    expect(para().attrs.numId).not.toBeNull();
+    const bullet = para().attrs.numId;
+    key("&", 55, { shiftKey: true });
+    expect(para().attrs.numId).not.toBeNull();
+    expect(para().attrs.numId).not.toBe(bullet);
+    const comment = vi.spyOn(v, "addComment").mockResolvedValue(undefined);
+    key("m", 77, { altKey: true });
+    expect(comment).toHaveBeenCalled();
+    await view.onUnloadFile(file);
+  });
+
+  it("Slides: Ctrl+Alt+M opens the slide's comments", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "keys.pptx");
+    view.contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "m", code: "KeyM", ctrlKey: true, altKey: true, bubbles: true, cancelable: true }));
+    expect(document.querySelector(".test-modal")?.textContent).toContain("Comments on slide 1");
+    await view.onUnloadFile(file);
+  });
+
+  it("Slides zoom lists Fit then 50%–200% like Docs; 100% draws the slide at its real size", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "zoom.pptx");
+    const v = view as any;
+    menuTitles(view, "View");
+    const zoom = Menu.last!.items.find((i) => i.title === "Zoom")!.submenu!.items.map((i) => i.title);
+    expect(zoom).toEqual(["Fit", "50%", "75%", "90%", "100%", "125%", "150%", "200%"]);
+    runMenu(view, "View", "Zoom", "100%");
+    expect(v.scale * v.doc.slideSize.cx).toBeCloseTo(v.doc.slideSize.cx / 9525, 3);
+    runMenu(view, "View", "Zoom", "200%");
+    expect(v.scale * v.doc.slideSize.cx).toBeCloseTo((2 * v.doc.slideSize.cx) / 9525, 3);
+    await view.onUnloadFile(file);
+  });
+
+  it("Insert › Special characters puts the picked character at the cursor (Docs and Slides)", async () => {
+    const docs = mount(DocxView, "sample.docx");
+    const f1 = await open(docs, "chars.docx");
+    const d = docs as any;
+    const { TextSelection } = await import("prosemirror-state");
+    d.editor.dispatch(d.editor.state.tr.setSelection(TextSelection.create(d.editor.state.doc, 1)));
+    runMenu(docs, "Insert", "Special characters");
+    document.querySelector<HTMLButtonElement>('.test-modal .dw-char[aria-label="Section sign"]')!.click();
+    expect(d.editor.state.doc.firstChild.textContent.startsWith("§")).toBe(true);
+    await docs.onUnloadFile(f1);
+    document.querySelectorAll(".test-modal").forEach((m) => m.remove());
+
+    const slides = mount(PptxView, "sample.pptx");
+    const f2 = await open(slides, "chars.pptx");
+    const s = slides as any;
+    const rs = s.rendered.find((r: any) => r.textEl && r.textEl.textContent);
+    s.activeText = rs;
+    const range = document.createRange();
+    range.setStart(rs.textEl.querySelector("span")!.firstChild, 0);
+    range.collapse(true);
+    s.savedRange = range;
+    runMenu(slides, "Insert", "Special characters");
+    document.querySelector<HTMLButtonElement>('.test-modal .dw-char[aria-label="Section sign"]')!.click();
+    expect(s.rendered.find((r: any) => r.shape.el === rs.shape.el).textEl.textContent.startsWith("§")).toBe(true);
+    await slides.onUnloadFile(f2);
+  });
+
+  it("Docs: Insert › Chart adds a native chart drawn on the page; double-click edits it; undo brings the old one back", async () => {
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "chart.docx");
+    const v = view as any;
+    const set = (modal: HTMLElement, label: string, value: string) => {
+      const el = modal.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+      el.value = value;
+      el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input"));
+    };
+    runMenu(view, "Insert", "Chart", "Column");
+    let modal = document.querySelector<HTMLElement>(".test-modal")!;
+    set(modal, "Chart title", "Sales");
+    set(modal, "Series 1, row 1", "42");
+    Array.from(modal.querySelectorAll("button")).find((b) => b.textContent === "Insert chart")!.click();
+    await vi.waitFor(() => expect(v.editor.dom.querySelector(".docx-chart svg")).not.toBeNull());
+    expect(v.editor.dom.querySelector(".docx-chart .chart-title")?.textContent).toBe("Sales");
+    modal.remove();
+    v.editor.dom.querySelector(".docx-chart").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    modal = document.querySelector<HTMLElement>(".test-modal")!;
+    expect(modal.querySelector<HTMLInputElement>('[aria-label="Series 1, row 1"]')!.value).toBe("42");
+    set(modal, "Chart title", "Revenue");
+    Array.from(modal.querySelectorAll("button")).find((b) => b.textContent === "Apply")!.click();
+    await vi.waitFor(() => expect(v.editor.dom.querySelector(".docx-chart .chart-title")?.textContent).toBe("Revenue"));
+    const { undo } = await import("prosemirror-history");
+    undo(v.editor.state, v.editor.dispatch);
+    expect(v.editor.dom.querySelector(".docx-chart .chart-title")?.textContent).toBe("Sales");
+    await view.onUnloadFile(file);
+  });
+
+  it("menu bar items show icons, as Google's menus do (Docs and Slides)", async () => {
+    for (const [View, sample] of [[DocxView, "sample.docx"], [PptxView, "sample.pptx"]] as const) {
+      const view = mount(View as any, sample);
+      const file = await open(view, `icons.${sample.split(".")[1]}`);
+      for (const [menu, title, icon] of [["Edit", "Cut", "scissors"], ["Edit", "Paste", "clipboard-paste"], ["Insert", "Image", "image"], ["Insert", "Comment", "message-square-plus"], ["Format", "Clear formatting", "remove-formatting"], ["Tools", "Find and replace", "replace"]]) {
+        menuTitles(view, menu);
+        expect(Menu.last!.items.find((i) => i.title === title)?.icon, `${sample} ${menu} › ${title}`).toBe(icon);
+      }
+      await view.onUnloadFile(file);
+    }
+  });
+
+  it("Insert › Chart lists Google's chart types (Docs and Slides); the editor opens on the one picked", async () => {
+    for (const [View, sample] of [[DocxView, "sample.docx"], [PptxView, "sample.pptx"]] as const) {
+      const view = mount(View as any, sample);
+      const file = await open(view, `types.${sample.split(".")[1]}`);
+      menuTitles(view, "Insert");
+      expect(Menu.last!.items.find((i) => i.title === "Chart")!.submenu!.items.map((i) => i.title)).toEqual(["Bar", "Column", "Line", "Pie"]);
+      for (const [type, value] of [["Pie", "pie:none"], ["Bar", "bar:none"], ["Line", "line:none"]]) {
+        runMenu(view, "Insert", "Chart", type);
+        const modal = Array.from(document.querySelectorAll<HTMLElement>(".test-modal")).at(-1)!;
+        expect(modal.querySelector<HTMLSelectElement>('[aria-label="Chart type"]')!.value, `${sample} ${type}`).toBe(value);
+        modal.remove();
+      }
+      await view.onUnloadFile(file);
+    }
+  });
+
+  it("Help › Keyboard shortcuts (Ctrl+/) lists the app's shortcuts, searchable (Docs and Slides)", async () => {
+    for (const [View, sample, own] of [[DocxView, "sample.docx", "Page break"], [PptxView, "sample.pptx", "Duplicate"]] as const) {
+      const view = mount(View as any, sample);
+      const file = await open(view, `keys.${sample.split(".")[1]}`);
+      const scope = view.scope as unknown as { keys: { mods: string[]; key: string; fn: () => boolean }[] };
+      expect(scope.keys.some((k) => k.key === "/" && k.mods.join() === "Mod"), sample).toBe(true);
+      runMenu(view, "Help", "Keyboard shortcuts");
+      const modal = Array.from(document.querySelectorAll<HTMLElement>(".test-modal")).at(-1)!;
+      const rows = () => Array.from(modal.querySelectorAll(".dw-shortcut")).map((r) => r.textContent);
+      expect(rows().some((t) => t?.includes(own)), `${sample} ${own}`).toBe(true);
+      expect(rows().some((t) => t?.includes("Undo"))).toBe(true);
+      const search = modal.querySelector<HTMLInputElement>('input[type="search"]')!;
+      search.value = "bold";
+      search.dispatchEvent(new Event("input"));
+      expect(rows().length).toBe(1);
+      expect(rows()[0]).toContain("Ctrl+B");
+      modal.remove();
+      await view.onUnloadFile(file);
+    }
+  });
+
+  it("Slides: Ctrl+K edits the link, as its button says", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    const file = await open(view, "link-key.pptx");
+    const link = vi.spyOn(view as any, "editLink").mockResolvedValue(undefined);
+    view.contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(link).toHaveBeenCalled();
+    await view.onUnloadFile(file);
+  });
+
   it("closes the comments sidebar with its × button", async () => {
     const view = mount(DocxView, "sample.docx");
     const file = await open(view, "review-x.docx");
@@ -844,7 +1021,7 @@ describe("DocxView comment author", () => {
     document.body.appendChild(view.containerEl);
     const file = await open(view, "suggestions.docx");
     const v = view as any;
-    const mode = view.contentEl.querySelector<HTMLSelectElement>('[aria-label="Editing mode"]')!;
+    const mode = view.contentEl.querySelector<HTMLSelectElement>('select[aria-label="Editing mode"]')!;
     expect(mode.value).toBe("editing");
     expect(saved).not.toHaveBeenCalled();
     mode.value = "suggesting";
@@ -957,7 +1134,7 @@ describe("slide authoring additions",()=>{
  });
  it("inserts a formatted chart: stacked bars with a title and no legend, then changes it to a pie",async()=>{
   const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
-  runMenu(view, "Insert", "Chart");
+  runMenu(view, "Insert", "Chart", "Column");
   let modal=document.querySelector<HTMLElement>(".test-modal")!;
   const set=(label:string,value:string|boolean)=>{const el=modal.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;if(typeof value==="boolean")el.checked=value;else el.value=value;el.dispatchEvent(new Event(el.tagName==="SELECT"||el.type==="checkbox"?"change":"input"));};
   set("Chart type","bar:stacked");set("Chart title","Sales");set("Legend","none");set("Data labels",true);
@@ -994,7 +1171,7 @@ describe("slide authoring additions",()=>{
  });
  it("undoes with Ctrl+Z after a dialog closes, when focus is on the page rather than the slide",async()=>{
   const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
-  runMenu(view, "Insert", "Chart");
+  runMenu(view, "Insert", "Chart", "Column");
   const modal=document.querySelector<HTMLElement>(".test-modal")!;
   Array.from(modal.querySelectorAll("button")).find(b=>b.textContent==="Insert chart")!.click();
   await vi.waitFor(()=>expect(v.model.shapes.some((s:any)=>s.chart)).toBe(true));
@@ -1012,7 +1189,7 @@ describe("slide authoring additions",()=>{
  });
  it("inserts an editable chart from its data grid and supports undo",async()=>{
   const view=mount(PptxView,"sample.pptx");const file=await open(view,"authoring.pptx");const v=view as any;
-  runMenu(view, "Insert", "Chart");
+  runMenu(view, "Insert", "Chart", "Column");
   const modal=document.querySelector<HTMLElement>(".test-modal")!;
   const field=modal.querySelector<HTMLInputElement>('input[aria-label="Series 1, row 1"]')!;field.value="42";field.dispatchEvent(new Event("input"));
   Array.from(modal.querySelectorAll("button")).find(b=>b.textContent==="Insert chart")!.click();
@@ -1085,13 +1262,13 @@ describe("PptxView menus", () => {
   it("has Google's menus with every command", async () => {
     const view = mount(PptxView, "sample.pptx");
     const file = await open(view, "menus.pptx");
-    expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Slide", "Arrange", "Tools"]);
+    expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Slide", "Arrange", "Tools", "Help"]);
     expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
     expect(view.contentEl.querySelector('.dw-toolbar [aria-label^="Insert link"]')).not.toBeNull();
     expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "Grid view", "Format panel", "Zoom", "Light", "Dark"]);
-    expect(menuTitles(view, "Insert")).toEqual(["Text box", "Image", "Audio or video", "Shape", "Table", "Chart", "Link", "Field", "Comment", "New slide"]);
-    expect(menuTitles(view, "Format")).toEqual(["Text", "Align", "Line spacing", "Character spacing", "Bullets", "Numbering", "Clear formatting"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Text box", "Image", "Audio or video", "Shape", "Table", "Chart", "Link", "Field", "Special characters", "Comment", "New slide"]);
+    expect(menuTitles(view, "Format")).toEqual(["Text", "Align", "Line spacing", "Character spacing", "Bulleted list", "Numbered list", "Clear formatting"]);
     expect(menuTitles(view, "Arrange")).toEqual(["Order", "Align", "Distribute", "Group", "Ungroup"]);
     const slide = menuTitles(view, "Slide");
     expect(slide).toContain("New slide");
@@ -1420,11 +1597,11 @@ describe("DocxView menus", () => {
   it("has Google's menus with every command", async () => {
     const view = mount(DocxView, "sample.docx");
     const file = await open(view, "menus.docx");
-    expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Tools"]);
+    expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Tools", "Help"]);
     expect(menuTitles(view, "File")).toEqual(["Export…"]);
     expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
     expect(menuTitles(view, "View")).toEqual(["Editing", "Suggesting", "Page view", "Ruler", "Outline", "Review panel", "Zoom", "Light", "Dark"]);
-    expect(menuTitles(view, "Insert")).toEqual(["Image", "Table", "Drawing", "Equation", "Horizontal line", "Break", "Footnote", "Comment", "Link", "Table of contents", "Header & footer", "Watermark"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Image", "Table", "Drawing", "Chart", "Equation", "Special characters", "Horizontal line", "Break", "Footnote", "Comment", "Link", "Table of contents", "Header & footer", "Watermark"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Paragraph style", "Align", "Line spacing", "Paragraph…", "Columns…", "Bulleted list", "Numbered list", "Clear formatting"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Word count", "Find and replace"]);
     await view.onUnloadFile(file);
@@ -1451,7 +1628,7 @@ describe("DocxView menus", () => {
     const view = mount(DocxView, "sample.docx");
     const file = await open(view, "menus.docx");
     const label = (l: string) => view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`);
-    for (const l of ["Undo (Ctrl+Z)", "Paragraph style", "Font", "Font size", "Bold (Ctrl+B)", "Text color", "Highlight color", "Insert image", "Align", "Line spacing", "Bulleted list", "Clear formatting"]) expect(label(l), l).not.toBeNull();
+    for (const l of ["Undo (Ctrl+Z)", "Paragraph style", "Font", "Font size", "Bold (Ctrl+B)", "Text color", "Highlight color", "Insert image", "Align", "Line spacing", "Bulleted list (Ctrl+Shift+8)", "Clear formatting"]) expect(label(l), l).not.toBeNull();
     for (const l of ["Document outline", "Show ruler", "Subscript", "Table", "Find and replace (Ctrl+F)"]) expect(label(l), l).toBeNull();
     expect(view.contentEl.querySelector(".dw-segmented")).toBeNull();
     // The mode select is the right-most group (it folds into ⋮ first); the word count sits with the save status.
@@ -1473,7 +1650,7 @@ describe("DocxView menus", () => {
     expect(group("Cell fill").hidden).toBe(true);
     editor.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 1)));
     expect(group("Crop image").hidden).toBe(false);
-    const wrap = view.contentEl.querySelector<HTMLSelectElement>('.dw-toolbar [aria-label="Text wrapping"]')!;
+    const wrap = view.contentEl.querySelector<HTMLSelectElement>('.dw-toolbar select[aria-label="Text wrapping"]')!;
     wrap.value = "square";
     wrap.dispatchEvent(new Event("change"));
     expect(editor.state.doc.nodeAt(1).attrs.wrap).toBe("square");

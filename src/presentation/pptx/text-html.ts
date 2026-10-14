@@ -111,7 +111,12 @@ export function renderParagraphs(
     // PowerPoint ignores space before the first paragraph of a text box.
     if (para.spcBef && index > 0) p.style.marginTop = `${space(para.spcBef)}px`;
     if (para.spcAft) p.style.marginBottom = `${space(para.spcAft)}px`;
-    if (para.bullet) p.style.setProperty("--pptx-bullet-size", `${(para.runs[0]?.sz ?? size) * pxPerPt}px`);
+    if (para.bullet) {
+      p.style.setProperty("--pptx-bullet-size", `${(para.runs[0]?.sz ?? size) * pxPerPt}px`);
+      // PowerPoint colours a bullet like the paragraph's first run unless it has its own colour.
+      const color = para.bulletColor ?? para.runs[0]?.color ?? null;
+      if (color) p.style.setProperty("--pptx-bullet-color", color);
+    }
     p.dataset.spacing = JSON.stringify({ lnSpc: para.lnSpc ?? null, spcBef: para.spcBef ?? null, spcAft: para.spcAft ?? null });
 
     for (const run of para.runs) {

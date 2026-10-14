@@ -1,10 +1,22 @@
 /** The chart editor's settings (Google's chart editor "Setup" type and "Customize" options), as plain DOM. */
+import { App, Modal } from "obsidian";
 import type { ChartData } from "../../domain/pptx/chart";
 import type { ChartFormat, ChartKind, LegendPos, SeriesKind, Stacking } from "../../domain/pptx/chart-format";
 
 export function defaultChartFormat(): ChartFormat {
   const axis = { title: "", visible: true, gridlines: false, min: null, max: null, reversed: false, format: null };
   return { kind: "column", stacking: "none", title: "", legend: "b", labels: false, colors: [], category: { ...axis }, value: { ...axis, gridlines: true } };
+}
+
+/** Insert › Chart's types, as Google's submenu lists them. */
+export const NEW_CHART_TYPES: [label: string, kind: ChartKind][] = [["Bar", "bar"], ["Column", "column"], ["Line", "line"], ["Pie", "pie"]];
+
+/** A new chart's format of `kind` (a bar chart lists its first category at the top, as Google's). */
+export function newChartFormat(kind: ChartKind): ChartFormat {
+  const f = defaultChartFormat();
+  f.kind = kind;
+  f.category.reversed = kind === "bar";
+  return f;
 }
 
 /** Controls that edit `format` in place; `data` names the series (or slices) for the colour pickers. */
@@ -81,4 +93,57 @@ export function chartFormatForm(host: HTMLElement, format: ChartFormat, data: Ch
   };
   renderColors();
   return { renderColors };
+}
+
+/**
+ * Insert / Edit chart: the chart's options above its data grid (categories × series). `apply` gets copies of the
+ * edited data and format; what it throws shows in the dialog, else the dialog closes. A new chart can add series;
+ * an imported one keeps its series count (its workbook's ranges).
+ */
+export function chartDialog(app: App, opts: { path?: string; data?: ChartData; format?: ChartFormat; palette: string[]; apply: (data: ChartData, format: ChartFormat) => Promise<void> }): void {
+  const data: ChartData = opts.data ? structuredClone(opts.data) : { categories: ["Category 1", "Category 2", "Category 3"], series: [{ name: "Series 1", values: [10, 20, 15] }] };
+  const format: ChartFormat = opts.format ? structuredClone(opts.format) : defaultChartFormat();
+  const modal = new Modal(app);
+  modal.titleEl.setText(opts.path ? "Edit chart" : "Insert chart");
+  const host = modal.contentEl;
+  const form = chartFormatForm(host, format, data, opts.palette);
+  const grid = host.createDiv({ cls: "dw-chart-grid" });
+  const render = () => {
+    grid.replaceChildren();
+    const table = grid.createEl("table");
+    const heading = table.createEl("tr");
+    heading.createEl("th", { text: "Category" });
+    data.series.forEach(s => { const field = heading.createEl("th").createEl("input", { type: "text", value: s.name, attr: { "aria-label": "Series name" } }); field.addEventListener("input", () => { s.name = field.value; }); });
+    data.categories.forEach((name, i) => {
+      const row = table.createEl("tr");
+      const category = row.createEl("td").createEl("input", { type: "text", value: name, attr: { "aria-label": `Category ${i + 1}` } });
+      category.addEventListener("input", () => { data.categories[i] = category.value; });
+      data.series.forEach(s => { const field = row.createEl("td").createEl("input", { type: "number", value: String(s.values[i]), attr: { "aria-label": `${s.name}, row ${i + 1}`, step: "any" } }); field.addEventListener("input", () => { s.values[i] = field.value === "" ? NaN : Number(field.value); }); });
+      const remove = row.createEl("td").createEl("button", { text: "Remove row" });
+      remove.disabled = data.categories.length === 1;
+      remove.addEventListener("click", () => { data.categories.splice(i, 1); data.series.forEach(s => s.values.splice(i, 1)); render(); });
+    });
+    form.renderColors();
+  };
+  render();
+  host.createEl("button", { text: "Add row" }).addEventListener("click", () => { data.categories.push(`Category ${data.categories.length + 1}`); data.series.forEach(s => s.values.push(0)); render(); });
+  if (!opts.path)
+    host.createEl("button", { text: "Add series" }).addEventListener("click", () => { data.series.push({ name: `Series ${data.series.length + 1}`, values: data.categories.map(() => 0) }); render(); });
+  const error = host.createDiv({ cls: "pptx-props-hint" });
+  const apply = host.createEl("button", { text: opts.path ? "Apply" : "Insert chart", cls: "mod-cta" });
+  apply.addEventListener("click", () => {
+    void (async () => {
+      apply.disabled = true;
+      try {
+        await opts.apply(structuredClone(data), structuredClone(format));
+        modal.close();
+      } catch (err) {
+        error.setText((err as Error).message);
+      } finally {
+        apply.disabled = false;
+      }
+    })();
+  });
+  host.createEl("button", { text: "Cancel" }).addEventListener("click", () => modal.close());
+  modal.open();
 }

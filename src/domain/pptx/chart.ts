@@ -2,6 +2,7 @@
 import JSZip from "jszip";
 import { NS, escapeXml } from "../../core/utils/xml";
 import { parseXml, resolvePath } from "../../infrastructure/ooxml/ooxml-package";
+import type { OoxmlPackage } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { nextShapeId } from "./slide-edit";
 import { axesXml, ChartFormat, orderedSeries, readChartFormat, setChartFormat } from "./chart-format";
@@ -52,25 +53,34 @@ export async function chartWorkbook(data: ChartData): Promise<Uint8Array> {
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 const cache = (values: (string | number)[], numeric: boolean) => `<c:${numeric ? "numCache" : "strCache"}>${numeric ? '<c:formatCode>General</c:formatCode>' : ''}<c:ptCount val="${values.length}"/>${values.map((v, i) => `<c:pt idx="${i}"><c:v>${escapeXml(String(v))}</c:v></c:pt>`).join("")}</c:${numeric ? "numCache" : "strCache"}>`;
-/** Add a chart of `type` (c:barChart...) to `slide`, then apply `format` (kind, stacking, title...) on top. */
-export function addChart(doc: PptxDocument, slide: string, data: ChartData, type: string, workbook: Uint8Array, format?: (f: ChartFormat) => void): Element {
+export const CHART_TYPE = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+export const WORKBOOK_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/** A chart part of `type` (c:barChart...) under `dir` ("ppt", "word") with its embedded workbook, then `format` (kind, stacking, title...) on top; returns its path. */
+export function addChartPart(doc: OoxmlPackage, dir: string, data: ChartData, type: string, workbook: Uint8Array, format?: (f: ChartFormat) => void): string {
   validate(data);
   if (!["barChart", "lineChart", "pieChart", "doughnutChart", "areaChart"].includes(type))
     throw new Error("Unsupported chart type");
-  const path = doc.uniquePath("ppt/charts/chart", ".xml");
-  const book = doc.uniquePath("ppt/embeddings/chartData", ".xlsx");
-  doc.putBinary(book, workbook, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  const rid = doc.addSlideRel(path, "package", book);
+  const path = doc.uniquePath(`${dir}/charts/chart`, ".xml");
+  const book = doc.uniquePath(`${dir}/embeddings/chartData`, ".xlsx");
+  doc.putBinary(book, workbook, WORKBOOK_TYPE);
+  const rid = doc.relate(path, "package", book);
   const ser = data.series.map((s, i) => `<c:ser><c:idx val="${i}"/><c:order val="${i}"/><c:tx><c:strRef><c:f>Sheet1!$${col(i + 1)}$1</c:f>${cache([s.name], false)}</c:strRef></c:tx><c:cat><c:strRef><c:f>Sheet1!$A$2:$A$${data.categories.length + 1}</c:f>${cache(data.categories, false)}</c:strRef></c:cat><c:val><c:numRef><c:f>Sheet1!$${col(i + 1)}$2:$${col(i + 1)}$${data.categories.length + 1}</c:f>${cache(s.values, true)}</c:numRef></c:val></c:ser>`).join("");
   const axes = type === "pieChart" || type === "doughnutChart" ? "" : '<c:axId val="1"/><c:axId val="2"/>';
   const axisXml = axes ? axesXml(1, 2) : '';
-  doc.putXml(path, parseXml(`<c:chartSpace xmlns:c="${CHART_NS}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart><c:plotArea><c:layout/><c:${type}>${type === "barChart" ? '<c:barDir val="col"/><c:grouping val="clustered"/>' : type === "lineChart" || type === "areaChart" ? '<c:grouping val="standard"/>' : ''}${ser}${type === "doughnutChart" ? '<c:holeSize val="50"/>' : ''}${axes}</c:${type}>${axisXml}</c:plotArea><c:legend><c:legendPos val="b"/><c:layout/></c:legend><c:plotVisOnly val="1"/></c:chart><c:externalData r:id="${rid}"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`)!, "application/vnd.openxmlformats-officedocument.drawingml.chart+xml");
+  doc.putXml(path, parseXml(`<c:chartSpace xmlns:c="${CHART_NS}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart><c:plotArea><c:layout/><c:${type}>${type === "barChart" ? '<c:barDir val="col"/><c:grouping val="clustered"/>' : type === "lineChart" || type === "areaChart" ? '<c:grouping val="standard"/>' : ''}${ser}${type === "doughnutChart" ? '<c:holeSize val="50"/>' : ''}${axes}</c:${type}>${axisXml}</c:plotArea><c:legend><c:legendPos val="b"/><c:layout/></c:legend><c:plotVisOnly val="1"/></c:chart><c:externalData r:id="${rid}"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`)!, CHART_TYPE);
   if (format) {
     const xml = doc.xml(path)!;
     const f = readChartFormat(xml);
     format(f);
     setChartFormat(xml, f);
   }
+  return path;
+}
+
+/** Add a chart of `type` (c:barChart...) to `slide`, then apply `format` (kind, stacking, title...) on top. */
+export function addChart(doc: PptxDocument, slide: string, data: ChartData, type: string, workbook: Uint8Array, format?: (f: ChartFormat) => void): Element {
+  const path = addChartPart(doc, "ppt", data, type, workbook, format);
   const xml = doc.xml(slide)!;
   const id = nextShapeId(xml);
   const chartRel = doc.addSlideRel(slide, "chart", path);
@@ -81,7 +91,7 @@ export function addChart(doc: PptxDocument, slide: string, data: ChartData, type
   return frame;
 }
 /** Apply values to the original referenced cells, retaining other sheets, styles and workbook parts. */
-export async function prepareChartEdit(doc: PptxDocument, path: string, data: ChartData): Promise<{
+export async function prepareChartEdit(doc: OoxmlPackage, path: string, data: ChartData): Promise<{
   xml: Document;
   workbookPath: string | null;
   workbook: Uint8Array | null;

@@ -1,8 +1,8 @@
 import { addSlideComment, editSlideComment, removeSlideThread, resolveSlideThread, slideComments } from "../../domain/pptx/comments";
 import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from "../../domain/pptx/media";
-import { addChart, ChartData, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
-import { chartPalette, ChartFormat, setChartFormat } from "../../domain/pptx/chart-format";
-import { chartFormatForm, defaultChartFormat } from "../common/chart-form";
+import { addChart, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
+import { ChartKind, chartPalette, setChartFormat } from "../../domain/pptx/chart-format";
+import { chartDialog, NEW_CHART_TYPES, newChartFormat } from "../common/chart-form";
 import { App, Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, ShapeModel, SlideModel, parseSlide, plainText, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
@@ -42,6 +42,8 @@ import { findSlideMatches, SlideSearchMatch, replaceAll, replaceMatch } from "..
 import { showFindPreview } from "../common/find-preview";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
 import { runEditCommand } from "../common/spelling";
+import { specialCharacters } from "../common/special-chars";
+import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
 import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { SaveStatus } from "../common/save-status";
@@ -75,6 +77,7 @@ const CHAR_SPACINGS: [string, string][] = [["Very tight", "-3"], ["Tight", "-1.5
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 72, 96];
 const MIN_SIZE_EMU = 91440;
 const EMU_PER_PT = 12700;
+const EMU_PER_PX = 9525;
 const EMU_PER_INCH = 914400;
 /** Snap distance for connector ends, in px. */
 const SNAP_PX = 10;
@@ -82,7 +85,9 @@ const PROPS_KEY = "doc-works-format-panel";
 /** CSS custom highlights (typed as a map; the DOM lib in use lacks its maplike methods). */
 const highlights = () => CSS.highlights as unknown as Map<string, Highlight>;
 /** Zoom steps; 1 = fit the slide to the stage. */
-const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+/** Zoom steps as Docs: "fit" fits the slide to the pane, a number is that scale of the slide's real size (96 dpi). */
+const ZOOMS = ["fit", "0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
+const zoomLabel = (z: string) => (z === "fit" ? "Fit" : `${Math.round(Number(z) * 100)}%`);
 
 type Snapshot = { snap: PptxSnapshot; index: number; editPart?: string | null };
 
@@ -218,6 +223,17 @@ export class PptxView extends FileView {
       this.openFind();
       return false;
     });
+    // Google's shortcuts for comments and lists, by key position (Shift changes the digit's character).
+    this.contentEl.addEventListener("keydown", (e) => {
+      if (!isMod(e)) return;
+      const run = e.altKey && !e.shiftKey && e.code === "KeyM" ? () => this.commentsDialog()
+        : !e.altKey && !e.shiftKey && e.code === "KeyK" ? () => void this.editLink()
+        : e.shiftKey && !e.altKey && (e.code === "Digit7" || e.code === "Digit8") ? () => this.toggleList(e.code === "Digit7") : null;
+      if (!run) return;
+      e.preventDefault();
+      run();
+    });
+    registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS]));
     // Google's grid view shortcut.
     this.scope.register(["Mod", "Alt"], "1", () => {
       this.setGridView(!this.gridView);
@@ -352,7 +368,7 @@ export class PptxView extends FileView {
       (e) => {
         if (!isMod(e)) return;
         e.preventDefault();
-        this.setZoom(this.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+        this.setZoom(String((this.scale * EMU_PER_PX) * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
       },
       { passive: false }
     );
@@ -780,7 +796,7 @@ export class PptxView extends FileView {
     this.model = parseSlide(this.doc, this.editPart ?? slides[this.index].path);
 
     this.lastStageWidth = this.stageEl.clientWidth;
-    const width = Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400)) * this.zoom;
+    const width = this.zoom === "fit" ? Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400)) : (this.doc.slideSize.cx / EMU_PER_PX) * Number(this.zoom);
     this.scale = width / this.doc.slideSize.cx;
     // The notes box lines up with the slide.
     this.stageEl.setCssProps({ "--pptx-slide-width": `${width}px` });
@@ -1814,6 +1830,11 @@ export class PptxView extends FileView {
     this.withText((rs, el) => applyRunStyle(el, patch, rs.pxPerPt));
   }
 
+  /** Bulleted list / Numbered list: on, or off when the paragraphs already have that kind. */
+  private toggleList(numbered: boolean): void {
+    this.updateParas((p) => ({ ...p, bullet: numbered ? (p.bullet?.startsWith("#") ? null : "#arabicPeriod") : p.bullet && !p.bullet.startsWith("#") ? null : "•" }));
+  }
+
   private updateParas(fn: Parameters<typeof updateParagraphs>[1]): void {
     this.withText((_, el) => updateParagraphs(el, fn), false);
   }
@@ -1869,18 +1890,22 @@ export class PptxView extends FileView {
     this.withText((r, el) => applyRunStyle(el, { link }, r.pxPerPt));
   }
 
+  /** Without a caret in the text box, insert at its end rather than over everything. */
+  private caretOrEnd(): void {
+    const el = (this.activeText ?? this.selected)?.textEl;
+    if (el && !(this.savedRange && el.contains(this.savedRange.commonAncestorContainer))) {
+      const end = document.createRange();
+      end.selectNodeContents(el.lastElementChild ?? el);
+      end.collapse(false);
+      this.savedRange = end;
+    }
+  }
+
   private fillFieldMenu(menu: Menu): void {
     const add = (title: string, type: string, text: () => string) =>
       menu.addItem((i) =>
         i.setTitle(title).onClick(() => {
-          // Without a caret in the box, insert at the end rather than over everything.
-          const el = (this.activeText ?? this.selected)?.textEl;
-          if (el && !(this.savedRange && el.contains(this.savedRange.commonAncestorContainer))) {
-            const end = document.createRange();
-            end.selectNodeContents(el.lastElementChild ?? el);
-            end.collapse(false);
-            this.savedRange = end;
-          }
+          this.caretOrEnd();
           this.withText((_, host) => insertField(host, type, text()), false);
         })
       );
@@ -2251,79 +2276,32 @@ export class PptxView extends FileView {
     modal.open();
   }
 
-  private editChart(path?: string): void {
+  private editChart(path?: string, kind: ChartKind = "column"): void {
     if (!this.doc)
       return;
     const doc = this.doc;
     const slide = this.editPart ?? doc.slides()[this.index].path;
     const model = path ? parseSlide(doc, slide).shapes.find(s => s.chart?.path === path)?.chart : undefined;
-    const imported = model?.data;
-    const data: ChartData = imported ? structuredClone(imported) : { categories: ["Category 1", "Category 2", "Category 3"], series: [{ name: "Series 1", values: [10, 20, 15] }] };
-    if (path && !imported)
+    if (path && !model?.data)
       return;
-    const format: ChartFormat = model?.format ? structuredClone(model.format) : defaultChartFormat();
     const colors = slideColors(doc, slide);
-    const palette = chartPalette(colors);
-    const modal = new Modal(this.app);
-    modal.titleEl.setText(path ? "Edit chart" : "Insert chart");
-    const host = modal.contentEl;
-    const form = chartFormatForm(host, format, data, palette);
-    const renderColors = () => form.renderColors();
-
-    const grid = host.createDiv({ cls: "dw-chart-grid" });
-    const render = () => {
-      grid.replaceChildren();
-      const table = grid.createEl("table");
-      const heading = table.createEl("tr");
-      heading.createEl("th", { text: "Category" });
-      data.series.forEach(s => { const field = heading.createEl("th").createEl("input", { type: "text", value: s.name, attr: { "aria-label": "Series name" } }); field.addEventListener("input", () => { s.name = field.value; }); });
-      data.categories.forEach((name, i) => {
-        const row = table.createEl("tr");
-        const category = row.createEl("td").createEl("input", { type: "text", value: name, attr: { "aria-label": `Category ${i + 1}` } });
-        category.addEventListener("input", () => { data.categories[i] = category.value; });
-        data.series.forEach(s => { const field = row.createEl("td").createEl("input", { type: "number", value: String(s.values[i]), attr: { "aria-label": `${s.name}, row ${i + 1}`, step: "any" } }); field.addEventListener("input", () => { s.values[i] = field.value === "" ? NaN : Number(field.value); }); });
-        const remove = row.createEl("td").createEl("button", { text: "Remove row" });
-        remove.disabled = data.categories.length === 1;
-        remove.addEventListener("click", () => { data.categories.splice(i, 1); data.series.forEach(s => s.values.splice(i, 1)); render(); });
-      });
-      renderColors();
-    };
-    render();
-    host.createEl("button", { text: "Add row" }).addEventListener("click", () => { data.categories.push(`Category ${data.categories.length + 1}`); data.series.forEach(s => s.values.push(0)); render(); });
-    if (!path)
-      host.createEl("button", { text: "Add series" }).addEventListener("click", () => { data.series.push({ name: `Series ${data.series.length + 1}`, values: data.categories.map(() => 0) }); render(); });
-    const error = host.createDiv({ cls: "pptx-props-hint" });
-    const apply = host.createEl("button", { text: path ? "Apply" : "Insert chart", cls: "mod-cta" });
-    apply.addEventListener("click", () => {
-      void (async () => {
-        apply.disabled = true;
-        try {
-          const update = path ? await prepareChartEdit(doc, path, data) : null;
-          if (update) setChartFormat(update.xml, format, colors);
-          const workbook = path ? null : await chartWorkbook(data);
-          if (this.doc !== doc || (this.editPart ?? doc.slides()[this.index].path) !== slide) {
-            error.setText("Return to the slide where this editor was opened.");
-            return;
-          }
-          this.mutate(d => { if (path && update) {
-            d.putXml(path, update.xml);
-            if (update.workbookPath && update.workbook)
-              d.putBinary(update.workbookPath, update.workbook);
-          }
-          else
-            addChart(d, slide, data, "barChart", workbook!, f => Object.assign(f, structuredClone(format))); });
-          modal.close();
+    chartDialog(this.app, {
+      path, data: model?.data, format: model?.format ?? newChartFormat(kind), palette: chartPalette(colors),
+      apply: async (data, format) => {
+        const update = path ? await prepareChartEdit(doc, path, data) : null;
+        if (update) setChartFormat(update.xml, format, colors);
+        const workbook = path ? null : await chartWorkbook(data);
+        if (this.doc !== doc || (this.editPart ?? doc.slides()[this.index].path) !== slide)
+          throw new Error("Return to the slide where this editor was opened.");
+        this.mutate(d => { if (path && update) {
+          d.putXml(path, update.xml);
+          if (update.workbookPath && update.workbook)
+            d.putBinary(update.workbookPath, update.workbook);
         }
-        catch (err) {
-          error.setText((err as Error).message);
-        }
-        finally {
-          apply.disabled = false;
-        }
-      })();
+        else
+          addChart(d, slide, data, "barChart", workbook!, f => Object.assign(f, structuredClone(format))); });
+      },
     });
-    host.createEl("button", { text: "Cancel" }).addEventListener("click", () => modal.close());
-    modal.open();
   }
   private renderThemePanel(): void {
     if (!this.doc)
@@ -2433,7 +2411,7 @@ export class PptxView extends FileView {
   private findInput!: HTMLInputElement;
   private findMatches: SlideSearchMatch[] = [];
   private findIndex = -1;
-  private zoom = 1;
+  private zoom = "fit";
 
   private openFind(): void {
     if (!this.doc) return;
@@ -2583,9 +2561,9 @@ export class PptxView extends FileView {
     }
   }
 
-  private setZoom(zoom: number): void {
-    this.zoom = Math.min(4, Math.max(0.25, zoom));
-    if (this.zoomSelect) this.zoomSelect.value = ZOOMS.some((z) => z === this.zoom) ? String(this.zoom) : "";
+  private setZoom(zoom: string): void {
+    this.zoom = zoom === "fit" ? zoom : String(Math.min(4, Math.max(0.25, Number(zoom))));
+    if (this.zoomSelect) this.zoomSelect.value = ZOOMS.includes(this.zoom) ? this.zoom : "";
     this.renderCurrent();
   }
 
@@ -2601,8 +2579,8 @@ export class PptxView extends FileView {
     const tb = (this.toolbar = new Toolbar(bar));
     const btn = (label: string, title: string, run: () => void, cls = "") => tb.button(label, title, run, cls);
     const sep = () => tb.gap();
-    const bullets = () => this.updateParas((p) => ({ ...p, bullet: p.bullet && !p.bullet.startsWith("#") ? null : "•" }));
-    const numbering = () => this.updateParas((p) => ({ ...p, bullet: p.bullet?.startsWith("#") ? null : "#arabicPeriod" }));
+    const bullets = () => this.toggleList(false);
+    const numbering = () => this.toggleList(true);
     const align = (align: Align) => this.updateParas((p) => ({ ...p, align }));
     const lineSpacing = (v: string) => this.updateParas((p) => ({ ...p, lnSpc: { pct: Number(v) } }));
     const shape = (fn: (spPr: Element) => void) => {
@@ -2615,21 +2593,16 @@ export class PptxView extends FileView {
     };
 
     // --- The row: everyday controls, as Google Slides' toolbar ---
-    btn("↶", "Undo (Ctrl+Z)", () => this.undo());
-    btn("↷", "Redo (Ctrl+Y)", () => this.redo());
-    this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
-    this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
+    tb.icon("undo-2", "Undo (Ctrl+Z)", () => this.undo());
+    tb.icon("redo-2", "Redo (Ctrl+Y)", () => this.redo());
     tb.pin();
     sep();
-    this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [z === 1 ? "Fit" : `${z * 100}%`, String(z)]), (v) => this.setZoom(Number(v)));
-    this.zoomSelect.value = "1";
+    this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [zoomLabel(z), z]), (z) => this.setZoom(z));
+    this.zoomSelect.value = this.zoom;
     sep();
-    btn("Text box", "Insert text box", () => this.addTextBox());
-    tb.icon("image", "Insert image from file", () => pickImage((file) => void this.insertImageFile(file)));
-    const shapesBtn = btn("Shapes ▾", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
+    tb.icon("square-dashed-text", "Insert text box", () => this.addTextBox());
+    const shapesBtn = tb.icon("shapes", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
     tb.icon("table", "Insert table", () => void this.insertTable());
-    tb.icon("link", "Insert link (Ctrl+K)", () => void this.editLink());
-    tb.icon("message-square", "Comments on this slide", () => this.commentsDialog());
     sep();
     this.fontSelect = tb.select("Font", "Font", FONTS.map((f) => [f, f]), (font) => this.setRunStyle({ font }));
     this.sizeSelect = tb.select("Font size", "Size", FONT_SIZES.map((sz) => [`${sz} pt`, String(sz)]), (sz) => this.setRunStyle({ sz: Number(sz) }));
@@ -2641,14 +2614,20 @@ export class PptxView extends FileView {
     tb.color("A", "Text color", "#000000", (color) => this.setRunStyle({ color }));
     tb.color("HL", "Highlight color", "#FFFF00", (highlight) => this.setRunStyle({ highlight }));
     sep();
+    tb.icon("link", "Insert link (Ctrl+K)", () => void this.editLink());
+    tb.icon("message-square-plus", "Add comment (Ctrl+Alt+M)", () => this.commentsDialog());
+    tb.icon("image", "Insert image", () => pickImage((file) => void this.insertImageFile(file)));
+    sep();
     tb.iconSelect("align-left", "Align", ALIGNS.map(([label, a]) => [label, a]), (v) => align(v as Align));
     tb.iconSelect("unfold-vertical", "Line spacing", LINE_SPACINGS.map((v) => [v, v]), lineSpacing);
     sep();
-    tb.icon("list", "Toggle bullets", bullets);
-    tb.icon("list-ordered", "Toggle numbering", numbering);
-    tb.icon("outdent", "Decrease list level (Shift+Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })));
-    tb.icon("indent", "Increase list level (Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })));
+    tb.icon("list", "Bulleted list (Ctrl+Shift+8)", bullets);
+    tb.icon("list-ordered", "Numbered list (Ctrl+Shift+7)", numbering);
+    tb.icon("outdent", "Decrease indent (Shift+Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })));
+    tb.icon("indent", "Increase indent (Tab)", () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })));
     sep();
+    this.brushBtn = tb.icon("paintbrush", "Paint format (double-click to keep painting)", () => this.startPainting(false));
+    this.brushBtn.addEventListener("dblclick", () => this.startPainting(true));
     btn("Tx", "Clear formatting", () => this.clearFormatting());
     // Shape tools, while a shape is selected (Google Slides' fill and border buttons).
     sep();
@@ -2692,7 +2671,7 @@ export class PptxView extends FileView {
       menuItem(mn, "Grid view", () => this.setGridView(!this.gridView), { checked: this.gridView });
       menuItem(mn, "Format panel", () => this.toggleProps(), { checked: this.showProps });
       subMenu(mn, "Zoom", (s) => {
-        for (const z of ZOOMS) menuItem(s, z === 1 ? "Fit" : `${z * 100}%`, () => this.setZoom(z), { checked: this.zoomSelect?.value === String(z) });
+        for (const z of ZOOMS) menuItem(s, zoomLabel(z), () => this.setZoom(z), { checked: this.zoom === z });
       });
       mn.addSeparator();
       menuItem(mn, "Light", () => this.setPaperTheme("light"), { checked: this.paperTheme === "light" });
@@ -2704,9 +2683,13 @@ export class PptxView extends FileView {
       menuItem(mn, "Audio or video", () => this.pickMedia());
       menuItem(mn, "Shape", () => this.toggleGallery(shapesBtn));
       menuItem(mn, "Table", () => void this.insertTable());
-      menuItem(mn, "Chart", () => this.editChart());
+      subMenu(mn, "Chart", (s) => NEW_CHART_TYPES.forEach(([label, kind]) => menuItem(s, label, () => this.editChart(undefined, kind))));
       menuItem(mn, "Link", () => void this.editLink());
       subMenu(mn, "Field", (s) => this.fillFieldMenu(s));
+      menuItem(mn, "Special characters", () => specialCharacters(this.app, (ch) => {
+        this.caretOrEnd();
+        this.withText(() => insertPlainText(ch), false);
+      }));
       menuItem(mn, "Comment", () => this.commentsDialog());
       mn.addSeparator();
       menuItem(mn, "New slide", () => this.mutate((d) => (this.index = d.addSlide(this.index))));
@@ -2730,8 +2713,8 @@ export class PptxView extends FileView {
       subMenu(mn, "Character spacing", (s) => {
         for (const [label, v] of CHAR_SPACINGS) menuItem(s, label, () => this.setRunStyle({ spc: Number(v) }));
       });
-      menuItem(mn, "Bullets", bullets);
-      menuItem(mn, "Numbering", numbering);
+      menuItem(mn, "Bulleted list", bullets);
+      menuItem(mn, "Numbered list", numbering);
       mn.addSeparator();
       menuItem(mn, "Clear formatting", () => this.clearFormatting());
     });
@@ -2760,6 +2743,7 @@ export class PptxView extends FileView {
       menuItem(mn, "Paint format", () => this.startPainting(false));
       menuItem(mn, "Find and replace", () => this.openFind());
     });
+    tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS])));
 
     const end = tb.end();
     this.saveStatus = end.status;

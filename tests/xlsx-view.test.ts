@@ -483,13 +483,14 @@ describe("XlsxView keyboard", () => {
 describe("XlsxView menus", () => {
   it("has Google's menus; the data tools live in Data, not the row", async () => {
     const { view, file } = await mount();
-    expect(Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent)).toEqual(["File", "Edit", "View", "Insert", "Format", "Data", "Tools"]);
-    expect(menuTitles(view, "File")).toEqual(["Export…", "Download sheet as CSV…"]);
-    expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Image", "Chart", "Pivot table", "Function", "Link", "Comment", "Note", "Dropdown"]);
+    expect(Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent)).toEqual(["File", "Edit", "View", "Insert", "Format", "Data", "Tools", "Help"]);
+    expect(menuTitles(view, "File")).toEqual(["Export…"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Image", "Chart", "Pivot table", "Function", "Link", "Comment", "Note", "Dropdown", "Special characters"]);
     expect(menuTitles(view, "Format")).toEqual(["Number", "Text", "Alignment", "Wrap text", "Merge cells", "Conditional formatting", "Clear formatting"]);
     expect(menuTitles(view, "Data")).toEqual(["Sort A → Z", "Sort Z → A", "Create a filter", "Data validation", "Remove duplicates…", "Split text to columns…", "Named ranges…", "Group rows 2 - 2", "Group columns A - A", "Import CSV as new sheet…"]);
     for (const l of ["Data", "Freeze", "Insert pivot table", "Conditional formatting", "Find and replace (Ctrl+F)"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).toBeNull();
-    for (const l of ["Undo (Ctrl+Z)", "Number format", "Font", "Bold (Ctrl+B)", "Fill color", "Borders", "Horizontal align", "Wrap text", "Insert comment", "Insert chart", "Create or remove a filter", "Functions"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).not.toBeNull();
+    for (const l of ["Format as currency", "Format as percent", "Decrease decimal places", "Increase decimal places", "Remove fill color"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`)!.classList.contains("dw-icon"), l).toBe(true);
+    for (const l of ["Undo (Ctrl+Z)", "Number format", "Font", "Bold (Ctrl+B)", "Fill color", "Borders", "Horizontal align", "Wrap text", "Add comment (Ctrl+Alt+M)", "Insert chart", "Create or remove a filter", "Functions"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).not.toBeNull();
     expect(view.contentEl.querySelector(".dw-segmented")).toBeNull();
     await view.onUnloadFile(file);
   });
@@ -525,6 +526,9 @@ describe("XlsxView menus", () => {
     v.grid.select({ row: 1, col: 0 });
     v.toggle("bold");
     const bold = v.sheet.at(1, 0).style;
+    const labels = Array.from(view.contentEl.querySelectorAll(".dw-toolbar button, .dw-toolbar label.dw-color")).map((b) => b.getAttribute("aria-label"));
+    expect(labels.slice(labels.indexOf("Text color") + 1, labels.indexOf("Text color") + 3)).toEqual(["Insert link (Ctrl+K)", "Add comment (Ctrl+Alt+M)"]);
+    expect(labels[labels.indexOf("Clear formatting") - 1]).toBe("Paint format (double-click to keep painting)");
     runMenu(view, "Tools", "Paint format");
     expect(view.contentEl.querySelector('[aria-label^="Paint format"]')!.classList.contains("is-active")).toBe(true);
     v.grid.select({ row: 5, col: 3 }, { row: 6, col: 3 });
@@ -574,6 +578,39 @@ describe("XlsxView menus", () => {
     expect(pics[0]).toMatchObject({ name: "Logo", x: v.sheet.colX(2), y: v.sheet.rowY(3) });
     v.undo();
     expect(v.pictures()).toHaveLength(0);
+    await view.onUnloadFile(file);
+  });
+
+  it("Insert › Special characters types the character into the active cell (or the open editor)", async () => {
+    const { view, file } = await mount();
+    const v = view as any;
+    v.grid.select({ row: 0, col: 0 });
+    runMenu(view, "Insert", "Special characters");
+    document.querySelector<HTMLButtonElement>('.test-modal .dw-char[aria-label="Section sign"]')!.click();
+    expect(v.grid.edit).not.toBeNull();
+    // Focus stays in the dialog: Escape there closes it rather than cancelling the cell edit, and typing searches.
+    expect(document.activeElement?.closest(".test-modal")).not.toBeNull();
+    expect(v.grid.input.value.endsWith("§")).toBe(true);
+    document.querySelectorAll(".test-modal").forEach((m) => m.remove());
+    await view.onUnloadFile(file);
+  });
+
+  it("menu bar items show icons, and other menus (right-click) don't change", async () => {
+    const { view, file } = await mount();
+    for (const [menu, title, icon] of [["Edit", "Copy", "copy"], ["Insert", "Chart", "chart-column"], ["Data", "Create a filter", "filter"], ["Format", "Wrap text", "wrap-text"]]) {
+      menuTitles(view, menu);
+      expect(Menu.last!.items.find((i) => i.title === title)?.icon, `${menu} › ${title}`).toBe(icon);
+    }
+    await view.onUnloadFile(file);
+  });
+
+  it("Help › Keyboard shortcuts lists the sheet's shortcuts", async () => {
+    const { view, file } = await mount();
+    runMenu(view, "Help", "Keyboard shortcuts");
+    const modal = Array.from(document.querySelectorAll<HTMLElement>(".test-modal")).at(-1)!;
+    const text = modal.textContent ?? "";
+    for (const s of ["Fill down", "Ctrl+D", "Insert date", "Edit cell", "F2"]) expect(text).toContain(s);
+    modal.remove();
     await view.onUnloadFile(file);
   });
 

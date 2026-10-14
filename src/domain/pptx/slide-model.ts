@@ -55,6 +55,8 @@ export interface Para {
   lvl: number;
   /** Bullet character, "#scheme[@start]" for automatic numbering (a:buAutoNum), or null for none. */
   bullet: string | null;
+  /** a:buClr; null (or missing) when the bullet takes the first run's colour, as PowerPoint draws it. */
+  bulletColor?: string | null;
   /** EMU */
   marL: number;
   indent: number;
@@ -217,6 +219,7 @@ interface ResolvedLevel {
   marL: number;
   indent: number;
   bullet: string | null;
+  bulletColor: string | null;
   lnSpc: Spacing | null;
   spcBef: Spacing | null;
   spcAft: Spacing | null;
@@ -231,6 +234,7 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
   let marL: number | null = null;
   let indent: number | null = null;
   let bullet: string | null | undefined;
+  let bulletColor: string | null | undefined;
   const spacing: Record<"lnSpc" | "spcBef" | "spcAft", Spacing | null> = { lnSpc: null, spcBef: null, spcAft: null };
   const props: Partial<RunProps> = {};
 
@@ -249,6 +253,10 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
         bullet = `#${auto.getAttribute("type") ?? "arabicPeriod"}${start ? `@${start}` : ""}`;
       }
     }
+    if (bulletColor === undefined) {
+      if (kid(l, NS.a, "buClrTx")) bulletColor = null;
+      else if (kid(l, NS.a, "buClr")) bulletColor = resolveColor(kid(l, NS.a, "buClr"), style.colors);
+    }
     for (const key of ["lnSpc", "spcBef", "spcAft"] as const) spacing[key] ??= readSpacing(kid(l, NS.a, key));
     mergeRunProps(props, kid(l, NS.a, "defRPr"), style);
   });
@@ -259,6 +267,7 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
     marL: marL ?? 0,
     indent: indent ?? 0,
     bullet: bullet ?? null,
+    bulletColor: bulletColor ?? null,
     ...spacing,
     defaults: {
       b: props.b ?? false,

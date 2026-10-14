@@ -63,13 +63,29 @@
 }
 
 /* A native select is as wide as its longest option ("Update 'Heading 1' to match"); cap it so the row fits more. */
+/* Value dropdown (Font, Size, Zoom…): a button with the value and a caret, opening a menu. */
 .dw-toolbar .dw-select {
-  max-width: 8.5em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-1);
+  width: 8.5em;
 }
 
 .dw-toolbar .dw-select[aria-label="Font size"],
 .dw-toolbar .dw-select[aria-label="Zoom"] {
-  max-width: 6.5em;
+  width: 5.5em;
+}
+
+.dw-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-select .dw-caret {
+  font-size: 0.7em;
+  color: var(--text-muted);
 }
 
 .dw-toolbar .dw-btn,
@@ -104,7 +120,7 @@
   cursor: var(--cursor);
 }
 
-/* Icon dropdown: a native select stretched invisibly over an icon. */
+/* Icon dropdown: an icon button opening a menu. */
 .dw-icon-select {
   display: inline-flex;
   align-items: center;
@@ -123,15 +139,6 @@
 .dw-icon-select .dw-caret {
   font-size: 0.7em;
   color: var(--text-muted);
-}
-
-.dw-icon-select select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: var(--cursor);
 }
 
 /* "+" under the last thumbnail adds a slide at the end. */
@@ -696,6 +703,8 @@ img.docx-behind,
 }
 
 .pptx-notes {
+  /* Above the slide's overflow (see below). */
+  position: relative;
   width: 100%;
   white-space: pre-wrap;
   font-size: 13px;
@@ -724,6 +733,12 @@ img.docx-behind,
   color: #000000;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   user-select: none;
+}
+
+/* In the editor, as in PowerPoint and Google Slides, what sticks out past the slide's edge still shows (slideshow,
+   thumbnails and exports cut it at the edge). */
+.pptx-slide-host > .pptx-slide {
+  overflow: visible;
 }
 
 .pptx-shape {
@@ -815,6 +830,7 @@ img.docx-behind,
   display: inline-flex;
   min-width: var(--pptx-bullet-width, 1em);
   font-size: var(--pptx-bullet-size, inherit);
+  color: var(--pptx-bullet-color, inherit);
 }
 
 .pptx-text:not(:focus) p[data-empty]::before {
@@ -2843,4 +2859,58 @@ textarea.pptx-notes {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* Insert › Special characters */
+.dw-chars-bar {
+  display: flex;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.dw-chars-bar input {
+  flex: 1;
+}
+
+.dw-chars {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.5em, 1fr));
+  gap: var(--size-2-1);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.dw-char {
+  height: 2.5em;
+  padding: 0;
+  font-size: 1.2em;
+  box-shadow: none;
+}
+
+.dw-chars-empty {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+
+/* A native Word chart in the document. */
+.docx-chart {
+  display: inline-block;
+  vertical-align: bottom;
+  background: #ffffff;
+  cursor: default;
+}
+
+/* Help › Keyboard shortcuts */
+.dw-shortcuts {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-top: var(--size-4-2);
+}
+
+.dw-shortcut {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--size-4-4);
+  padding: var(--size-2-2) 0;
+  border-bottom: 1px solid var(--background-modifier-border);
 }

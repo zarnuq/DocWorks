@@ -267,6 +267,11 @@ export class OoxmlPackage {
     return parseXml(`<Relationships xmlns="${NS.pkgRels}"/>`)!;
   }
 
+  /** A new relationship from `fromPath` (rels types without a scheme are officeDocument ones); returns its id. */
+  relate(fromPath: string, type: string, targetPath: string): string {
+    return this.addRel(fromPath, type, targetPath);
+  }
+
   protected addRel(fromPath: string, type: string, targetPath: string, external = false): string {
     if (!this.parts.has(relsPathOf(fromPath))) this.parts.set(relsPathOf(fromPath), this.emptyRels());
     const relsDoc = this.parts.get(relsPathOf(fromPath))!;
