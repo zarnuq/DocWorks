@@ -38,9 +38,17 @@ const MENU_ICONS: Record<string, string> = {
 };
 /** Set while a menu bar menu is being built: its items get MENU_ICONS. */
 let menuBarIcons = false;
+
+/** Read-only files: the menus kept, and the items (or whole submenus) in them that only look at the file. */
+const VIEW_MENUS = new Set(["File", "Edit", "View", "Tools", "Help"]);
+const VIEW_ITEMS = new Set(["Export…", "Copy", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts"]);
+/** Set while a read-only file's menu is being built: other items are left out. */
+let viewOnly = false;
+const hidden = (title: string) => viewOnly && !VIEW_ITEMS.has(title);
 const menuIcon = (title: string) => (menuBarIcons ? MENU_ICONS[title] ?? (/^Ungroup /.test(title) ? "ungroup" : /^Group /.test(title) ? "group" : undefined) : undefined);
 
 export function menuItem(m: Menu, title: string, run: () => void, opts: { checked?: boolean; disabled?: boolean; icon?: string } = {}): void {
+  if (hidden(title)) return;
   m.addItem((i) => {
     i.setTitle(title).onClick(run);
     if (opts.checked !== undefined) i.setChecked(opts.checked);
@@ -55,6 +63,18 @@ type SubmenuItem = MenuItem & { setSubmenu?: () => Menu };
 
 /** An item that opens a submenu. */
 export function subMenu(m: Menu, title: string, build: (m: Menu) => void): void {
+  if (hidden(title)) return;
+  // A submenu kept for a read-only file is kept whole (Zoom's levels).
+  const outer = build;
+  build = (sub) => {
+    const was = viewOnly;
+    viewOnly = false;
+    try {
+      outer(sub);
+    } finally {
+      viewOnly = was;
+    }
+  };
   m.addItem((i: SubmenuItem) => {
     i.setTitle(title);
     const icon = menuIcon(title);
@@ -68,6 +88,19 @@ export function subMenu(m: Menu, title: string, build: (m: Menu) => void): void 
       sub.showAtPosition("clientX" in e && e.clientX ? { x: e.clientX, y: e.clientY } : lastAt);
     });
   });
+}
+
+/** Separators only between items: leftovers of removed items (read-only menus) are dropped. */
+function tidySeparators(menu: Menu): void {
+  const addItem = menu.addItem.bind(menu), addSeparator = menu.addSeparator.bind(menu);
+  let pending = false, any = false;
+  menu.addSeparator = () => ((pending = any), menu);
+  menu.addItem = (cb) => {
+    if (pending) addSeparator();
+    pending = false;
+    any = true;
+    return addItem(cb);
+  };
 }
 
 // FALLBACK(submenu): where the last toolbar menu opened, for fallback submenus opened from the keyboard.
@@ -85,7 +118,11 @@ export class Toolbar {
   /** Whether the row is wider than the bar; replaced in tests (jsdom has no layout). */
   overflows = (): boolean => this.el.scrollWidth > this.el.clientWidth;
 
-  constructor(readonly el: HTMLElement) {
+  /** `readOnly`: only the menus and groups (`keep`) that look at the file, never change it. */
+  constructor(
+    readonly el: HTMLElement,
+    readonly readOnly = false
+  ) {
     this.group = el.createDiv({ cls: "dw-group" });
   }
 
@@ -163,6 +200,7 @@ export class Toolbar {
 
   /** A menu in the menu row above the toolbar; `build` runs each time it opens, so items show the current state. */
   menu(name: string, build: (m: Menu) => void, open?: (e: MouseEvent) => boolean): HTMLButtonElement {
+    if (this.readOnly && !VIEW_MENUS.has(name)) return createEl("button");
     if (!this.menubar) {
       this.menubar = createDiv({ cls: "dw-menubar" });
       this.el.parentElement?.insertBefore(this.menubar, this.el);
@@ -172,11 +210,14 @@ export class Toolbar {
     b.addEventListener("click", (e) => {
       if (open?.(e)) return;
       const menu = new Menu();
+      if (this.readOnly) tidySeparators(menu);
       menuBarIcons = true;
+      viewOnly = this.readOnly;
       try {
         build(menu);
       } finally {
         menuBarIcons = false;
+        viewOnly = false;
       }
       showBelow(menu, b);
     });
@@ -191,6 +232,11 @@ export class Toolbar {
   /** Start the next group. */
   gap(): void {
     this.group = this.el.createDiv({ cls: "dw-group" });
+  }
+
+  /** The current group stays on a read-only file's toolbar. */
+  keep(): void {
+    this.group.dataset.view = "true";
   }
 
   /** The current group never folds into ⋮. */
@@ -246,7 +292,7 @@ export class Toolbar {
       .forEach((g, n) => {
         if (n) m.addSeparator();
         for (const el of Array.from(g.children) as HTMLElement[]) {
-          const select = el.matches("select") ? (el as HTMLSelectElement) : el.querySelector("select");
+          const select = (el.matches("select") ? el : el.querySelector("select")) as HTMLSelectElement | null;
           const color = el.querySelector<HTMLInputElement>('input[type="color"]');
           // "Bold (Ctrl+B)" -> "Bold": the hint is for the tooltip.
           const label = (el.getAttribute("aria-label") ?? el.textContent ?? "").replace(/\s*\([^)]*\)$/, "");
@@ -265,8 +311,7 @@ export class Toolbar {
               }
             });
           } else if (el.matches("button")) {
-            const b = el as HTMLButtonElement;
-            menuItem(m, label, () => b.click(), { checked: b.classList.contains("is-active") || undefined, disabled: b.disabled });
+            menuItem(m, label, () => el.click(), { checked: el.classList.contains("is-active") || undefined, disabled: el.hasAttribute("disabled") });
           }
         }
       });
@@ -274,6 +319,12 @@ export class Toolbar {
 
   /** Save status (and whatever the view adds to the returned element) pushed to the end of the bar. */
   end(): { status: SaveStatus; el: HTMLElement } {
+    if (this.readOnly) {
+      for (const g of Array.from(this.el.querySelectorAll<HTMLElement>(":scope > .dw-group")).filter((g) => !g.dataset.view)) {
+        this.tests.delete(g);
+        g.remove();
+      }
+    }
     const more = (this.more = this.el.createEl("button", { cls: "dw-btn dw-icon dw-more", attr: { "aria-label": "More tools" } }));
     setIcon(more, "more-vertical");
     more.hidden = true;
@@ -284,6 +335,7 @@ export class Toolbar {
     });
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => this.fit()).observe(this.el);
     const end = this.el.createDiv({ cls: "dw-end" });
+    if (this.readOnly) end.createSpan({ cls: "dw-status", text: "View only" });
     // The end area grows on its own ("Couldn't save" + Retry, the word count): the bar's size doesn't change, so refit.
     new MutationObserver(() => this.fit()).observe(end, { childList: true, subtree: true, characterData: true });
     // The bar is built: make it (and the menu row) one Tab stop with arrow keys inside.
@@ -292,7 +344,10 @@ export class Toolbar {
       rovingToolbar(this.menubar);
       this.menubar.setAttribute("role", "menubar");
     }
-    return { status: new SaveStatus(end), el: end };
+    const status = new SaveStatus(end);
+    // Nothing is ever saved: no "Saved".
+    if (this.readOnly) end.querySelector<HTMLElement>('[role="status"]')?.hide();
+    return { status, el: end };
   }
 }
 

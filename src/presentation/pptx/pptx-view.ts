@@ -204,6 +204,9 @@ export class PptxView extends FileView {
   private narrowWatch: ReturnType<typeof watchNarrow> | null = null;
   private closeDrawer: (() => void) | null = null;
 
+  /** Counts onLoadFile calls, so an older load still reading the file gives way. */
+  private loads = 0;
+
   constructor(leaf: WorkspaceLeaf, private settings: DocWorksSettings = { ...DEFAULT_SETTINGS }) {
     super(leaf);
     // Shape shortcuts go through a view scope so they win over app hotkeys (Ctrl+G opens the graph otherwise).
@@ -234,6 +237,7 @@ export class PptxView extends FileView {
     ];
     for (const [mods, key, run] of google) {
       this.scope.register(mods, key, () => {
+        if (this.settings.readOnly) return true;
         run();
         return false;
       });
@@ -248,6 +252,7 @@ export class PptxView extends FileView {
     const slideKeys: Record<string, () => void> = { c: () => void this.copySlide(false), x: () => void this.copySlide(true), v: () => void this.pasteSlides() };
     for (const [mods, key, run] of keys) {
       this.scope.register(mods, key, () => {
+        if (this.settings.readOnly && key !== "c" && key !== "a") return true;
         if (mods.length === 1 && slideKeys[key] && this.thumbsEl && document.activeElement === this.thumbsEl) {
           slideKeys[key]();
           return false;
@@ -303,15 +308,22 @@ export class PptxView extends FileView {
   // ---------------------------------------------------------------------------
 
   async onLoadFile(file: TFile): Promise<void> {
+    const load = ++this.loads;
     this.stopFocusReturn?.();
     this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(PptxView) === this, () => this.stageEl?.focus({ preventScroll: true }));
     this.contentEl.empty();
     this.contentEl.addClass("pptx-editor-root");
+    this.contentEl.toggleClass("dw-read-only", this.settings.readOnly);
+    if (this.settings.readOnly) this.showProps = false;
     const status = this.contentEl.createDiv({ cls: "dw-loading", text: "Loading presentation..." });
 
     try {
-      this.doc = await PptxDocument.load(await this.app.vault.readBinary(file));
+      const doc = await PptxDocument.load(await this.app.vault.readBinary(file));
+      // Opened again meanwhile (a setting change while loading): only the newest load draws.
+      if (load !== this.loads) return;
+      this.doc = doc;
       await this.loadMedia();
+      if (load !== this.loads) return;
     } catch (err) {
       status.setText(`Could not open this .pptx file: ${(err as Error).message}`);
       console.error(err);
@@ -343,7 +355,7 @@ export class PptxView extends FileView {
         this.setGridView(false);
         return;
       }
-      if ((e.key !== "Delete" && e.key !== "Backspace") || e.target !== this.thumbsEl || !this.doc) return;
+      if ((e.key !== "Delete" && e.key !== "Backspace") || e.target !== this.thumbsEl || !this.doc || this.settings.readOnly) return;
       e.preventDefault();
       const count = this.doc.slides().length;
       if (count < 2) return;
@@ -384,7 +396,8 @@ export class PptxView extends FileView {
     this.slideHostEl.addEventListener("pointerdown", (e) => this.drawing && this.startDraw(e), { capture: true });
     const notesBox = this.stageEl.createDiv({ cls: "pptx-notes-box" });
     this.notesHighlightEl = notesBox.createDiv({ cls: "pptx-notes-highlight", attr: { "aria-hidden": "true" } });
-    this.notesEl = notesBox.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes", placeholder: "Click to add speaker notes" } });
+    this.notesEl = notesBox.createEl("textarea", { cls: "pptx-notes", attr: { "aria-label": "Speaker notes", placeholder: this.settings.readOnly ? "" : "Click to add speaker notes" } });
+    this.notesEl.readOnly = this.settings.readOnly;
     this.notesEl.addEventListener("input", () => {
       this.clearNotesHighlight();
       if (this.notesTimer) window.clearTimeout(this.notesTimer);
@@ -408,15 +421,15 @@ export class PptxView extends FileView {
     this.stageEl.addEventListener("keydown", this.onStageKey);
     this.stageEl.addEventListener("pointerdown", (e) => {
       const t = e.target as HTMLElement;
-      if (this.drawing || e.button !== 0 || t.closest(".pptx-shape:not(.is-inherited)") || t.closest("textarea, .pptx-props")) return;
+      if (this.settings.readOnly || this.drawing || e.button !== 0 || t.closest(".pptx-shape:not(.is-inherited)") || t.closest("textarea, .pptx-props")) return;
       if (t === this.stageEl || this.slideHostEl.contains(t)) this.startMarquee(e);
     });
-    this.stageEl.addEventListener("contextmenu", (e) => this.contextMenu(e));
-    this.stageEl.addEventListener("paste", this.onPaste);
+    this.stageEl.addEventListener("contextmenu", (e) => !this.settings.readOnly && this.contextMenu(e));
+    this.stageEl.addEventListener("paste", (e) => !this.settings.readOnly && this.onPaste(e));
     this.stageEl.addEventListener("dragover", (e) => e.preventDefault());
     this.stageEl.addEventListener("drop", (e) => {
       const image = Array.from(e.dataTransfer?.files ?? []).find((f) => f.type.startsWith("image/"));
-      if (!image) return;
+      if (!image || this.settings.readOnly) return;
       e.preventDefault();
       void this.insertImageFile(image);
     });
@@ -586,6 +599,7 @@ export class PptxView extends FileView {
     const header = (parent: HTMLElement, k: number) => {
       const h = parent.createDiv({ cls: "pptx-section", text: sections[k].name || "Untitled section" });
       h.addEventListener("click", (e) => e.stopPropagation());
+      if (this.settings.readOnly) return;
       h.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -618,6 +632,7 @@ export class PptxView extends FileView {
         this.setGridView(false);
         this.goTo(i);
       });
+      if (this.settings.readOnly) return;
       item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         this.goTo(i);
@@ -628,6 +643,7 @@ export class PptxView extends FileView {
     // Empty sections at the end have no slide to sit on.
     sections.forEach((sec, k) => sec.start >= slides.length && header(this.thumbsEl, k));
     this.thumbsEl.setAttribute("aria-activedescendant", `${this.thumbsEl.id}-slide-${this.index}`);
+    if (this.settings.readOnly) return;
     const add = this.thumbsEl.createEl("button", { cls: "pptx-thumb-add", attr: { "aria-label": "New slide" } });
     setIcon(add, "plus");
     add.addEventListener("click", () => this.mutate((d) => (this.index = d.addSlide(d.slides().length - 1))));
@@ -805,8 +821,8 @@ export class PptxView extends FileView {
     this.scale = width / this.doc.slideSize.cx;
     // The notes box lines up with the slide.
     this.stageEl.setCssProps({ "--pptx-slide-width": `${width}px` });
-    this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: true, imageUrl: this.imageUrl, slideNumber: this.index + 1 });
-    this.rendered.forEach((rs) => this.wireShape(rs));
+    this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: !this.settings.readOnly, imageUrl: this.imageUrl, slideNumber: this.index + 1 });
+    if (!this.settings.readOnly) this.rendered.forEach((rs) => this.wireShape(rs));
 
     this.notesEl.value = this.doc.notesText(this.index);
     this.clearNotesHighlight();
@@ -1032,6 +1048,8 @@ export class PptxView extends FileView {
    * panel; groups and multi-selections get a selection box and the arrange panel.
    */
   private setSelection(items: Element[], primaryEl: Element | null = null): void {
+    // Nothing on a read-only slide can be selected (moved, deleted, cut).
+    if (this.settings.readOnly) [items, primaryEl] = [[], null];
     this.applySelection(items, primaryEl);
     this.toolbar?.sync();
   }
@@ -2581,7 +2599,7 @@ export class PptxView extends FileView {
     bar.addEventListener("mousedown", (e) => {
       if ((e.target as HTMLElement).closest("button")) e.preventDefault();
     });
-    const tb = (this.toolbar = new Toolbar(bar));
+    const tb = (this.toolbar = new Toolbar(bar, this.settings.readOnly));
     const btn = (label: string, title: string, run: () => void, cls = "") => tb.button(label, title, run, cls);
     const sep = () => tb.gap();
     const bullets = () => this.toggleList(false);
@@ -2604,6 +2622,7 @@ export class PptxView extends FileView {
     sep();
     this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [zoomLabel(z), z]), (z) => this.setZoom(z));
     this.zoomSelect.value = this.zoom;
+    tb.keep();
     sep();
     tb.icon("square-dashed-text", "Insert text box", () => this.addTextBox());
     const shapesBtn = tb.icon("shapes", "Insert a shape or line", () => this.toggleGallery(shapesBtn));
@@ -2821,6 +2840,7 @@ export class PptxView extends FileView {
   // ---------------------------------------------------------------------------
 
   private markDirty(): void {
+    if (this.settings.readOnly) return;
     this.dirty = true;
     this.updateSaveStatus(true);
     if (this.saveTimer) window.clearTimeout(this.saveTimer);

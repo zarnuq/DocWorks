@@ -2,7 +2,7 @@ import { addExportToMenu, addNoteExportToMenu, exportNoteToDocx } from "./presen
 import { exportDocxFile } from "./presentation/common/export-markdown";
 import { registerEmbeds } from "./presentation/common/embeds";
 import { canExportPdf } from "./presentation/common/pdf";
-import { App, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, FileView, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
 import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
 import { PptxView, VIEW_TYPE_PPTX } from "./presentation/pptx/pptx-view";
@@ -146,7 +146,20 @@ export default class DocWorksPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DOCX)) (leaf.view as DocxView).applyPageSize();
+    // Tabs not shown since startup hold a placeholder view until they're opened.
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DOCX)) if (leaf.view instanceof DocxView) leaf.view.applyPageSize();
+  }
+
+  /** Open files again with the current settings (read-only on or off); pending edits are saved first. */
+  async reopenViews(): Promise<void> {
+    for (const type of [VIEW_TYPE_DOCX, VIEW_TYPE_PPTX, VIEW_TYPE_XLSX]) {
+      for (const leaf of this.app.workspace.getLeavesOfType(type)) {
+        const view = leaf.view;
+        if (!(view instanceof FileView) || !view.file) continue;
+        await view.onUnloadFile(view.file);
+        await view.onLoadFile(view.file);
+      }
+    }
   }
 
   /** Create "Untitled.<ext>" (or "Untitled 1"...) in `folder` from a blank template and open it. */
@@ -169,6 +182,8 @@ export default class DocWorksPlugin extends Plugin {
     }
   }
 }
+
+const READ_ONLY = { name: "Read only", desc: "Open documents, presentations and spreadsheets for viewing only: no editing tools, and files are never changed." };
 
 const AUTHOR = { name: "Comment author", desc: "Your name on comments you add to Word documents." };
 
@@ -202,6 +217,7 @@ class DocWorksSettingTab extends PluginSettingTab {
   // Obsidian 1.13+: rendered declaratively and searchable.
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
+      { name: READ_ONLY.name, desc: READ_ONLY.desc, control: { type: "toggle", key: "readOnly", defaultValue: false } },
       { name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } },
       { name: AUTHOR.name, desc: AUTHOR.desc, control: { type: "text", key: "author", defaultValue: "" } },
       { name: PAPER.name, desc: PAPER.desc, control: { type: "dropdown", key: "paper", options: PAPER.options, defaultValue: "default" } },
@@ -214,12 +230,19 @@ class DocWorksSettingTab extends PluginSettingTab {
     if (key === "author") this.plugin.settings.author = typeof value === "string" ? value.trim() : "";
     if (key === "paper" && typeof value === "string" && value in PAPER.options) this.plugin.settings.paper = value as keyof typeof PAPER.options;
     for (const [open] of OPEN) if (key === open) this.plugin.settings[open] = value !== false;
+    const reopen = key === "readOnly" && this.plugin.settings.readOnly !== (value === true);
+    if (key === "readOnly") this.plugin.settings.readOnly = value === true;
     await this.plugin.saveSettings();
+    if (reopen) await this.plugin.reopenViews();
   }
 
   // Older Obsidian versions.
   display(): void {
     this.containerEl.empty();
+    new Setting(this.containerEl)
+      .setName(READ_ONLY.name)
+      .setDesc(READ_ONLY.desc)
+      .addToggle((t) => t.setValue(this.plugin.settings.readOnly).onChange((v) => void this.setControlValue("readOnly", v)));
     new Setting(this.containerEl)
       .setName(PAGE_SIZE.name)
       .setDesc(PAGE_SIZE.desc)

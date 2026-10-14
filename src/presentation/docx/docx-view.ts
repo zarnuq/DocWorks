@@ -221,10 +221,12 @@ export class DocxView extends FileView {
   }
 
   async onLoadFile(file: TFile): Promise<void> {
+    const load = ++this.loads;
     this.stopFocusReturn?.();
     this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(DocxView) === this, () => this.editor?.focus());
     this.contentEl.empty();
     this.contentEl.addClass("dw-root");
+    this.contentEl.toggleClass("dw-read-only", this.settings.readOnly);
     const status = this.contentEl.createDiv({ cls: "dw-loading", text: "Loading document..." });
 
     let docx: DocxDocument;
@@ -238,6 +240,8 @@ export class DocxView extends FileView {
       console.error(err);
       return;
     }
+    // Opened again meanwhile (a setting change while loading): only the newest load draws.
+    if (load !== this.loads) return;
     status.remove();
     this.docx = docx;
 
@@ -248,6 +252,7 @@ export class DocxView extends FileView {
     this.origins = origins;
     this.readAllHF();
     await this.loadWatermark();
+    if (load !== this.loads) return;
 
     const ctx: EditorContext = {
       styles: new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml()),
@@ -283,20 +288,21 @@ export class DocxView extends FileView {
 
     // Double-click a page's header or footer to edit it, as in Word.
     host.addEventListener("dblclick", (e) => {
-      if ((e.target as HTMLElement).closest(".docx-page-first, .docx-page-head, .docx-page-foot")) this.headerFooterDialog();
+      if (!this.settings.readOnly && (e.target as HTMLElement).closest(".docx-page-first, .docx-page-head, .docx-page-foot")) this.headerFooterDialog();
     });
     // Click an equation to edit it, as in Google Docs.
     host.addEventListener("click", (e) => {
       const el = (e.target as HTMLElement).closest(".docx-math")?.parentElement;
       const editor = this.editor;
-      if (!el || !editor || !editor.dom.contains(el)) return;
+      if (!el || !editor || !editor.dom.contains(el) || this.settings.readOnly) return;
       const at = editor.posAtDOM(el, 0);
       const pos = [at, at - 1].find((p) => p >= 0 && cmd.equationAt(editor.state, p) !== null);
       if (pos !== undefined) this.equationDialog(pos);
     });
     this.editor = new EditorView(host, {
       attributes: { role: "textbox", "aria-labelledby": host.createDiv({ cls: "dw-sr-only", text: "Document content", attr: { id: `docx-content-name-${Math.random().toString(36).slice(2)}` } }).id, "aria-multiline": "true" },
-      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true), "Mod-Alt-m": () => (void this.addComment(), true), "Mod-Shift-8": cmd.toggleList(ctx, "bullet"), "Mod-Shift-7": cmd.toggleList(ctx, "ordered") }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize)] }),
+      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true), "Mod-Alt-m": () => (void this.addComment(), true), "Mod-Shift-8": cmd.toggleList(ctx, "bullet"), "Mod-Shift-7": cmd.toggleList(ctx, "ordered") }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize), readOnlyPlugin(() => this.settings.readOnly)] }),
+      editable: () => !this.settings.readOnly,
       nodeViews: {
         image: (node, view, getPos) =>
           new DocxImageView(node, view, getPos, {
@@ -370,7 +376,7 @@ export class DocxView extends FileView {
       },
     });
     // On the editor's element (not a ProseMirror handler): picture node views would stop the event from reaching one.
-    this.editor.dom.addEventListener("contextmenu", (e) => this.contextMenu(e));
+    this.editor.dom.addEventListener("contextmenu", (e) => !this.settings.readOnly && this.contextMenu(e));
 
     this.buildToolbar(toolbar, ctx);
     this.setPaperTheme(paperFor(this.settings, "light"));
@@ -536,6 +542,10 @@ export class DocxView extends FileView {
   // Toolbar
   // ---------------------------------------------------------------------------
 
+  private pageViewBtn: HTMLButtonElement | null = null;
+  /** Counts onLoadFile calls, so an older load still reading the file gives way. */
+  private loads = 0;
+
   private buildToolbar(bar: HTMLElement, ctx: EditorContext): void {
     // Buttons must not steal focus/selection from the editor.
     bar.addEventListener("mousedown", (e) => {
@@ -546,7 +556,7 @@ export class DocxView extends FileView {
       command(this.editor.state, this.editor.dispatch);
       this.editor.focus();
     };
-    const tb = (this.toolbar = new Toolbar(bar));
+    const tb = (this.toolbar = new Toolbar(bar, this.settings.readOnly));
     const action = (label: string, title: string, onClick: () => void, cls = "") => tb.button(label, title, onClick, cls);
     const btn = (label: string, title: string, command: Command, cls = "") => action(label, title, () => run(command), cls);
     const sep = () => tb.gap();
@@ -563,6 +573,9 @@ export class DocxView extends FileView {
     sep();
     this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [zoomLabel(z), z]), (z) => this.setZoom(z));
     this.zoomSelect.value = this.zoom;
+    this.pageViewBtn = tb.icon("file-text", "Page view", () => this.togglePageView());
+    this.pageViewBtn.toggleClass("is-active", this.pageView);
+    tb.keep();
     sep();
     this.styleSelect = tb.select("Paragraph style", "Style", [...STYLES, ["Update style to match", "update"]], (v) => {
       if (v === "update") return this.updateStyle();
@@ -616,7 +629,7 @@ export class DocxView extends FileView {
     const mode = tb.select("Editing mode", "Mode", [["Editing", "editing"], ["Suggesting", "suggesting"]], setMode);
     mode.value = this.suggesting ? "suggesting" : "editing";
     const showRuler = this.app.loadLocalStorage("doc-works-ruler") !== "off";
-    this.rulerViewport?.toggle(showRuler);
+    this.rulerViewport?.toggle(showRuler && !this.settings.readOnly);
 
     // --- The menus: every command ---
     tb.fileMenu(this, (mn) => menuItem(mn, "Export…", () => void this.exportAs()));
@@ -1161,6 +1174,7 @@ export class DocxView extends FileView {
   }
 
   private setReview(open: boolean): void {
+    if (open && this.settings.readOnly) return;
     // Narrow pane: show it as a drawer (a new comment, suggesting mode) without changing the remembered docked state.
     if (this.contentEl.hasClass("is-narrow") && this.reviewEl) {
       if (open && !this.reviewEl.hasClass("is-drawer")) this.drawer(this.reviewEl, () => this.renderReview());
@@ -1850,6 +1864,7 @@ export class DocxView extends FileView {
 
   private setPageView(on: boolean): void {
     this.pageView = on;
+    this.pageViewBtn?.toggleClass("is-active", on);
     this.hostEl?.toggleClass("is-paged", on);
     if (this.editor) {
       refreshSectionWidths(this.editor);
@@ -1949,6 +1964,7 @@ export class DocxView extends FileView {
   // ---------------------------------------------------------------------------
 
   private markDirty(): void {
+    if (this.settings.readOnly) return;
     this.dirty = true;
     this.saveStatus?.saving();
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
@@ -2183,4 +2199,9 @@ function wordAt(state: EditorState, pos: number): { from: number; to: number; te
   if (!word) return null;
   const lead = text.slice(a, b).indexOf(word);
   return { from: start + a + lead, to: start + a + lead + word.length, text: word };
+}
+
+/** Read-only files: transactions that would change the document are dropped (selection, find and decorations still work). */
+function readOnlyPlugin(readOnly: () => boolean): Plugin {
+  return new Plugin({ filterTransaction: (tr) => !tr.docChanged || !readOnly() });
 }

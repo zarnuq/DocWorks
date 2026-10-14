@@ -2914,3 +2914,9 @@ textarea.pptx-notes {
   padding: var(--size-2-2) 0;
   border-bottom: 1px solid var(--background-modifier-border);
 }
+
+/* Read-only files: find without replace, no new sheets. */
+.dw-read-only :is(input[aria-label="Replace with"], button[aria-label^="Replace"]),
+.dw-read-only .xlsx-tab-add {
+  display: none;
+}

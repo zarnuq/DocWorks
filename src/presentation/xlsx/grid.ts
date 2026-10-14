@@ -168,6 +168,9 @@ export class Grid {
   /** Viewport size for environments without layout (tests). */
   fallbackSize = { width: 1000, height: 600 };
 
+  /** A read-only file: cells, pictures and charts can't be edited or moved (the view refuses changes too). */
+  readOnly = false;
+
   constructor(
     parent: HTMLElement,
     private host: GridHost
@@ -970,7 +973,7 @@ export class Grid {
       if (picture) this.focusGrid();
       const key = chartEl!.dataset.chart ?? picture!;
       const ch = picture ? this.host.pictures?.().find((p) => p.key === key) : this.host.charts?.().find((c) => c.key === key);
-      const canMove = picture ? !!this.host.movePicture : !!this.host.moveChart;
+      const canMove = !this.readOnly && (picture ? !!this.host.movePicture : !!this.host.moveChart);
       if (!ch || !canMove) return;
       const resize = !!target.closest(".xlsx-chart-handle");
       const left = Number.parseFloat(chartEl!.style.getPropertyValue("--x")) || 0, top = Number.parseFloat(chartEl!.style.getPropertyValue("--y")) || 0;
@@ -1135,6 +1138,7 @@ export class Grid {
 
   /** Start editing the active cell with `text` (null: its current content). */
   beginEdit(text: string | null, typed: boolean): void {
+    if (this.readOnly) return;
     const s = this.sheet;
     const cell = s.at(this.active.row, this.active.col);
     const value = text ?? editText(cell, s.wb.styles.numFmt(cell?.style ?? 0), s.wb.date1904);

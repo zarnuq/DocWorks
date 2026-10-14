@@ -14,9 +14,11 @@ export interface DocWorksSettings {
   openDocx: boolean;
   openPptx: boolean;
   openXlsx: boolean;
+  /** Open every file as a viewer: no editing controls, nothing is ever saved. */
+  readOnly: boolean;
 }
 
-export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document", author: "", paper: "default", openDocx: true, openPptx: true, openXlsx: true };
+export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document", author: "", paper: "default", openDocx: true, openPptx: true, openXlsx: true, readOnly: false };
 
 /** The theme a view opens with: the setting, or the view's own default. */
 export function paperFor(settings: DocWorksSettings, viewDefault: "light" | "dark"): "light" | "dark" {

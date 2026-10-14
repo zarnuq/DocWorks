@@ -109,6 +109,9 @@ export class XlsxView extends FileView {
   private chartSvgs = new Map<string, { sig: string; el: HTMLElement }>();
   private pictureCache = new Map<string, Picture[]>();
 
+  /** Counts onLoadFile calls, so an older load still reading the file gives way. */
+  private loads = 0;
+
   constructor(leaf: WorkspaceLeaf, private settings: DocWorksSettings = { ...DEFAULT_SETTINGS }) {
     super(leaf);
     // The setting, or (by default) the theme last picked here.
@@ -194,13 +197,18 @@ export class XlsxView extends FileView {
   private brushBtn: HTMLButtonElement | null = null;
 
   async onLoadFile(file: TFile): Promise<void> {
+    const load = ++this.loads;
     this.stopFocusReturn?.();
     this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(XlsxView) === this, () => this.grid?.focusGrid());
     this.contentEl.empty();
     this.contentEl.addClass("dw-root", "xlsx-editor-root");
+    this.contentEl.toggleClass("dw-read-only", this.settings.readOnly);
     const status = this.contentEl.createDiv({ cls: "dw-loading", text: "Loading spreadsheet..." });
     try {
-      this.edits = new Edits(Workbook.open(await XlsxWorkbook.load(await this.app.vault.readBinary(file))));
+      const book = await XlsxWorkbook.load(await this.app.vault.readBinary(file));
+      // Opened again meanwhile (a setting change while loading): only the newest load draws.
+      if (load !== this.loads) return;
+      this.edits = new Edits(Workbook.open(book));
     } catch (err) {
       status.setText(`Could not open this .xlsx file: ${(err as Error).message}`);
       console.error(err);
@@ -251,6 +259,7 @@ export class XlsxView extends FileView {
       deletePicture: (key) => this.change(() => deletePicture(this.edits!, this.sheet, key)),
       toggleGroup: (axis, g) => this.change(() => setGroupCollapsed(this.edits!, this.sheet, axis, g, !g.collapsed)),
     });
+    this.grid.readOnly = this.grid.input.readOnly = this.formulaInput.readOnly = this.settings.readOnly;
     if (this.savedZoom() !== "1") this.grid.setZoom(Number(this.savedZoom()));
     const bottom = this.contentEl.createDiv({ cls: "xlsx-bottom" });
     this.tabsEl = bottom.createDiv({ cls: "xlsx-tabs" });
@@ -347,7 +356,7 @@ export class XlsxView extends FileView {
   }
 
   private change(fn: () => void): boolean {
-    if (!this.edits) return false;
+    if (!this.edits || this.settings.readOnly) return false;
     try {
       fn();
     } catch (err) {
@@ -1104,7 +1113,7 @@ export class XlsxView extends FileView {
     bar.addEventListener("mousedown", (e) => {
       if ((e.target as HTMLElement).closest("button")) e.preventDefault();
     });
-    const tb = new Toolbar(bar);
+    const tb = new Toolbar(bar, this.settings.readOnly);
     const zoomTo = (z: string) => {
       zoom.value = z;
       this.grid?.setZoom(Number(z));
@@ -1118,6 +1127,7 @@ export class XlsxView extends FileView {
     tb.gap();
     const zoom = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [`${Math.round(Number(z) * 100)}%`, z]), zoomTo);
     zoom.value = this.savedZoom();
+    tb.keep();
     tb.gap();
     tb.icon("dollar-sign", "Format as currency", () => this.format({ numFmt: '"$"#,##0.00' }));
     tb.icon("percent", "Format as percent", () => this.format({ numFmt: "0%" }));
@@ -1377,8 +1387,9 @@ export class XlsxView extends FileView {
       if (s.ref.state !== "visible") return;
       const tab = bar.createEl("button", { cls: i === this.sheetIndex ? "xlsx-tab is-active" : "xlsx-tab", text: s.name, attr: { "aria-label": `Sheet ${s.name}`, "aria-current": i === this.sheetIndex ? "true" : "false" } });
       tab.addEventListener("click", () => this.showSheet(i));
-      tab.addEventListener("dblclick", () => void this.renameSheet(i));
+      tab.addEventListener("dblclick", () => !this.settings.readOnly && void this.renameSheet(i));
       tab.addEventListener("contextmenu", (e) => {
+        if (this.settings.readOnly) return;
         e.preventDefault();
         this.sheetMenu(i).showAtMouseEvent(e);
       });
@@ -1469,6 +1480,7 @@ export class XlsxView extends FileView {
   }
 
   private contextMenu(e: MouseEvent, hit: Hit): void {
+    if (this.settings.readOnly) return;
     const ed = this.edits!;
     const r = this.sel;
     const menu = new Menu();
@@ -1853,6 +1865,7 @@ export class XlsxView extends FileView {
   // ---------------------------------------------------------------------------
 
   private markDirty(): void {
+    if (this.settings.readOnly) return;
     this.dirty = true;
     this.saveStatus?.saving();
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
