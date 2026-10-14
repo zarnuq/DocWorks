@@ -40,13 +40,14 @@ import { IMAGE_MIME } from "../../core/utils/images";
 import { pickImage } from "../common/images";
 import { findSlideMatches, SlideSearchMatch, replaceAll, replaceMatch } from "../../domain/pptx/find";
 import { showFindPreview } from "../common/find-preview";
+import { findBar } from "../common/find-bar";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
 import { runEditCommand } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
 import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
-import { SaveStatus } from "../common/save-status";
+import { Autosave } from "../common/autosave";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
 import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
@@ -164,9 +165,19 @@ export class PptxView extends FileView {
   private savedRange: Range | null = null;
   private history = new History<Snapshot>();
   private imageUrls = new Map<string, string>();
-  private dirty = false;
-  private saveTimer: number | null = null;
-  private saving: Promise<void> = Promise.resolve();
+  private autosave = new Autosave({
+    delay: 800,
+    readOnly: () => this.settings.readOnly,
+    canSave: () => !!this.doc && !!this.file,
+    name: () => this.file?.name ?? "",
+    before: () => this.flushCommit(),
+    pending: () => !!this.pendingCommit,
+    write: async () => {
+      const file = this.file!;
+      const bytes = await this.doc!.save();
+      await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    },
+  });
   private commitTimer: number | null = null;
   private pendingCommit: RenderedShape | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -199,7 +210,6 @@ export class PptxView extends FileView {
   private extendingRange = false;
   /** Slide index being dragged in the thumbnail pane. */
   private dragFrom: number | null = null;
-  private saveStatus: SaveStatus | null = null;
   private toolbar: Toolbar | null = null;
   private narrowWatch: ReturnType<typeof watchNarrow> | null = null;
   private closeDrawer: (() => void) | null = null;
@@ -480,12 +490,7 @@ export class PptxView extends FileView {
     // onLoadFile empties contentEl; without this the next file's Ctrl+F and shape gallery see stale elements.
     if (this.findEl) this.closeFind();
     this.closeGallery();
-    this.flushCommit();
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    if (this.dirty) await this.saveNow();
-    await this.saving;
-    // A closed file stops retrying (the save above was its last attempt).
-    this.saveStatus?.destroy();
+    await this.autosave.close();
     this.stopFocusReturn?.();
     this.stopFocusReturn = null;
     for (const url of this.imageUrls.values()) URL.revokeObjectURL(url);
@@ -499,15 +504,10 @@ export class PptxView extends FileView {
 
   /** Force an immediate save, e.g. before Obsidian quits. */
   async requestSave(): Promise<void> {
-    this.flushCommit();
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    if (this.dirty) await this.saveNow();
+    await this.autosave.flush();
   }
 
-  private onWindowBlur = () => {
-    this.flushCommit();
-    if (this.dirty) void this.saveNow();
-  };
+  private onWindowBlur = () => void this.autosave.flush();
 
   private async loadMedia(): Promise<void> {
     for (const path of this.doc!.mediaPaths()) {
@@ -1762,7 +1762,7 @@ export class PptxView extends FileView {
   private scheduleCommit(rs: RenderedShape): void {
     if (this.pendingCommit && this.pendingCommit !== rs) this.flushCommit();
     this.pendingCommit = rs;
-    this.updateSaveStatus(true);
+    this.autosave.status?.saving();
     if (this.commitTimer) window.clearTimeout(this.commitTimer);
     this.commitTimer = window.setTimeout(() => this.flushCommit(), 400);
   }
@@ -1774,7 +1774,7 @@ export class PptxView extends FileView {
     if (!this.doc || this.notesEl.value === this.doc.notesText(this.index)) return;
     this.pushHistory();
     this.doc.setNotes(this.index, this.notesEl.value);
-    this.markDirty();
+    this.autosave.markDirty();
   }
 
   private flushCommit(): void {
@@ -1792,7 +1792,7 @@ export class PptxView extends FileView {
     this.pushHistory();
     writeParagraphs(rs.shape.text, paras ?? readParagraphs(rs.textEl, rs.pxPerPt, this.defaultsFor(rs)));
     this.refreshModel();
-    this.markDirty();
+    this.autosave.markDirty();
     this.refreshThumb(this.index);
   }
 
@@ -2130,7 +2130,7 @@ export class PptxView extends FileView {
       return;
     }
     this.history.push({ snap: before, index, editPart });
-    this.markDirty();
+    this.autosave.markDirty();
     if (scope === "all") this.renderAll();
     else {
       this.renderCurrent();
@@ -2154,7 +2154,7 @@ export class PptxView extends FileView {
     this.doc.restore(target.snap);
     this.index = target.index;
     this.editPart = target.editPart ?? null;
-    this.markDirty();
+    this.autosave.markDirty();
     this.renderAll();
   }
 
@@ -2443,47 +2443,58 @@ export class PptxView extends FileView {
       this.findInput.select();
       return;
     }
-    const bar = (this.findEl = createDiv({ cls: "pptx-find" }));
-    this.contentEl.insertBefore(bar, this.contentEl.querySelector(".pptx-body"));
-    this.findInput = bar.createEl("input", { type: "search", attr: { placeholder: "Find", "aria-label": "Find" } });
-    const replace = bar.createEl("input", { type: "text", attr: { placeholder: "Replace with", "aria-label": "Replace with" } });
-    const caseLabel = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": "Match case" } });
-    const matchCase = caseLabel.createEl("input", { type: "checkbox" });
-    caseLabel.appendText("Aa");
-    const check = (text: string, title: string) => {
-      const label = bar.createEl("label", { cls: "pptx-find-case" });
-      const box = label.createEl("input", { type: "checkbox", attr: { "aria-label": title } });
-      box.checked = true;
-      label.appendText(text);
-      return box;
-    };
-    const notes = check("Notes", "Search speaker notes");
-    const comments = check("Comments", "Search comments");
-    const count = bar.createSpan({ cls: "pptx-find-count" });
-    const preview = bar.createDiv({ cls: "dw-find-preview", attr: { "aria-live": "polite" } });
+    const bar = findBar(this.contentEl, this.contentEl.querySelector(".pptx-body"), {
+      options: [["Aa", "Match case", false], ["Notes", "Search speaker notes", true], ["Comments", "Search comments", true]],
+      replaceTitles: ["Replace this slide-text match", "Replace matching slide text"],
+      changed: () => {
+        refresh();
+        if (this.findMatches[this.findIndex]) show(this.findMatches[this.findIndex]);
+      },
+      step: (dir) => step(dir),
+      replace: () => {
+        refresh(true);
+        const m = this.findMatches[this.findIndex];
+        if (!m || m.kind !== "text") return;
+        this.mutate(() => replaceMatch(m, bar.replaceInput.value), "slide");
+        refresh(true);
+        this.findIndex--;
+        step(1);
+      },
+      replaceAll: () => {
+        let n = 0;
+        this.mutate((d) => (n = replaceAll(d, this.findInput.value, bar.replaceInput.value, opts())));
+        new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
+        refresh();
+      },
+      close: () => this.closeFind(),
+    });
+    this.findEl = bar.el;
+    this.findInput = bar.input;
+    const { preview } = bar;
+    const [matchCase, notes, comments] = bar.options;
     const opts = () => ({ matchCase: matchCase.checked, notes: notes.checked, comments: comments.checked });
     const refresh = (keep = false) => {
       this.findMatches = findSlideMatches(this.doc!, this.findInput.value, opts());
       if (!keep) this.findIndex = this.findMatches.findIndex((m) => m.slide >= this.index);
       if (this.findMatches.length && this.findIndex < 0) this.findIndex = 0;
       this.findIndex = Math.min(this.findIndex, this.findMatches.length - 1);
-      count.setText(this.findInput.value ? (this.findMatches.length ? `${this.findIndex + 1} of ${this.findMatches.length}` : "No results") : "");
+      bar.setCount(this.findInput.value, this.findIndex, this.findMatches.length);
       preview.empty();
       this.clearNotesHighlight();
       if ("highlights" in CSS) highlights().delete("dw-find");
-      replaceButton.disabled = this.findMatches[this.findIndex]?.kind !== "text";
-      replaceAllButton.disabled = !this.findMatches.some(m => m.kind === "text");
+      bar.replaceButton.disabled = this.findMatches[this.findIndex]?.kind !== "text";
+      bar.replaceAllButton.disabled = !this.findMatches.some(m => m.kind === "text");
     };
     const step = (dir: number) => {
       refresh(true);
       if (!this.findMatches.length) return;
       this.findIndex = (this.findIndex + dir + this.findMatches.length) % this.findMatches.length;
-      count.setText(`${this.findIndex + 1} of ${this.findMatches.length}`);
+      bar.setCount(this.findInput.value, this.findIndex, this.findMatches.length);
       show(this.findMatches[this.findIndex]);
     };
     const show = (m: SlideSearchMatch) => {
       this.showMatch(m);
-      replaceButton.disabled = m.kind !== "text";
+      bar.replaceButton.disabled = m.kind !== "text";
       if (m.kind !== "comment") { preview.empty(); return; }
       showFindPreview(preview, `Slide ${m.slide + 1} · ${m.resolved ? "Resolved comment" : "Comment"}${m.author ? ` · ${m.author}` : ""}`, m.text, m.start, m.end,
         "Open comment", () => {
@@ -2491,42 +2502,6 @@ export class PptxView extends FileView {
           this.commentsDialog(m);
         });
     };
-    const button = (text: string, title: string, fn: () => void) => {
-      const b = bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } });
-      b.addEventListener("click", fn);
-      return b;
-    };
-    button("↑", "Previous match (Shift+Enter)", () => step(-1));
-    button("↓", "Next match (Enter)", () => step(1));
-    const replaceButton = button("Replace", "Replace this slide-text match", () => {
-      refresh(true);
-      const m = this.findMatches[this.findIndex];
-      if (!m || m.kind !== "text") return;
-      this.mutate(() => replaceMatch(m, replace.value), "slide");
-      refresh(true);
-      this.findIndex--;
-      step(1);
-    });
-    const replaceAllButton = button("Replace all", "Replace matching slide text", () => {
-      let n = 0;
-      this.mutate((d) => (n = replaceAll(d, this.findInput.value, replace.value, opts())));
-      new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
-      refresh();
-    });
-    button("×", "Close (Esc)", () => this.closeFind());
-    bar.append(preview);
-    this.findInput.addEventListener("input", () => {
-      refresh();
-      if (this.findMatches[this.findIndex]) show(this.findMatches[this.findIndex]);
-    });
-    for (const box of [matchCase, notes, comments]) box.addEventListener("change", () => { refresh(); if (this.findMatches[this.findIndex]) show(this.findMatches[this.findIndex]); });
-    bar.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") this.closeFind();
-      else if (e.key === "Enter" && e.target === this.findInput) {
-        e.preventDefault();
-        step(e.shiftKey ? -1 : 1);
-      }
-    });
     this.flushNotes();
     refresh();
     this.findInput.focus();
@@ -2770,7 +2745,7 @@ export class PptxView extends FileView {
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS])));
 
     const end = tb.end();
-    this.saveStatus = end.status;
+    this.autosave.status = end.status;
     end.el.prepend(present);
     tb.sync();
   }
@@ -2839,39 +2814,7 @@ export class PptxView extends FileView {
   // Saving
   // ---------------------------------------------------------------------------
 
-  private markDirty(): void {
-    if (this.settings.readOnly) return;
-    this.dirty = true;
-    this.updateSaveStatus(true);
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => void this.saveNow(), 800);
-  }
 
-  private saveNow(): Promise<void> {
-    // Serialize saves: JSZip must not be written while a previous save is generating.
-    this.saving = this.saving.then(async () => {
-      if (!this.doc || !this.file) return;
-      this.flushCommit();
-      if (this.saveTimer) window.clearTimeout(this.saveTimer);
-      const file = this.file;
-      try {
-        this.dirty = false;
-        const bytes = await this.doc.save();
-        await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-        this.updateSaveStatus(this.dirty || !!this.pendingCommit);
-      } catch (err) {
-        this.dirty = true;
-        console.error("Failed to save .pptx:", err);
-        this.saveStatus?.failed(err, () => void this.saveNow(), file.name);
-      }
-    });
-    return this.saving;
-  }
-
-  private updateSaveStatus(dirty: boolean): void {
-    if (dirty) this.saveStatus?.saving();
-    else this.saveStatus?.saved();
-  }
 }
 
 /** Characters of `el`'s text before the caret (0 when the caret is elsewhere). */

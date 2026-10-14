@@ -1524,13 +1524,13 @@ describe("save status in documents and slides", () => {
       view.app.vault.modifyBinary = async () => {
         if (fail) throw new Error("read-only file");
       };
-      view.dirty = true;
-      await view.saveNow();
+      view.autosave.dirty = true;
+      await view.requestSave();
       const status = view.contentEl.querySelector(".dw-status-text")!.parentElement as HTMLElement;
       expect(status.textContent).toContain("Couldn't save");
       fail = false;
       status.querySelector("button")!.click();
-      await view.saving;
+      await view.autosave.idle();
       expect(status.textContent).toBe("Saved");
       await view.onUnloadFile(file);
     });

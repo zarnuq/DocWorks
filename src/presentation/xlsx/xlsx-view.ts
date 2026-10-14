@@ -18,9 +18,10 @@ import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
 import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboard";
 import { SheetSearchMatch, findSheetMatches, replaceCells } from "../../domain/xlsx/find";
 import { showFindPreview } from "../common/find-preview";
+import { findBar } from "../common/find-bar";
 import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
-import { SaveStatus } from "../common/save-status";
+import { Autosave } from "../common/autosave";
 import { runEditCommand } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
 import { insertCheckboxes, toggleCheckboxes } from "../../domain/xlsx/checkbox";
@@ -85,7 +86,6 @@ export class XlsxView extends FileView {
   private formulaInput!: HTMLTextAreaElement;
   private tabsEl!: HTMLElement;
   private statusEl!: HTMLElement;
-  private saveStatus: SaveStatus | null = null;
   private fontSelect: HTMLSelectElement | null = null;
   private sizeSelect: HTMLSelectElement | null = null;
   private formatSelect: HTMLSelectElement | null = null;
@@ -93,10 +93,21 @@ export class XlsxView extends FileView {
   private clip: Clip | null = null;
   /** The next paste event (from the menu) pastes values only. */
   private valuesOnly = false;
-  private dirty = false;
-  private saveTimer: number | null = null;
-  private saving: Promise<void> = Promise.resolve();
   private lastWrite = 0;
+  private autosave = new Autosave({
+    delay: 800,
+    readOnly: () => this.settings.readOnly,
+    canSave: () => !!this.edits && !!this.file,
+    name: () => this.file?.name ?? "",
+    write: async () => {
+      const file = this.file!;
+      const bytes = await this.edits!.wb.pkg.save();
+      // Our own write isn't an outside change.
+      this.lastWrite = Date.now();
+      await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+      this.lastWrite = Date.now();
+    },
+  });
   private findEl: HTMLElement | null = null;
   /** Object URLs of images by zip path ("" while loading). */
   private imageUrls = new Map<string, string>();
@@ -285,11 +296,7 @@ export class XlsxView extends FileView {
 
   async onUnloadFile(_file: TFile): Promise<void> {
     if (this.grid?.edit) this.grid.commitEdit();
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    if (this.dirty) await this.saveNow();
-    await this.saving;
-    // A closed file stops retrying (the save above was its last attempt).
-    this.saveStatus?.destroy();
+    await this.autosave.close();
     this.stopFocusReturn?.();
     this.stopFocusReturn = null;
     this.closeFind();
@@ -303,8 +310,7 @@ export class XlsxView extends FileView {
   }
 
   async requestSave(): Promise<void> {
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    if (this.dirty) await this.saveNow();
+    await this.autosave.flush();
   }
 
   onResize(): void {
@@ -314,7 +320,7 @@ export class XlsxView extends FileView {
   /** The file changed outside this view: reload it, unless there are edits it would throw away. */
   private async onExternalChange(): Promise<void> {
     if (!this.file) return;
-    if (this.dirty) {
+    if (this.autosave.dirty) {
       new Notice(`${this.file.name} changed on disk. Your unsaved edits here will replace that version.`);
       return;
     }
@@ -373,7 +379,7 @@ export class XlsxView extends FileView {
     for (const sheet of this.wb.sheets) invalidateValidations(sheet);
     this.grid?.invalidate();
     this.syncSelection();
-    this.markDirty();
+    this.autosave.markDirty();
     return true;
   }
 
@@ -1260,7 +1266,7 @@ export class XlsxView extends FileView {
     });
     menu("Help", (m) => menuItem(m, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS])));
 
-    this.saveStatus = tb.end().status;
+    this.autosave.status = tb.end().status;
   }
 
   private setTheme(theme: PaperTheme): void {
@@ -1667,35 +1673,49 @@ export class XlsxView extends FileView {
       this.findEl.querySelector("input")?.focus();
       return;
     }
-    const bar = (this.findEl = createDiv({ cls: "pptx-find xlsx-find" }));
-    this.contentEl.insertBefore(bar, this.contentEl.querySelector(".xlsx-body"));
-    const input = bar.createEl("input", { type: "search", attr: { placeholder: "Find", "aria-label": "Find" } });
-    const replace = bar.createEl("input", { type: "text", attr: { placeholder: "Replace with", "aria-label": "Replace with" } });
-    const check = (text: string, title: string) => {
-      const label = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": title } });
-      const box = label.createEl("input", { type: "checkbox", attr: { "aria-label": title } });
-      label.appendText(text);
-      return box;
-    };
-    const matchCase = check("Aa", "Match case");
-    const entire = check("Whole cell", "Match entire cell contents");
-    const formulas = check("Formulas", "Also search within formulas");
-    const allSheets = check("All sheets", "Search all sheets");
-    const notes = check("Notes", "Search cell notes");
-    const comments = check("Comments", "Search comments");
-    notes.checked = comments.checked = true;
-    const count = bar.createSpan({ cls: "pptx-find-count" });
-    const preview = bar.createDiv({ cls: "dw-find-preview", attr: { "aria-live": "polite" } });
     let matches: SheetSearchMatch[] = [];
     let index = -1;
+    const bar = findBar(this.contentEl, this.contentEl.querySelector(".xlsx-body"), {
+      options: [["Aa", "Match case", false], ["Whole cell", "Match entire cell contents", false], ["Formulas", "Also search within formulas", false], ["All sheets", "Search all sheets", false], ["Notes", "Search cell notes", true], ["Comments", "Search comments", true]],
+      replaceTitles: ["Replace this cell-content match", "Replace matching cell contents"],
+      changed: (text) => {
+        // New search text starts again from the first match.
+        if (text) index = -1;
+        refresh();
+        if (matches.length) {
+          index = Math.max(index, 0);
+          show(matches[index]);
+        }
+      },
+      step: (dir) => step(dir),
+      replace: () => {
+        refresh();
+        const m = matches[index];
+        if (!m || m.kind !== "cell") return;
+        this.change(() => replaceCells(this.edits!, [m], input.value, bar.replaceInput.value, opts()));
+        step(0);
+      },
+      replaceAll: () => {
+        refresh();
+        let n = 0;
+        this.change(() => (n = replaceCells(this.edits!, matches.filter(m => m.kind === "cell"), input.value, bar.replaceInput.value, opts())));
+        new Notice(`Replaced ${n} ${n === 1 ? "cell" : "cells"}.`);
+        refresh();
+      },
+      close: () => this.closeFind(),
+    });
+    this.findEl = bar.el;
+    bar.el.addClass("xlsx-find");
+    const { input, preview } = bar;
+    const [matchCase, entire, formulas, allSheets, notes, comments] = bar.options;
     const opts = () => ({ matchCase: matchCase.checked, entire: entire.checked, formulas: formulas.checked, notes: notes.checked, comments: comments.checked });
     const refresh = () => {
       matches = findSheetMatches(allSheets.checked ? this.wb.sheets : [this.sheet], input.value, opts());
       index = Math.min(index, matches.length - 1);
-      count.setText(input.value ? (matches.length ? `${Math.max(index, 0) + 1} of ${matches.length}` : "No results") : "");
+      bar.setCount(input.value, Math.max(index, 0), matches.length);
       preview.empty();
-      replaceButton.disabled = matches[Math.max(index, 0)]?.kind !== "cell";
-      replaceAllButton.disabled = !matches.some(m => m.kind === "cell");
+      bar.replaceButton.disabled = matches[Math.max(index, 0)]?.kind !== "cell";
+      bar.replaceAllButton.disabled = !matches.some(m => m.kind === "cell");
     };
     const show = (m: SheetSearchMatch) => {
       const i = this.wb.sheets.indexOf(m.sheet);
@@ -1703,7 +1723,7 @@ export class XlsxView extends FileView {
       this.grid!.select({ row: m.row, col: m.col });
       this.grid!.reveal({ row: m.row, col: m.col });
       input.focus({ preventScroll: true });
-      replaceButton.disabled = m.kind !== "cell";
+      bar.replaceButton.disabled = m.kind !== "cell";
       if (m.kind !== "cell") showFindPreview(preview, `${m.sheet.name}!${cellName(m.row, m.col)} · ${m.kind === "note" ? "Note" : m.resolved ? "Resolved comment" : "Comment"} · ${m.author}`, m.text, m.start, m.end,
         m.kind === "note" ? "Open note" : "Open comment", () => {
           const sheetIndex = this.wb.sheets.indexOf(m.sheet);
@@ -1716,42 +1736,9 @@ export class XlsxView extends FileView {
       refresh();
       if (!matches.length) return;
       index = (index + dir + matches.length) % matches.length;
-      count.setText(`${index + 1} of ${matches.length}`);
+      bar.setCount(input.value, index, matches.length);
       show(matches[index]);
     };
-    const button = (text: string, title: string, fn: () => void) => {
-      const b = bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } });
-      b.addEventListener("click", fn);
-      return b;
-    };
-    button("↑", "Previous match (Shift+Enter)", () => step(-1));
-    button("↓", "Next match (Enter)", () => step(1));
-    const replaceButton = button("Replace", "Replace this cell-content match", () => {
-      refresh();
-      const m = matches[index];
-      if (!m || m.kind !== "cell") return;
-      this.change(() => replaceCells(this.edits!, [m], input.value, replace.value, opts()));
-      step(0);
-    });
-    const replaceAllButton = button("Replace all", "Replace matching cell contents", () => {
-      refresh();
-      let n = 0;
-      this.change(() => (n = replaceCells(this.edits!, matches.filter(m => m.kind === "cell"), input.value, replace.value, opts())));
-      new Notice(`Replaced ${n} ${n === 1 ? "cell" : "cells"}.`);
-      refresh();
-    });
-    button("×", "Close (Esc)", () => this.closeFind());
-    bar.append(preview);
-    input.addEventListener("input", () => {
-      index = -1;
-      refresh();
-      if (matches.length) { index = 0; show(matches[0]); }
-    });
-    for (const box of [matchCase, entire, formulas, allSheets, notes, comments]) box.addEventListener("change", () => { refresh(); if (matches.length) { index = Math.max(index, 0); show(matches[index]); } });
-    bar.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") this.closeFind();
-      else if (e.key === "Enter" && e.target === input) { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
-    });
     refresh();
     input.focus();
   }
@@ -1864,35 +1851,7 @@ export class XlsxView extends FileView {
   // Saving
   // ---------------------------------------------------------------------------
 
-  private markDirty(): void {
-    if (this.settings.readOnly) return;
-    this.dirty = true;
-    this.saveStatus?.saving();
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => void this.saveNow(), 800);
-  }
 
-  private saveNow(): Promise<void> {
-    this.saving = this.saving.then(async () => {
-      if (!this.edits || !this.file) return;
-      if (this.saveTimer) window.clearTimeout(this.saveTimer);
-      const file = this.file;
-      try {
-        this.dirty = false;
-        const bytes = await this.edits.wb.pkg.save();
-        this.lastWrite = Date.now();
-        await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-        this.lastWrite = Date.now();
-        if (this.dirty) this.saveStatus?.saving();
-        else this.saveStatus?.saved();
-      } catch (err) {
-        this.dirty = true;
-        console.error("Failed to save .xlsx:", err);
-        this.saveStatus?.failed(err, () => void this.saveNow(), file.name);
-      }
-    });
-    return this.saving;
-  }
 }
 
 /** Pick one of `files` by fuzzy search. */

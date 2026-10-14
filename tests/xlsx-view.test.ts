@@ -449,12 +449,12 @@ describe("XlsxView save status", () => {
       return write(f, d);
     };
     type("5");
-    await v.saveNow();
+    await v.requestSave();
     const status = view.contentEl.querySelector<HTMLElement>(".dw-status")!;
     expect(status.textContent).toContain("Couldn't save");
     fail = false;
     status.querySelector<HTMLButtonElement>("button")!.click();
-    await v.saving;
+    await v.autosave.idle();
     expect(status.textContent).toBe("Saved");
   });
 });

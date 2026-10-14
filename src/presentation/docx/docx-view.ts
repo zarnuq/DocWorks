@@ -17,7 +17,7 @@ import { Origins, readDocx, startsWordPage } from "../../domain/docx/docx-reader
 import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
-import { SaveStatus } from "../common/save-status";
+import { Autosave } from "../common/autosave";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
 import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems } from "../common/toolbar";
@@ -42,6 +42,7 @@ import { exportDocxToMarkdown, MARKDOWN_FORMAT } from "../common/export-markdown
 import { acceptRevisions, groupRevisions, rejectRevisions, revisions } from "../../domain/docx/revisions";
 import { countWords, findRanges, findCommentMatches, CommentMatch, Range, replaceAllCmd, replaceRangeCmd, setFind } from "./docx-find";
 import { showFindPreview } from "../common/find-preview";
+import { findBar } from "../common/find-bar";
 import { pageSetup, PageSetup, sectionSetups } from "../../domain/docx/pages";
 import { attrsOf, ImageAttrs, ParagraphAttrs } from "../../domain/docx/schema";
 import { DocxImageView, WRAPS } from "./docx-image-view";
@@ -115,10 +116,18 @@ export class DocxView extends FileView {
   private origins: Origins = new Map();
   private editor: EditorView | null = null;
   private pageWidth = 624;
-  private dirty = false;
-  private saveTimer: number | null = null;
-  private saving: Promise<void> = Promise.resolve();
-  private saveStatus: SaveStatus | null = null;
+  private autosave = new Autosave({
+    delay: SAVE_DELAY_MS,
+    readOnly: () => this.settings.readOnly,
+    canSave: () => !!this.editor && !!this.docx && !!this.file,
+    name: () => this.file?.name ?? "",
+    write: async () => {
+      const file = this.file!, docx = this.docx!;
+      writeBody(docx.body, this.editor!.state.doc, this.origins, docx);
+      const bytes = await docx.save();
+      await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    },
+  });
   private toolbar: Toolbar | null = null;
   private wrapSelect: HTMLSelectElement | null = null;
   /** The last cell colour picked, where the custom picker starts. */
@@ -329,7 +338,7 @@ export class DocxView extends FileView {
         const applied = this.editor.state.applyTransaction(tr);
         this.editor.updateState(applied.state);
         const changed = applied.transactions.some(t => t.docChanged);
-        if (changed) this.markDirty();
+        if (changed) this.autosave.markDirty();
         if (changed || tr.selectionSet) {
           this.scheduleWordCount();
           this.updateFormatControls();
@@ -363,7 +372,7 @@ export class DocxView extends FileView {
           return true;
         },
         blur: () => {
-          if (this.dirty) void this.saveNow();
+          void this.autosave.flush();
           return false;
         },
       },
@@ -423,10 +432,7 @@ export class DocxView extends FileView {
     this.closeDrawer?.();
     this.closeFind();
     for (const t of [this.wordsTimer, this.reviewTimer]) if (t) window.clearTimeout(t);
-    await this.requestSave();
-    await this.saving;
-    // A closed file stops retrying (the save above was its last attempt).
-    this.saveStatus?.destroy();
+    await this.autosave.close();
     this.stopFocusReturn?.();
     this.stopFocusReturn = null;
     this.editor?.destroy();
@@ -488,13 +494,10 @@ export class DocxView extends FileView {
 
   /** Force an immediate save, e.g. before Obsidian quits. */
   async requestSave(): Promise<void> {
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    if (this.dirty) await this.saveNow();
+    await this.autosave.flush();
   }
 
-  private onWindowBlur = () => {
-    if (this.dirty) void this.saveNow();
-  };
+  private onWindowBlur = () => void this.autosave.flush();
 
   setPaperTheme(theme: "light" | "dark"): void {
     this.paperTheme = theme;
@@ -729,7 +732,7 @@ export class DocxView extends FileView {
 
     mode.parentElement?.addClass("dw-push");
     const end = tb.end();
-    this.saveStatus = end.status;
+    this.autosave.status = end.status;
     this.wordsEl = createSpan({ cls: "dw-status docx-words" });
     this.wordsEl.hidden = this.app.loadLocalStorage(WORD_COUNT_KEY) === "off";
     end.el.prepend(this.wordsEl);
@@ -1047,7 +1050,7 @@ export class DocxView extends FileView {
     return [
       [c.resolved ? "Reopen" : "Resolve", () => {
         docx.setCommentResolved(c.id, !c.resolved);
-        this.markDirty();
+        this.autosave.markDirty();
         this.renderReview();
       }],
       ["Reply", () => void (async () => {
@@ -1057,13 +1060,13 @@ export class DocxView extends FileView {
         if (!author || this.docx !== docx) return;
         docx.replyToComment(c.id, text.trim(), author);
         docx.setCommentResolved(c.id, false);
-        this.markDirty();
+        this.autosave.markDirty();
         this.renderReview();
       })()],
       ["Delete", () => {
         docx.deleteComment(c.id);
         cmd.removeCommentAnchors(c.id)(editor.state, editor.dispatch);
-        this.markDirty();
+        this.autosave.markDirty();
         this.renderReview();
       }],
     ];
@@ -1199,7 +1202,7 @@ export class DocxView extends FileView {
     const doc = retainOrigins(read.doc, read.origins, this.origins);
     editor.dispatch(closeHistory(editor.state.tr.replaceWith(0, editor.state.doc.content.size, doc.content)
       .setDocAttribute("sectPr", doc.attrs.sectPr).setMeta("suggestionsRecorded", true)));
-    this.markDirty();
+    this.autosave.markDirty();
     this.renderReview();
     repaginate(editor);
   }
@@ -1232,7 +1235,7 @@ export class DocxView extends FileView {
       area.rows = Math.min(6, Math.max(2, text.split("\n").length));
       area.addEventListener("change", () => {
         onText(area.value);
-        this.markDirty();
+        this.autosave.markDirty();
       });
       const row = c.createDiv({ cls: "docx-review-actions" });
       for (const [label, fn] of actions) row.createEl("button", { text: label }).addEventListener("click", fn);
@@ -1268,7 +1271,7 @@ export class DocxView extends FileView {
         card(replies, `${reply.author}${reply.date ? ` · ${new Date(reply.date).toLocaleDateString()}` : ""}`, reply.text,
           text => docx.setCommentText(reply.id, text), [["Delete reply", () => {
             docx.deleteComment(reply.id);
-            this.markDirty();
+            this.autosave.markDirty();
             this.renderReview();
           }]]).dataset.commentId = reply.id;
       }
@@ -1286,7 +1289,7 @@ export class DocxView extends FileView {
           () => {
             cmd.removeFootnoteRef(id)(editor.state, editor.dispatch);
             docx.deleteFootnote(id);
-            this.markDirty();
+            this.autosave.markDirty();
             this.renderReview();
           },
         ],
@@ -1317,7 +1320,7 @@ export class DocxView extends FileView {
       if (where) {
         fn(where.root);
         this.readAllHF();
-        this.markDirty();
+        this.autosave.markDirty();
         this.renderReview();
         if (this.editor) repaginate(this.editor);
       } else this.rewriteBody(fn);
@@ -1353,24 +1356,37 @@ export class DocxView extends FileView {
       return;
     }
     const editor = this.editor;
-    const bar = createDiv({ cls: "pptx-find" });
     // Above the document area: the content element's child that holds the editor (outline, pages, review).
     const body = Array.from(this.contentEl.children).find((c) => this.hostEl && c.contains(this.hostEl)) ?? null;
-    this.contentEl.insertBefore(bar, body);
-    this.findEl = bar;
-    const input = bar.createEl("input", { type: "search", attr: { placeholder: "Find", "aria-label": "Find" } });
-    const replace = bar.createEl("input", { type: "text", attr: { placeholder: "Replace with", "aria-label": "Replace with" } });
-    const caseLabel = bar.createEl("label", { cls: "pptx-find-case", attr: { "aria-label": "Match case" } });
-    const matchCase = caseLabel.createEl("input", { type: "checkbox" });
-    caseLabel.appendText("Aa");
-    const commentsLabel = bar.createEl("label", { cls: "pptx-find-case" });
-    const comments = commentsLabel.createEl("input", { type: "checkbox", attr: { "aria-label": "Search comments" } });
-    comments.checked = true;
-    commentsLabel.appendText("Comments");
-    const count = bar.createSpan({ cls: "pptx-find-count" });
-    const preview = bar.createDiv({ cls: "dw-find-preview", attr: { "aria-live": "polite" } });
     type Result = ({ kind: "text" } & Range) | ({ kind: "comment" } & CommentMatch);
     let matches: Result[] = [], index = -1;
+    const bar = findBar(this.contentEl, body, {
+      options: [["Aa", "Match case", false], ["Comments", "Search comments", true]],
+      replaceTitles: ["Replace this document-text match", "Replace matching document text"],
+      changed: () => show(0),
+      step: (dir) => {
+        refresh();
+        const n = matches.length;
+        if (n) show((index + dir + n) % n);
+      },
+      replace: () => {
+        refresh();
+        const hit = matches[index];
+        if (!hit || hit.kind !== "text") return;
+        replaceRangeCmd(hit, bar.replaceInput.value)(editor.state, editor.dispatch);
+        show(index);
+      },
+      replaceAll: () => {
+        const n = findRanges(editor.state.doc, input.value, matchCase.checked).length;
+        replaceAllCmd(input.value, bar.replaceInput.value, matchCase.checked)(editor.state, editor.dispatch);
+        new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
+        show(0);
+      },
+      close: () => this.closeFind(),
+    });
+    this.findEl = bar.el;
+    const { input, preview } = bar;
+    const [matchCase, comments] = bar.options;
     const refresh = () => {
       matches = [...findRanges(editor.state.doc, input.value, matchCase.checked).map(r => ({ ...r, kind: "text" as const })),
         ...(comments.checked && this.docx ? findCommentMatches(this.docx, input.value, matchCase.checked).map(r => ({ ...r, kind: "comment" as const })) : [])];
@@ -1380,9 +1396,9 @@ export class DocxView extends FileView {
       index = matches.length ? Math.min(Math.max(current, 0), matches.length - 1) : -1;
       const hit = matches[index];
       editor.dispatch(setFind(editor.state.tr, input.value, matchCase.checked, hit?.kind === "text" ? index : -1));
-      count.setText(input.value ? (matches.length ? `${index + 1} of ${matches.length}` : "No results") : "");
-      replaceButton.disabled = hit?.kind !== "text";
-      replaceAllButton.disabled = !matches.some(m => m.kind === "text");
+      bar.setCount(input.value, index, matches.length);
+      bar.replaceButton.disabled = hit?.kind !== "text";
+      bar.replaceAllButton.disabled = !matches.some(m => m.kind === "text");
       preview.empty();
       if (hit?.kind === "text") editor.dom.querySelector(".docx-find-hit.is-current")?.scrollIntoView({ block: "center" });
       else if (hit?.kind === "comment") showFindPreview(preview, `${hit.comment.resolved ? "Resolved comment" : "Comment"} · ${hit.comment.author}`, hit.comment.text, hit.start, hit.end, "Open comment", () => {
@@ -1394,43 +1410,6 @@ export class DocxView extends FileView {
         area?.setSelectionRange(hit.start, hit.end);
       });
     };
-    const step = (dir: number) => {
-      refresh();
-      const n = matches.length;
-      if (n) show((index + dir + n) % n);
-    };
-    const button = (text: string, title: string, fn: () => void) => {
-      const b = bar.createEl("button", { text, cls: "dw-btn", attr: { "aria-label": title } });
-      b.addEventListener("click", fn);
-      return b;
-    };
-    button("↑", "Previous match (Shift+Enter)", () => step(-1));
-    button("↓", "Next match (Enter)", () => step(1));
-    const replaceButton = button("Replace", "Replace this document-text match", () => {
-      refresh();
-      const hit = matches[index];
-      if (!hit || hit.kind !== "text") return;
-      replaceRangeCmd(hit, replace.value)(editor.state, editor.dispatch);
-      show(index);
-    });
-    const replaceAllButton = button("Replace all", "Replace matching document text", () => {
-      const n = findRanges(editor.state.doc, input.value, matchCase.checked).length;
-      replaceAllCmd(input.value, replace.value, matchCase.checked)(editor.state, editor.dispatch);
-      new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
-      show(0);
-    });
-    button("×", "Close (Esc)", () => this.closeFind());
-    bar.append(preview);
-    input.addEventListener("input", () => show(0));
-    matchCase.addEventListener("change", () => show(0));
-    comments.addEventListener("change", () => show(0));
-    bar.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") this.closeFind();
-      else if (e.key === "Enter" && e.target === input) {
-        e.preventDefault();
-        step(e.shiftKey ? -1 : 1);
-      }
-    });
     show(0);
     input.focus();
   }
@@ -1585,7 +1564,7 @@ export class DocxView extends FileView {
     });
     editor.dispatch(tr);
     refreshText(editor);
-    this.markDirty();
+    this.autosave.markDirty();
     this.updateFormatControls();
   }
 
@@ -1614,8 +1593,8 @@ export class DocxView extends FileView {
       });
       if (tr.docChanged) this.editor.dispatch(tr.setMeta("addToHistory", false));
     }
-    this.dirty = true;
-    void this.saveNow();
+    this.autosave.markDirty();
+    void this.autosave.flush();
     if (this.editor) repaginate(this.editor);
     this.renderReview();
   }
@@ -1963,35 +1942,7 @@ export class DocxView extends FileView {
   // Saving
   // ---------------------------------------------------------------------------
 
-  private markDirty(): void {
-    if (this.settings.readOnly) return;
-    this.dirty = true;
-    this.saveStatus?.saving();
-    if (this.saveTimer) window.clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => void this.saveNow(), SAVE_DELAY_MS);
-  }
 
-  private saveNow(): Promise<void> {
-    // Serialize saves: the package must not change while a previous save is zipping.
-    this.saving = this.saving.then(async () => {
-      if (!this.editor || !this.docx || !this.file || !this.dirty) return;
-      const file = this.file;
-      if (this.saveTimer) window.clearTimeout(this.saveTimer);
-      this.dirty = false;
-      try {
-        writeBody(this.docx.body, this.editor.state.doc, this.origins, this.docx);
-        const bytes = await this.docx.save();
-        await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-        if (this.dirty) this.saveStatus?.saving();
-        else this.saveStatus?.saved();
-      } catch (err) {
-        this.dirty = true;
-        console.error("Failed to save .docx:", err);
-        this.saveStatus?.failed(err, () => void this.saveNow(), file.name);
-      }
-    });
-    return this.saving;
-  }
 }
 
 /** Edits the default header and footer, each in its own small editor. */
