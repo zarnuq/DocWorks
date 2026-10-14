@@ -36,6 +36,20 @@ describe("replace", () => {
     expect(s.cell("B3")!.value).toBe("inline");
   });
 
+  it("uses Google's options: regular expressions with $1, whole words, ignoring accents", async () => {
+    const e = await setup();
+    const s = e.wb.sheets[0];
+    e.input(s, 20, 0, "Smith, Jo");
+    e.input(s, 21, 0, "café");
+    expect(refs(findCells([s], "^s\\w+,", { regex: true }))).toEqual(["Data!20,0"]);
+    expect(refs(findCells([s], "cafe", { ignoreAccents: true }))).toEqual(["Data!21,0"]);
+    expect(findCells([s], "Smit", { wholeWord: true })).toHaveLength(0);
+    expect(replaceCells(e, findCells([s], "(\\w+), (\\w+)", { regex: true }), "(\\w+), (\\w+)", "$2 $1", { regex: true })).toBe(1);
+    expect(s.at(20, 0)!.value).toBe("Jo Smith");
+    expect(replaceCells(e, findCells([s], "cafe", { ignoreAccents: true }), "cafe", "tea", { ignoreAccents: true })).toBe(1);
+    expect(s.at(21, 0)!.value).toBe("tea");
+  });
+
   it("rewrites formulas only when searching formulas, and recalculates", async () => {
     const e = await setup();
     const s = e.wb.sheets[0];

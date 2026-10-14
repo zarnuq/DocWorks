@@ -74,6 +74,18 @@ describe("find and replace", () => {
     expect(text(st)).toEqual(["bye world, bye", "bye cell"]);
   });
 
+  it("uses Google's options: regular expressions with $1, whole words, ignoring accents", () => {
+    let st = state([s.paragraph.create(null, schema.text("Smith, Jo; café hello helloworld"))]);
+    expect(findRanges(st.doc, "h[a-z]+o", { regex: true }).map((h) => st.doc.textBetween(h.from, h.to))).toEqual(["hello", "hellowo"]);
+    expect(findRanges(st.doc, "hello", { wholeWord: true })).toHaveLength(1);
+    expect(findRanges(st.doc, "cafe", { ignoreAccents: true })).toHaveLength(1);
+    st = run(st, replaceAllCmd("(\\w+), (\\w+)", "$2 $1", { regex: true }));
+    expect(text(st)).toEqual(["Jo Smith; café hello helloworld"]);
+    const [hit] = findRanges(st.doc, "c(a)f", { regex: true, ignoreAccents: true });
+    st = run(st, replaceRangeCmd(hit, "[$1]"));
+    expect(text(st)).toEqual(["Jo Smith; [a]é hello helloworld"]);
+  });
+
   it("highlights matches and the current one", () => {
     let st = doc();
     st = st.apply(setFind(st.tr, "hello", false, 1));

@@ -103,3 +103,8 @@ if (!Range.prototype.getClientRects) {
 (Node.prototype as unknown as { instanceOf: (type: unknown) => boolean }).instanceOf = function (this: Node, type: unknown) {
   return this instanceof (type as new () => unknown);
 };
+
+// Each test starts with no remembered find-bar searches (they're kept per file path, and tests reuse names).
+import { afterEach } from "vitest";
+import { forgetSearches } from "../src/presentation/common/find-bar";
+afterEach(() => forgetSearches());

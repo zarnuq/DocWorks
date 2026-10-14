@@ -9,7 +9,8 @@ export function renderDrawing(host: HTMLElement, drawing: WordDrawing, selected?
   const svg = document.createElementNS(SVG,'svg');
   svg.setAttribute('viewBox',`0 0 ${drawing.width} ${drawing.height}`);
   svg.setAttribute('width','100%');svg.setAttribute('height','100%');
-  svg.setAttribute('role','img');svg.setAttribute('aria-label','Drawing');host.appendChild(svg);
+  // Named by <title>: an aria-label would get Obsidian's hover tooltip, which fails on SVG elements.
+  svg.setAttribute('role','img');svg.appendChild(document.createElementNS(SVG,'title')).textContent='Drawing';host.appendChild(svg);
   for (const shape of drawing.shapes) {
     const g=document.createElementNS(SVG,'g');g.dataset.shape=shape.id;g.setAttribute('transform',`translate(${shape.x} ${shape.y})`);svg.appendChild(g);
     const geom=drawingGeometry(shape);

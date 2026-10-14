@@ -157,9 +157,9 @@ describe("XlsxView", () => {
     scope.keys.find((k) => k.key === "f")!.fn();
     const bar = view.contentEl.querySelector(".xlsx-find")!;
     const input = bar.querySelector<HTMLInputElement>("input[type=search]")!;
-    bar.querySelectorAll<HTMLInputElement>("input[type=checkbox]")[3].click(); // all sheets
+    bar.querySelector<HTMLInputElement>('[aria-label="Search all sheets"]')!.click();
     input.value = "SUM";
-    bar.querySelectorAll<HTMLInputElement>("input[type=checkbox]")[2].click(); // formulas
+    bar.querySelector<HTMLInputElement>('[aria-label="Also search within formulas"]')!.click();
     expect(view.contentEl.querySelector<HTMLInputElement>(".xlsx-name-box")!.value).toBe("A5");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(view.contentEl.querySelector(".xlsx-tab.is-active")!.textContent).toBe("Totals");
@@ -438,6 +438,20 @@ describe("XlsxView data tools", () => {
   });
 });
 
+describe("XlsxView Copy as Markdown table", () => {
+  it("copies the selection as a Markdown table from Edit and the cell menu", async () => {
+    const { view } = await mount();
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void written.push(t) } });
+    (view as any).grid.select({ row: 0, col: 0 }, { row: 1, col: 1 });
+    runMenu(view, "Edit", "Copy as Markdown table");
+    await Promise.resolve();
+    const lines = written[0].trimEnd().split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(/^\| -{3}:? \| -{3}:? \|$/);
+  });
+});
+
 describe("XlsxView save status", () => {
   it("shows Couldn't save with Retry when writing fails, and Saved after a retry works", async () => {
     const { view, type } = await mount();
@@ -510,7 +524,7 @@ describe("XlsxView menus", () => {
   it("has Select all, Delete and a Tools menu like the other editors", async () => {
     const { view, file } = await mount();
     const v = view as any;
-    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste values only", "Select all", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Copy as Markdown table", "Paste", "Paste values only", "Select all", "Delete", "Find and replace"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
     runMenu(view, "Edit", "Select all");
     expect(v.grid.selection()).toMatchObject({ r1: 0, c1: 0, r2: 1048575, c2: 16383 });

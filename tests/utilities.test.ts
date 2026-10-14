@@ -53,6 +53,15 @@ describe("find and replace", () => {
     expect(findAll(back, "dog", { matchCase: true })).toHaveLength(3);
   });
 
+  it("uses Google's options: regular expressions with $1, whole words, ignoring accents", async () => {
+    const { doc, p } = await withRuns("Smith, ", "Jo; café cat concat");
+    expect(findAll(doc, "c.t", { matchCase: false, regex: true }).map((h) => [h.start, h.end])).toEqual([[16, 19], [23, 26]]);
+    expect(findAll(doc, "cat", { matchCase: false, wholeWord: true })).toHaveLength(1);
+    expect(findAll(doc, "cafe", { matchCase: false, ignoreAccents: true })).toHaveLength(1);
+    expect(replaceAll(doc, "(\\w+), (\\w+)", "$2 $1", { matchCase: false, regex: true })).toBe(1);
+    expect(texts(p).join("")).toBe("Jo Smith; café cat concat");
+  });
+
   it("ignores an empty query", async () => {
     const { doc } = await withRuns("x");
     expect(findAll(doc, "", { matchCase: false })).toEqual([]);

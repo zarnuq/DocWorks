@@ -6,6 +6,7 @@ import { Change } from "./calculation";
 import { Edits } from "./commands";
 import { addSheet } from "./sheet-edit";
 import { Sheet } from "./workbook-model";
+import type { Rect } from "./references";
 
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -46,6 +47,27 @@ export function sheetToCsv(sheet: Sheet): string {
     out += fields.join(",") + "\r\n";
   }
   return out;
+}
+
+/**
+ * Copy as Markdown table: the shown text of `r` (cut to the used area, hidden rows and columns left out), the first
+ * row as the header, columns of numbers right-aligned. "" when nothing is in the range.
+ */
+export function rangeToMarkdown(sheet: Sheet, r: Rect): string {
+  const used = sheet.used();
+  if (!used) return "";
+  const r2 = Math.min(r.r2, used.r2), c2 = Math.min(r.c2, used.c2);
+  const rows: number[] = [], cols: number[] = [];
+  for (let i = r.r1; i <= r2; i++) if (sheet.rowHeight(i) > 0) rows.push(i);
+  for (let i = r.c1; i <= c2; i++) if (sheet.colWidth(i) > 0) cols.push(i);
+  if (!rows.some((row) => cols.some((col) => sheet.at(row, col)))) return "";
+  const cell = (row: number, col: number) => sheet.display(row, col).text.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+  const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
+  const numeric = (col: number) => {
+    const body = rows.slice(1).map((row) => sheet.at(row, col)?.value).filter((v) => v !== undefined && v !== null && v !== "");
+    return body.length > 0 && body.every((v) => typeof v === "number");
+  };
+  return [line(cols.map((col) => cell(rows[0], col))), line(cols.map((col) => (numeric(col) ? "---:" : "---"))), ...rows.slice(1).map((row) => line(cols.map((col) => cell(row, col)))), ""].join("\n");
 }
 
 /** Add a tab after tab `after`, named from `name` (made valid and unique), holding `rows`; returns the tab's name. */

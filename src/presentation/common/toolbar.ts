@@ -34,14 +34,14 @@ const MENU_ICONS: Record<string, string> = {
   "Word count": "whole-word", "Sort A → Z": "arrow-down-az", "Sort Z → A": "arrow-down-za", "Create a filter": "filter",
   "Remove filter": "filter-x", "Data validation": "list-checks", "Remove duplicates…": "list-x", "Split text to columns…": "columns-2",
   "Named ranges…": "tag", "Import CSV as new sheet…": "file-input", Bold: "bold", Italic: "italic", Underline: "underline",
-  "Keyboard shortcuts": "keyboard", Checkbox: "square-check", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
+  "Keyboard shortcuts": "keyboard", "Copy as Markdown table": "table", "Copy as Markdown outline": "list-tree", Checkbox: "square-check", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
 };
 /** Set while a menu bar menu is being built: its items get MENU_ICONS. */
 let menuBarIcons = false;
 
 /** Read-only files: the menus kept, and the items (or whole submenus) in them that only look at the file. */
 const VIEW_MENUS = new Set(["File", "Edit", "View", "Tools", "Help"]);
-const VIEW_ITEMS = new Set(["Export…", "Copy", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts"]);
+const VIEW_ITEMS = new Set(["Export…", "Copy", "Copy as Markdown table", "Copy as Markdown outline", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts"]);
 /** Set while a read-only file's menu is being built: other items are left out. */
 let viewOnly = false;
 const hidden = (title: string) => viewOnly && !VIEW_ITEMS.has(title);

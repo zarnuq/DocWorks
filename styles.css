@@ -2920,3 +2920,70 @@ textarea.pptx-notes {
 .dw-read-only .xlsx-tab-add {
   display: none;
 }
+
+/* ![[book.xlsx#Sheet!A1:D10]]: the range's name above its cells. */
+.dw-embed-range {
+  padding: var(--size-4-1) var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* Search in documents, presentations and spreadsheets (side panel). */
+.dw-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.dw-search-option {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.dw-search-status,
+.dw-search-folder,
+.dw-search-more,
+.dw-search-where {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.dw-search-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+}
+
+.dw-search-count {
+  color: var(--text-faint);
+}
+
+.dw-search-hit {
+  padding: var(--size-4-1) var(--size-4-2);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.dw-search-hit:hover,
+.dw-search-hit:focus-visible {
+  background: var(--background-modifier-hover);
+}
+
+.dw-search-line {
+  overflow-wrap: anywhere;
+}
+
+.dw-search-file + .dw-search-file {
+  margin-top: var(--size-4-3);
+}
+
+.dw-embed-range + .dw-embed-sheet {
+  width: fit-content;
+  max-width: 100%;
+}

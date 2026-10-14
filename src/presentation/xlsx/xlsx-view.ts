@@ -4,7 +4,7 @@ import { addComment, commentsOf, editComment, removeThread, resolveThread, Comme
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
 import { App, FileView, FuzzySuggestModal, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { detectSeparator, removeDuplicates, splitSources, splitText } from "../../domain/xlsx/cleanup";
-import { importCsv, parseCsv, sheetToCsv } from "../../domain/xlsx/csv";
+import { importCsv, parseCsv, rangeToMarkdown, sheetToCsv } from "../../domain/xlsx/csv";
 import { addName, deleteName, listNames, renameName, setNameRange } from "../../domain/xlsx/names";
 import { groupRange, setGroupCollapsed, ungroupRange } from "../../domain/xlsx/outline";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
@@ -822,6 +822,13 @@ export class XlsxView extends FileView {
   }
 
   /** Format › Clear formatting: the selection back to the default style. */
+  /** The selection as a Markdown table, for pasting into a note. */
+  private copyMarkdown(): void {
+    const md = rangeToMarkdown(this.sheet, this.sel);
+    if (!md) return void new Notice("Nothing to copy: the selected cells are empty.");
+    void navigator.clipboard.writeText(md).then(() => new Notice("Copied as a Markdown table."));
+  }
+
   private clearFormatting(): void {
     if (this.grid) this.change(() => this.edits!.restyle(this.sheet, this.grid!.selection(), () => 0));
   }
@@ -1188,6 +1195,7 @@ export class XlsxView extends FileView {
       m.addSeparator();
       menuItem(m, "Cut", () => this.editCommand("cut"));
       menuItem(m, "Copy", () => this.editCommand("copy"));
+      menuItem(m, "Copy as Markdown table", () => this.copyMarkdown());
       menuItem(m, "Paste", () => this.editCommand("paste"));
       menuItem(m, "Paste values only", () => this.editCommand("paste", true));
       menuItem(m, "Select all", () => this.grid?.selectAll());
@@ -1495,6 +1503,7 @@ export class XlsxView extends FileView {
     const cols = `${r.c2 - r.c1 + 1} ${r.c2 > r.c1 ? "columns" : "column"}`;
     item("Cut", "scissors", () => this.editCommand("cut"));
     item("Copy", "copy", () => this.editCommand("copy"));
+    item("Copy as Markdown table", "table", () => this.copyMarkdown());
     item("Paste", "clipboard", () => this.editCommand("paste"));
     item("Paste values only", "clipboard-type", () => this.editCommand("paste", true));
     menu.addSeparator();
@@ -1667,7 +1676,8 @@ export class XlsxView extends FileView {
   // Find and replace
   // ---------------------------------------------------------------------------
 
-  private openFind(): void {
+  /** Ctrl+F / Ctrl+H: the find bar (also opened by a vault search result). */
+  openFind(): void {
     if (!this.edits) return;
     if (this.findEl) {
       this.findEl.querySelector("input")?.focus();
@@ -1676,7 +1686,8 @@ export class XlsxView extends FileView {
     let matches: SheetSearchMatch[] = [];
     let index = -1;
     const bar = findBar(this.contentEl, this.contentEl.querySelector(".xlsx-body"), {
-      options: [["Aa", "Match case", false], ["Whole cell", "Match entire cell contents", false], ["Formulas", "Also search within formulas", false], ["All sheets", "Search all sheets", false], ["Notes", "Search cell notes", true], ["Comments", "Search comments", true]],
+      key: this.file?.path,
+      options: [["Whole cell", "Match entire cell contents", false], ["Formulas", "Also search within formulas", false], ["All sheets", "Search all sheets", false], ["Notes", "Search cell notes", true], ["Comments", "Search comments", true]],
       replaceTitles: ["Replace this cell-content match", "Replace matching cell contents"],
       changed: (text) => {
         // New search text starts again from the first match.
@@ -1707,8 +1718,8 @@ export class XlsxView extends FileView {
     this.findEl = bar.el;
     bar.el.addClass("xlsx-find");
     const { input, preview } = bar;
-    const [matchCase, entire, formulas, allSheets, notes, comments] = bar.options;
-    const opts = () => ({ matchCase: matchCase.checked, entire: entire.checked, formulas: formulas.checked, notes: notes.checked, comments: comments.checked });
+    const [entire, formulas, allSheets, notes, comments] = bar.options;
+    const opts = () => ({ ...bar.search(), entire: entire.checked, formulas: formulas.checked, notes: notes.checked, comments: comments.checked });
     const refresh = () => {
       matches = findSheetMatches(allSheets.checked ? this.wb.sheets : [this.sheet], input.value, opts());
       index = Math.min(index, matches.length - 1);

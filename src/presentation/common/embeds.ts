@@ -1,5 +1,6 @@
 /*
- * Embeds in notes: ![[report.docx]], ![[deck.pptx#3]] (slide 3) and ![[budget.xlsx#Sheet2]] (that sheet) show a
+ * Embeds in notes: ![[report.docx]], ![[deck.pptx#3]] (slide 3), ![[budget.xlsx#Sheet2]] (that sheet) and
+ * ![[budget.xlsx#Sheet2!A1:D10]] or ![[budget.xlsx#A1:D10]] (just that range) show a
  * read-only preview inside the note, through Obsidian's embed registry (as its own PDF and canvas embeds do).
  * Clicking the preview's title opens the file in its editor.
  */
@@ -15,6 +16,7 @@ import { ConditionalFormats } from "../../domain/xlsx/conditional";
 import { sheetPictures } from "../../domain/xlsx/drawing";
 import { formulaSparklines, readSparklines } from "../../domain/xlsx/sparklines";
 import { Workbook } from "../../domain/xlsx/workbook-model";
+import { parseRange, rangeName, Rect } from "../../domain/xlsx/references";
 import { eotToTtf } from "../../infrastructure/fonts/eot";
 import { DocxDocument } from "../../infrastructure/docx/docx-document";
 import { PptxDocument } from "../../infrastructure/pptx/pptx-document";
@@ -26,6 +28,18 @@ import { Grid } from "../xlsx/grid";
 
 /** Rows and columns an embedded sheet shows at most (the file opens for the rest). */
 const MAX_ROWS = 60, MAX_COLS = 20;
+/** An explicit range is drawn as asked, up to this size. */
+const MAX_RANGE_ROWS = 500, MAX_RANGE_COLS = 50;
+
+/** "#Sheet!A1:D10", "#'My sheet'!B2", "#A1:D10" (first sheet) or "#Sheet": the sheet and range to show. */
+export function sheetTarget(subpath: string, names: string[]): { sheet: string | null; range: Rect | null } {
+  const text = decodeURIComponent(subpath.replace(/^#/, "")).trim();
+  if (!text || names.includes(text)) return { sheet: text || null, range: null };
+  const bang = text.lastIndexOf("!");
+  const name = bang < 0 ? null : text.slice(0, bang).replace(/^'(.*)'$/, "$1").replace(/''/g, "'");
+  const range = parseRange(text.slice(bang + 1));
+  return range ? { sheet: name, range } : { sheet: null, range: null };
+}
 
 /** "#3" as slide index 2; anything else (or nothing) is the first slide. */
 export function slideIndex(subpath: string, count: number): number {
@@ -81,14 +95,16 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
   const edits = new Edits(Workbook.open(await XlsxWorkbook.load(bytes)));
   const wb = edits.wb;
   const visible = wb.sheets.filter((s) => s.ref.state === "visible");
-  const wanted = decodeURIComponent(subpath.replace(/^#/, ""));
-  let sheet = visible.find((s) => s.name === wanted) ?? visible[0] ?? wb.sheets[0];
+  const target = sheetTarget(subpath, wb.sheets.map((s) => s.name));
+  let sheet = wb.sheets.find((s) => s.name === target.sheet) ?? visible[0] ?? wb.sheets[0];
   const urls = new Map<string, string>();
+  // A range shows just those cells, named above them; a sheet gets tabs for the others.
+  const caption = target.range ? el.createDiv({ cls: "dw-embed-range" }) : null;
   const area = el.createDiv({ cls: "dw-embed-sheet" });
-  const tabs = visible.length > 1 ? el.createDiv({ cls: "dw-embed-tabs" }) : null;
+  const tabs = !target.range && visible.length > 1 ? el.createDiv({ cls: "dw-embed-tabs" }) : null;
   const draw = async () => {
     area.empty();
-    const used = sheet.used();
+    const used = target.range ?? sheet.used();
     if (!used) return void area.createDiv({ cls: "dw-muted", text: "This sheet is empty." });
     const pictures = sheetPictures(wb, sheet);
     for (const p of pictures) if (!urls.has(p.image)) urls.set(p.image, blobUrl(await wb.pkg.media(p.image).catch(() => new Uint8Array()), p.image));
@@ -112,10 +128,13 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
       contextMenu: () => undefined,
       filterMenu: () => undefined,
     });
-    const r = { r1: 0, c1: 0, r2: Math.min(used.r2, MAX_ROWS - 1), c2: Math.min(used.c2, MAX_COLS - 1) };
+    const r = target.range
+      ? { ...used, r2: Math.min(used.r2, used.r1 + MAX_RANGE_ROWS - 1), c2: Math.min(used.c2, used.c1 + MAX_RANGE_COLS - 1) }
+      : { r1: 0, c1: 0, r2: Math.min(used.r2, MAX_ROWS - 1), c2: Math.min(used.c2, MAX_COLS - 1) };
+    caption?.setText(`${sheet.name}!${rangeName(r)}`);
     // The painted cells are positioned absolutely; the box takes their size so the frame scrolls over them.
     const grid = area.createDiv({ cls: "dw-embed-grid" });
-    grid.setCssProps({ "--dw-grid-w": `${sheet.colX(r.c2 + 1)}px`, "--dw-grid-h": `${sheet.rowY(r.r2 + 1)}px` });
+    grid.setCssProps({ "--dw-grid-w": `${sheet.colX(r.c2 + 1) - sheet.colX(r.c1)}px`, "--dw-grid-h": `${sheet.rowY(r.r2 + 1) - sheet.rowY(r.r1)}px` });
     painter.drawRange(grid, r);
     tabs?.querySelectorAll("button").forEach((b) => b.toggleClass("is-active", b.textContent === sheet.name));
   };

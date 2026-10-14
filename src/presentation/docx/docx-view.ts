@@ -1349,7 +1349,8 @@ export class DocxView extends FileView {
   // Find and replace
   // ---------------------------------------------------------------------------
 
-  private openFind(): void {
+  /** Ctrl+F / Ctrl+H: the find bar (also opened by a vault search result). */
+  openFind(): void {
     if (!this.editor) return;
     if (this.findEl) {
       this.findEl.querySelector<HTMLInputElement>("input")?.focus();
@@ -1361,7 +1362,8 @@ export class DocxView extends FileView {
     type Result = ({ kind: "text" } & Range) | ({ kind: "comment" } & CommentMatch);
     let matches: Result[] = [], index = -1;
     const bar = findBar(this.contentEl, body, {
-      options: [["Aa", "Match case", false], ["Comments", "Search comments", true]],
+      key: this.file?.path,
+      options: [["Comments", "Search comments", true]],
       replaceTitles: ["Replace this document-text match", "Replace matching document text"],
       changed: () => show(0),
       step: (dir) => {
@@ -1377,8 +1379,8 @@ export class DocxView extends FileView {
         show(index);
       },
       replaceAll: () => {
-        const n = findRanges(editor.state.doc, input.value, matchCase.checked).length;
-        replaceAllCmd(input.value, bar.replaceInput.value, matchCase.checked)(editor.state, editor.dispatch);
+        const n = findRanges(editor.state.doc, input.value, bar.search()).length;
+        replaceAllCmd(input.value, bar.replaceInput.value, bar.search())(editor.state, editor.dispatch);
         new Notice(`Replaced ${n} ${n === 1 ? "match" : "matches"}.`);
         show(0);
       },
@@ -1386,16 +1388,16 @@ export class DocxView extends FileView {
     });
     this.findEl = bar.el;
     const { input, preview } = bar;
-    const [matchCase, comments] = bar.options;
+    const [comments] = bar.options;
     const refresh = () => {
-      matches = [...findRanges(editor.state.doc, input.value, matchCase.checked).map(r => ({ ...r, kind: "text" as const })),
-        ...(comments.checked && this.docx ? findCommentMatches(this.docx, input.value, matchCase.checked).map(r => ({ ...r, kind: "comment" as const })) : [])];
+      matches = [...findRanges(editor.state.doc, input.value, bar.search()).map(r => ({ ...r, kind: "text" as const })),
+        ...(comments.checked && this.docx ? findCommentMatches(this.docx, input.value, bar.search()).map(r => ({ ...r, kind: "comment" as const })) : [])];
     };
     const show = (current: number) => {
       refresh();
       index = matches.length ? Math.min(Math.max(current, 0), matches.length - 1) : -1;
       const hit = matches[index];
-      editor.dispatch(setFind(editor.state.tr, input.value, matchCase.checked, hit?.kind === "text" ? index : -1));
+      editor.dispatch(setFind(editor.state.tr, input.value, bar.search(), hit?.kind === "text" ? index : -1));
       bar.setCount(input.value, index, matches.length);
       bar.replaceButton.disabled = hit?.kind !== "text";
       bar.replaceAllButton.disabled = !matches.some(m => m.kind === "text");

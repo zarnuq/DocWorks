@@ -4,10 +4,10 @@
  */
 import { NS } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
-import { textMatches, TextMatch } from "../../core/utils/text-matches";
+import { expandReplacement, SearchOptions, textMatches, TextMatch } from "../../core/utils/text-matches";
 import { slideComments } from "./comments";
 
-export interface FindOptions {
+export interface FindOptions extends SearchOptions {
   matchCase: boolean;
   notes?: boolean;
   comments?: boolean;
@@ -37,10 +37,10 @@ export function findSlideMatches(doc: PptxDocument, query: string, opts: FindOpt
     out.push(...(bySlide.get(slide) ?? []).map(m => ({ ...m, kind: "text" as const })));
     if (opts.notes) {
       const notes = doc.notesText(slide);
-      out.push(...textMatches(notes, query, opts.matchCase).map(m => ({ ...m, kind: "notes" as const, slide, text: notes })));
+      out.push(...textMatches(notes, query, opts).map(m => ({ ...m, kind: "notes" as const, slide, text: notes })));
     }
     if (opts.comments) for (const thread of slideComments(doc, ref.path)) for (const message of thread.messages) {
-      out.push(...textMatches(message.text, query, opts.matchCase).map(m => ({ ...m, kind: "comment" as const, slide, text: message.text, author: message.author, messageId: message.id, resolved: thread.resolved })));
+      out.push(...textMatches(message.text, query, opts).map(m => ({ ...m, kind: "comment" as const, slide, text: message.text, author: message.author, messageId: message.id, resolved: thread.resolved })));
     }
   });
   return out;
@@ -55,6 +55,8 @@ export interface Match {
   para: Element;
   start: number;
   end: number;
+  /** A regular expression search's groups, for $1 in the replacement. */
+  groups?: string[];
 }
 
 interface Piece {
@@ -87,8 +89,6 @@ function textBodies(slide: Document): Element[] {
 
 export function findAll(doc: PptxDocument, query: string, opts: FindOptions): Match[] {
   if (!query) return [];
-  const norm = (s: string) => (opts.matchCase ? s : s.toLowerCase());
-  const q = norm(query);
   const out: Match[] = [];
   doc.slides().forEach((ref, slide) => {
     const xml = doc.xml(ref.path);
@@ -96,8 +96,8 @@ export function findAll(doc: PptxDocument, query: string, opts: FindOptions): Ma
     for (const body of textBodies(xml)) {
       const owner = body.parentElement!;
       for (const para of Array.from(body.children).filter((c) => c.localName === "p")) {
-        const text = norm(pieces(para).map((pc) => pc.text).join(""));
-        for (let i = text.indexOf(q); i >= 0; i = text.indexOf(q, i + q.length)) out.push({ slide, owner, para, start: i, end: i + q.length });
+        const text = pieces(para).map((pc) => pc.text).join("");
+        for (const m of textMatches(text, query, opts)) out.push({ slide, owner, para, ...m });
       }
     }
   });
@@ -106,6 +106,7 @@ export function findAll(doc: PptxDocument, query: string, opts: FindOptions): Ma
 
 /** Replace one match; the replacement takes the formatting of the run the match starts in. */
 export function replaceMatch(m: Match, replacement: string): void {
+  replacement = expandReplacement(replacement, m);
   let at = 0;
   let placed = false;
   for (const pc of pieces(m.para)) {

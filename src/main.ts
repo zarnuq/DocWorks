@@ -2,6 +2,7 @@ import { addExportToMenu, addNoteExportToMenu, exportNoteToDocx } from "./presen
 import { exportDocxFile } from "./presentation/common/export-markdown";
 import { registerEmbeds } from "./presentation/common/embeds";
 import { canExportPdf } from "./presentation/common/pdf";
+import { OfficeSearchView, VIEW_TYPE_SEARCH } from "./presentation/common/office-search";
 import { App, FileView, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
 import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
@@ -54,7 +55,11 @@ export default class DocWorksPlugin extends Plugin {
     if (this.settings.openPptx) this.claimExtension("pptx", VIEW_TYPE_PPTX);
     if (this.settings.openXlsx) this.claimExtension("xlsx", VIEW_TYPE_XLSX);
     // Previews in notes (![[deck.pptx#3]]) for the same file types.
-    registerEmbeds(this, (["docx", "pptx", "xlsx"] as const).filter((k) => this.settings[k === "docx" ? "openDocx" : k === "pptx" ? "openPptx" : "openXlsx"]));
+    const kinds = (["docx", "pptx", "xlsx"] as const).filter((k) => this.settings[k === "docx" ? "openDocx" : k === "pptx" ? "openPptx" : "openXlsx"]);
+    registerEmbeds(this, kinds);
+    // Search inside the same file types, in a side panel.
+    this.registerView(VIEW_TYPE_SEARCH, (leaf: WorkspaceLeaf) => new OfficeSearchView(leaf, () => kinds));
+    this.addCommand({ id: "search-office-files", name: "Search in documents, presentations and spreadsheets", callback: () => void this.openSearch() });
     this.app.workspace.onLayoutReady(() => this.nameBackgroundTabs());
 
     for (const [id, name, fromStart] of [
@@ -148,6 +153,14 @@ export default class DocWorksPlugin extends Plugin {
     await this.saveData(this.settings);
     // Tabs not shown since startup hold a placeholder view until they're opened.
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DOCX)) if (leaf.view instanceof DocxView) leaf.view.applyPageSize();
+  }
+
+  /** The search panel in the right sidebar (the open one, or a new one). */
+  private async openSearch(): Promise<void> {
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_SEARCH)[0] ?? this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+    await leaf.setViewState({ type: VIEW_TYPE_SEARCH, active: true });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   /** Open files again with the current settings (read-only on or off); pending edits are saved first. */

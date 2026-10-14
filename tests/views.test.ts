@@ -53,6 +53,18 @@ function runMenu(view: { contentEl: HTMLElement }, name: string, ...path: string
 }
 const menuNames = (view: { contentEl: HTMLElement }) => Array.from(view.contentEl.querySelectorAll(".dw-menu-btn")).map((b) => b.textContent);
 
+describe("PptxView Copy as Markdown outline", () => {
+  it("copies the deck as headings and bullets from the Edit menu", async () => {
+    const view = mount(PptxView, "sample.pptx");
+    await open(view, "deck.pptx");
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void written.push(t) } });
+    runMenu(view, "Edit", "Copy as Markdown outline");
+    await Promise.resolve();
+    expect(written[0]).toMatch(/^## Hello Deck\n\n- Subtitle here\n/);
+  });
+});
+
 describe("PptxView motion editor", () => {
   it("keeps slide creation in the Slide dropdown without a duplicate toolbar button", async () => {
     const view = mount(PptxView, "sample.pptx");
@@ -1265,7 +1277,7 @@ describe("PptxView menus", () => {
     const view = mount(PptxView, "sample.pptx");
     const file = await open(view, "menus.pptx");
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Slide", "Arrange", "Tools", "Help"]);
-    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Copy as Markdown outline", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
     expect(view.contentEl.querySelector('.dw-toolbar [aria-label^="Insert link"]')).not.toBeNull();
     expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "Grid view", "Format panel", "Zoom", "Light", "Dark"]);

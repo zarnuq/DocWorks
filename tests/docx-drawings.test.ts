@@ -50,3 +50,14 @@ describe('Word drawings', () => {
   expect(saved).toContain('<w:b');expect(saved).toContain('w:val="28"');
  });
 });
+
+describe('drawing view', () => {
+  it('names the drawing without aria-label (Obsidian hover tooltips crash on SVG)', async () => {
+    const { renderDrawing } = await import('../src/presentation/docx/docx-drawing-view');
+    const host = createDiv();
+    const svg = renderDrawing(host, newDrawing());
+    expect(svg.hasAttribute('aria-label')).toBe(false);
+    expect(svg.querySelector('title')?.textContent).toBe('Drawing');
+    expect(host.querySelector('[aria-label]')).toBeNull();
+  });
+});

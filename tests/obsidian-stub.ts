@@ -20,6 +20,7 @@ export class TFile {
   constructor(public path: string) {}
   get name() { return this.path.slice(this.path.lastIndexOf("/") + 1); }
   get basename() { return this.name.replace(/\.[^.]*$/, ""); }
+  stat = { mtime: 0, ctime: 0, size: 0 };
   get extension() { return this.name.slice(this.name.lastIndexOf(".") + 1); }
 }
 export class TFolder {}
@@ -67,6 +68,19 @@ export class FileView {
   registerEvent(_ref: unknown) {}
   onPaneMenu(_menu: Menu, _source: string) {}
 }
+
+export class ItemView {
+  app: App;
+  containerEl = createDiv({ cls: "workspace-leaf-content" });
+  contentEl = this.containerEl.createDiv({ cls: "view-content" });
+  constructor(public leaf: WorkspaceLeaf) {
+    this.app = leaf.app;
+  }
+  registerEvent(_ref: unknown) {}
+  register(_cb: () => void) {}
+}
+
+export const Keymap = { isModEvent: (e?: MouseEvent | KeyboardEvent | null) => !!(e && (e.ctrlKey || e.metaKey)) };
 
 export class Notice {
   /** Every message shown, for tests. */

@@ -48,6 +48,7 @@ import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCU
 import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { Autosave } from "../common/autosave";
+import { deckToMarkdown } from "../../domain/pptx/outline";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
 import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
@@ -2436,7 +2437,8 @@ export class PptxView extends FileView {
   private findIndex = -1;
   private zoom = "fit";
 
-  private openFind(): void {
+  /** Ctrl+F / Ctrl+H: the find bar (also opened by a vault search result). */
+  openFind(): void {
     if (!this.doc) return;
     if (this.findEl) {
       this.findInput.focus();
@@ -2444,7 +2446,8 @@ export class PptxView extends FileView {
       return;
     }
     const bar = findBar(this.contentEl, this.contentEl.querySelector(".pptx-body"), {
-      options: [["Aa", "Match case", false], ["Notes", "Search speaker notes", true], ["Comments", "Search comments", true]],
+      key: this.file?.path,
+      options: [["Notes", "Search speaker notes", true], ["Comments", "Search comments", true]],
       replaceTitles: ["Replace this slide-text match", "Replace matching slide text"],
       changed: () => {
         refresh();
@@ -2471,8 +2474,8 @@ export class PptxView extends FileView {
     this.findEl = bar.el;
     this.findInput = bar.input;
     const { preview } = bar;
-    const [matchCase, notes, comments] = bar.options;
-    const opts = () => ({ matchCase: matchCase.checked, notes: notes.checked, comments: comments.checked });
+    const [notes, comments] = bar.options;
+    const opts = () => ({ matchCase: false, ...bar.search(), notes: notes.checked, comments: comments.checked });
     const refresh = (keep = false) => {
       this.findMatches = findSlideMatches(this.doc!, this.findInput.value, opts());
       if (!keep) this.findIndex = this.findMatches.findIndex((m) => m.slide >= this.index);
@@ -2655,6 +2658,11 @@ export class PptxView extends FileView {
       mn.addSeparator();
       menuItem(mn, "Cut", () => void this.cutSelection(), { disabled: !has });
       menuItem(mn, "Copy", () => void this.copySelection(), { disabled: !has });
+      menuItem(mn, "Copy as Markdown outline", () => {
+        if (!this.doc) return;
+        this.flushCommit();
+        void navigator.clipboard.writeText(deckToMarkdown(this.doc)).then(() => new Notice("Copied the slides as a Markdown outline."));
+      });
       menuItem(mn, "Paste", () => this.paste(), { disabled: !clipboard });
       // In a text box: the clipboard's plain text; otherwise as Paste.
       menuItem(mn, "Paste without formatting", () => (activeDocument.activeElement?.closest(".pptx-text") ? void runEditCommand("pasteAndMatchStyle") : this.paste()));
