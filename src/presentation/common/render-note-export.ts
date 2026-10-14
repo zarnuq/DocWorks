@@ -1,11 +1,14 @@
 import { App, Component, finishRenderMath, MarkdownRenderer, parseLinktext, resolveSubpath, TFile } from "obsidian";
+import { ExportPicture, officeEmbedForExport, OFFICE_EXTENSIONS } from "./office-export";
 
 const stripProperties = (markdown: string) => markdown.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
 const decode = (link: string) => { try { return decodeURIComponent(link); } catch { return link; } };
 
 /** Render note embeds from their source, independent of the asynchronous preview's readiness. */
-export async function renderNoteForExport(app: App, file: TFile, component: Component): Promise<{ el: HTMLElement; warnings: string[] }> {
+export async function renderNoteForExport(app: App, file: TFile, component: Component): Promise<{ el: HTMLElement; warnings: string[]; pictures: Map<HTMLImageElement, ExportPicture> }> {
   const warnings = new Set<string>();
+  // Pictures made for embedded Office files (slides, a document's own pictures), which aren't vault files.
+  const pictures = new Map<HTMLImageElement, ExportPicture>();
   let count = 0;
   const resolve = (link: string, source: TFile) => {
     const { path, subpath } = parseLinktext(decode(link));
@@ -57,6 +60,15 @@ export async function renderNoteForExport(app: App, file: TFile, component: Comp
         warnings.add("Some note embeds were unavailable; their names were kept in the document.");
         continue;
       }
+      if (target && OFFICE_EXTENSIONS.has(target.extension.toLowerCase())) {
+        const content = await officeEmbedForExport(app, target, anchor, component, pictures).catch(() => null);
+        if (content) replace(embed, content);
+        else {
+          embed.replaceWith(createEl("a", { text: embed.getAttribute("alt") || link, attr: { href: uri(target, anchor) } }));
+          warnings.add("Some embedded files couldn't be included and were kept as links (slides need the desktop app).");
+        }
+        continue;
+      }
       if (target?.extension !== "md") continue;
       const key = target.path + anchor;
       const fallback = () => {
@@ -75,5 +87,5 @@ export async function renderNoteForExport(app: App, file: TFile, component: Comp
     }
     return el;
   };
-  return { el: await render(file, "", new Set([file.path])), warnings: [...warnings] };
+  return { el: await render(file, "", new Set([file.path])), warnings: [...warnings], pictures };
 }

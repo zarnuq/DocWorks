@@ -7,7 +7,7 @@
 [![Latest Release](https://img.shields.io/github/release-date/zarnuq/DocWorks?style=for-the-badge&label=Latest%20Release&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0ibHVjaWRlIGx1Y2lkZS1jYWxlbmRhci1jaGVjay0yIj48cGF0aCBkPSJNMjEgMTRWNmEyIDIgMCAwIDAtMi0ySDVhMiAyIDAgMCAwLTIgMnYxNGEyIDIgMCAwIDAgMiAyaDgiLz48bGluZSB4MT0iMTYiIHgyPSIxNiIgeTE9IjIiIHkyPSI2Ii8+PGxpbmUgeDE9IjgiIHgyPSI4IiB5MT0iMiIgeTI9IjYiLz48bGluZSB4MT0iMyIgeDI9IjIxIiB5MT0iMTAiIHkyPSIxMCIvPjxwYXRoIGQ9Im0xNiAyMCAyIDIgNC00Ii8+PC9zdmc+)](https://github.com/zarnuq/DocWorks/releases/latest)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)](LICENSE)
 
-![Editing a slide deck with the slide panel and thumbnails](docs/pptx.png)
+![Editing a slide deck with the menu bar, toolbar and slide thumbnails](docs/pptx.png)
 
 - **Looks like PowerPoint, Word and Excel.** Themes, layouts, shapes, SmartArt, tables, document styles and cell formats render faithfully, even without Office fonts.
 - **Doesn't break your files.** Only what you edit is rewritten; everything else is saved back byte-for-byte.
@@ -15,7 +15,7 @@
 
 If it saves you a trip to Office, please ⭐ the repo.
 
-![Editing a Word document with comments, footnotes and tracked changes](docs/docx.png)
+![Editing a Word document in page view with the ruler](docs/docx.png)
 
 ![Editing a spreadsheet with conditional formatting, dropdowns and a chart](docs/xlsx.png)
 
@@ -65,7 +65,9 @@ If it saves you a trip to Office, please ⭐ the repo.
 - Saves only what you change; the rest of the file is kept byte for byte
 - Google Docs / Slides / Sheets-style menus and toolbars
 - Undo / redo, autosave with retry, light and dark page themes
-- Find and replace, including speaker notes, comments and cell notes
+- Find and replace with whole words, regular expressions and ignore accents, including speaker notes, comments and cell notes
+- Search inside every document, deck and sheet in the vault from a side panel
+- Read-only mode in settings: view files without any chance of changing them
 - Export to PDF; slides to PNG, sheets to CSV
 - New document / presentation / spreadsheet commands
 - No Office or other software needed; works offline and on mobile
@@ -74,7 +76,13 @@ If it saves you a trip to Office, please ⭐ the repo.
 
 - **Export current note to .docx:** headings, lists, tasks, callouts, code, tables, equations, pictures and links back to Obsidian
 - **Export to Markdown** from a Word file, keeping frontmatter, tasks, callouts and code languages from notes exported here
-- Embed a file in a note: `![[report.docx]]`, `![[deck.pptx#3]]`, `![[budget.xlsx#Sheet2]]`
+- **Export current note to .docx** also brings in embedded files: sheets as tables, slides as pictures, documents as their content
+- Embed a file in a note: `![[report.docx]]`, `![[deck.pptx#3]]`, `![[budget.xlsx#Sheet2]]`, or just a range: `![[budget.xlsx#Sheet2!A1:D10]]`
+- **Copy as Markdown:** a sheet range as a Markdown table, a deck as a headed outline
+
+![A note with an embedded slide and a sheet range](docs/embeds.png)
+
+![Searching inside documents, slides and sheets from the side panel](docs/search.png)
 
 ## Install
 

@@ -63,8 +63,7 @@ export async function exportNoteToDocx(app: App, file: TFile): Promise<void> {
   const component = new Component();
   component.load();
   try {
-    const { el, warnings } = await renderNoteForExport(app, file, component);
-    const pictures = new Map<HTMLImageElement, Picture>();
+    const { el, warnings, pictures } = await renderNoteForExport(app, file, component);
     for (const img of Array.from(el.querySelectorAll("img"))) {
       const target = pictureFile(app, img, img.dataset.exportSource ?? file.path);
       const pic = target && (await loadPicture(app, target));

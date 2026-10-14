@@ -50,24 +50,30 @@ export function sheetToCsv(sheet: Sheet): string {
 }
 
 /**
- * Copy as Markdown table: the shown text of `r` (cut to the used area, hidden rows and columns left out), the first
- * row as the header, columns of numbers right-aligned. "" when nothing is in the range.
+ * The shown text of `r`, cut to the used area, with hidden rows and columns left out; null when nothing is in it.
+ * `numeric` tells, per kept column, whether every value under the first row is a number.
  */
-export function rangeToMarkdown(sheet: Sheet, r: Rect): string {
+export function rangeRows(sheet: Sheet, r: Rect): { rows: string[][]; numeric: boolean[] } | null {
   const used = sheet.used();
-  if (!used) return "";
+  if (!used) return null;
   const r2 = Math.min(r.r2, used.r2), c2 = Math.min(r.c2, used.c2);
   const rows: number[] = [], cols: number[] = [];
   for (let i = r.r1; i <= r2; i++) if (sheet.rowHeight(i) > 0) rows.push(i);
   for (let i = r.c1; i <= c2; i++) if (sheet.colWidth(i) > 0) cols.push(i);
-  if (!rows.some((row) => cols.some((col) => sheet.at(row, col)))) return "";
-  const cell = (row: number, col: number) => sheet.display(row, col).text.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
-  const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
-  const numeric = (col: number) => {
+  if (!rows.some((row) => cols.some((col) => sheet.at(row, col)))) return null;
+  const numeric = cols.map((col) => {
     const body = rows.slice(1).map((row) => sheet.at(row, col)?.value).filter((v) => v !== undefined && v !== null && v !== "");
     return body.length > 0 && body.every((v) => typeof v === "number");
-  };
-  return [line(cols.map((col) => cell(rows[0], col))), line(cols.map((col) => (numeric(col) ? "---:" : "---"))), ...rows.slice(1).map((row) => line(cols.map((col) => cell(row, col)))), ""].join("\n");
+  });
+  return { rows: rows.map((row) => cols.map((col) => sheet.display(row, col).text)), numeric };
+}
+
+/** Copy as Markdown table: `rangeRows` with the first row as the header and number columns right-aligned; "" when empty. */
+export function rangeToMarkdown(sheet: Sheet, r: Rect): string {
+  const t = rangeRows(sheet, r);
+  if (!t) return "";
+  const line = (cells: string[]) => `| ${cells.map((c) => c.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>")).join(" | ")} |`;
+  return [line(t.rows[0]), `| ${t.numeric.map((n) => (n ? "---:" : "---")).join(" | ")} |`, ...t.rows.slice(1).map(line), ""].join("\n");
 }
 
 /** Add a tab after tab `after`, named from `name` (made valid and unique), holding `rows`; returns the tab's name. */

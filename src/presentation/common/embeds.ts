@@ -15,7 +15,7 @@ import { Edits } from "../../domain/xlsx/commands";
 import { ConditionalFormats } from "../../domain/xlsx/conditional";
 import { sheetPictures } from "../../domain/xlsx/drawing";
 import { formulaSparklines, readSparklines } from "../../domain/xlsx/sparklines";
-import { Workbook } from "../../domain/xlsx/workbook-model";
+import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { parseRange, rangeName, Rect } from "../../domain/xlsx/references";
 import { eotToTtf } from "../../infrastructure/fonts/eot";
 import { DocxDocument } from "../../infrastructure/docx/docx-document";
@@ -30,6 +30,15 @@ import { Grid } from "../xlsx/grid";
 const MAX_ROWS = 60, MAX_COLS = 20;
 /** An explicit range is drawn as asked, up to this size. */
 const MAX_RANGE_ROWS = 500, MAX_RANGE_COLS = 50;
+
+/** The cells an embed shows: the range asked for (up to MAX_RANGE_*), or the sheet's used area (up to MAX_*). */
+export function embedRange(sheet: Sheet, range: Rect | null): Rect | null {
+  const used = range ?? sheet.used();
+  if (!used) return null;
+  return range
+    ? { ...used, r2: Math.min(used.r2, used.r1 + MAX_RANGE_ROWS - 1), c2: Math.min(used.c2, used.c1 + MAX_RANGE_COLS - 1) }
+    : { r1: 0, c1: 0, r2: Math.min(used.r2, MAX_ROWS - 1), c2: Math.min(used.c2, MAX_COLS - 1) };
+}
 
 /** "#Sheet!A1:D10", "#'My sheet'!B2", "#A1:D10" (first sheet) or "#Sheet": the sheet and range to show. */
 export function sheetTarget(subpath: string, names: string[]): { sheet: string | null; range: Rect | null } {
@@ -104,8 +113,8 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
   const tabs = !target.range && visible.length > 1 ? el.createDiv({ cls: "dw-embed-tabs" }) : null;
   const draw = async () => {
     area.empty();
-    const used = target.range ?? sheet.used();
-    if (!used) return void area.createDiv({ cls: "dw-muted", text: "This sheet is empty." });
+    const r = embedRange(sheet, target.range);
+    if (!r) return void area.createDiv({ cls: "dw-muted", text: "This sheet is empty." });
     const pictures = sheetPictures(wb, sheet);
     for (const p of pictures) if (!urls.has(p.image)) urls.set(p.image, blobUrl(await wb.pkg.media(p.image).catch(() => new Uint8Array()), p.image));
     const cf = new ConditionalFormats(sheet, (r, c, f) => edits.calc.evaluate(sheet, r, c, f));
@@ -128,9 +137,6 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
       contextMenu: () => undefined,
       filterMenu: () => undefined,
     });
-    const r = target.range
-      ? { ...used, r2: Math.min(used.r2, used.r1 + MAX_RANGE_ROWS - 1), c2: Math.min(used.c2, used.c1 + MAX_RANGE_COLS - 1) }
-      : { r1: 0, c1: 0, r2: Math.min(used.r2, MAX_ROWS - 1), c2: Math.min(used.c2, MAX_COLS - 1) };
     caption?.setText(`${sheet.name}!${rangeName(r)}`);
     // The painted cells are positioned absolutely; the box takes their size so the frame scrolls over them.
     const grid = area.createDiv({ cls: "dw-embed-grid" });
@@ -179,7 +185,7 @@ class OfficeEmbed extends Component {
   async loadFile(): Promise<void> {
     const el = this.containerEl;
     el.empty();
-    el.addClass("dw-embed");
+    el.addClass("dw-embed", `dw-embed-file-${this.kind}`);
     const title = el.createDiv({ cls: "dw-embed-title", text: this.file.basename });
     title.addEventListener("click", () => void this.app.workspace.getLeaf("tab").openFile(this.file));
     const body = el.createDiv({ cls: `dw-embed-body dw-embed-${this.kind}` });

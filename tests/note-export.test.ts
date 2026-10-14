@@ -150,3 +150,14 @@ describe("note export to .docx", () => {
     expect(texts).toEqual(["Slide: deck.pptx#2", "Embedded note text"]);
   });
 });
+
+describe("pictures between blocks", () => {
+  it("keeps a picture that sits directly between blocks (looked up by the element itself)", () => {
+    const root = html(`<p>Before</p><img alt="slide"><p>After</p>`);
+    const img = root.querySelector("img")!;
+    const doc = htmlToDoc(root, { ...ctx, image: (el: HTMLImageElement) => (el === img ? { rId: "rId9", src: "", width: 10, height: 5 } : null) });
+    const pics: string[] = [];
+    doc.forEach((block) => block.descendants((n) => void (n.type.name === "image" && pics.push(n.attrs.rId as string))));
+    expect(pics).toEqual(["rId9"]);
+  });
+});

@@ -127,7 +127,8 @@ export function htmlToDoc(root: HTMLElement, ctx: FromHtmlContext): PMNode {
     const flush = () => {
       if (!loose.some((n) => (n.textContent ?? "").trim() || (n.instanceOf(HTMLElement) && (n.querySelector("img, input") || ["IMG", "INPUT"].includes(n.tagName))))) return void (loose = []);
       const holder = createSpan();
-      holder.append(...loose.map((n) => n.cloneNode(true)));
+      // Moved, not copied: pictures are looked up by their element.
+      holder.append(...loose);
       into.push(paragraph(holder, attrs));
       loose = [];
     };

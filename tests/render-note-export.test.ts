@@ -1,20 +1,26 @@
+vi.mock("../src/presentation/common/png", () => ({ PNG_WIDTH: 1920, renderPng: vi.fn(async () => new Uint8Array([137, 80, 78, 71])) }));
 import { afterEach, expect, it, vi } from "vitest";
 import * as obsidian from "obsidian";
 import { renderNoteForExport } from "../src/presentation/common/render-note-export";
+import { fixture } from "./helpers";
+import { sheetXml, xlsx } from "./xlsx-fixtures";
 
 afterEach(() => vi.restoreAllMocks());
 const file = (path: string) => Object.assign(new obsidian.TFile(), { path });
-function setup(notes: Record<string, { markdown: string; html: string }>) {
-  const files = new Map(Object.keys(notes).map(path => [path, file(path)]));
+function setup(notes: Record<string, { markdown: string; html: string }>, binaries: Record<string, Uint8Array> = {}) {
+  const files = new Map([...Object.keys(notes), ...Object.keys(binaries)].map(path => [path, file(path)]));
   const read = vi.fn(async (f: obsidian.TFile) => notes[f.path].markdown);
   const app = {
-    vault: { cachedRead: read, getName: () => "My vault" },
+    vault: { cachedRead: read, getName: () => "My vault", readBinary: async (f: obsidian.TFile) => binaries[f.path].slice().buffer },
     metadataCache: {
       getFirstLinkpathDest: vi.fn((path: string, source: string) => files.get(path) ?? files.get(source.slice(0, source.lastIndexOf("/") + 1) + path) ?? null),
       getFileCache: () => ({}),
     },
   } as unknown as obsidian.App;
-  const render = vi.spyOn(obsidian.MarkdownRenderer, "render").mockImplementation(async (_app, _markdown, el, source) => { el.innerHTML = notes[source].html; });
+  // A Word file's Markdown is shown as paragraphs, its pictures as <img>.
+  const render = vi.spyOn(obsidian.MarkdownRenderer, "render").mockImplementation(async (_app, markdown, el, source) => {
+    el.innerHTML = notes[source]?.html ?? markdown.split(/\n\n+/).map(b => /^!\[[^\]]*\]\(<?([^>)]+)>?\)$/.exec(b.trim()) ? `<p><img src="${/\(<?([^>)]+)>?\)/.exec(b)![1]}"></p>` : `<p>${b}</p>`).join("");
+  });
   const finishMath = vi.spyOn(obsidian, "finishRenderMath").mockResolvedValue();
   return { app, files, read, render, finishMath, component: new obsidian.Component() };
 }
@@ -118,4 +124,32 @@ it("splits a paragraph around an embedded note to retain the note's block struct
   });
   const out = await renderNoteForExport(t.app, t.files.get("main.md")!, t.component);
   expect(Array.from(out.el.children).map(e => e.textContent)).toEqual(["Before ", "HeadingBody", " after"]);
+});
+
+it("turns a sheet range embed into a table of its shown values", async () => {
+  const bytes = await xlsx({ sheets: [sheetXml(`<row r="1"><c r="A1" t="inlineStr"><is><t>Item</t></is></c><c r="B1" t="inlineStr"><is><t>Cost</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Tea</t></is></c><c r="B2"><v>3</v></c></row><row r="3"><c r="A3" t="inlineStr"><is><t>Not asked for</t></is></c></row>`)], names: ["One"] });
+  const t = setup({ "main.md": { markdown: "", html: '<p>Before</p><div class="internal-embed" src="book.xlsx#One!A1:B2"></div>' } }, { "book.xlsx": bytes });
+  const out = await renderNoteForExport(t.app, t.files.get("main.md")!, t.component);
+  const table = out.el.querySelector("table")!;
+  expect(Array.from(table.querySelectorAll("thead th")).map(c => c.textContent)).toEqual(["Item", "Cost"]);
+  expect(Array.from(table.querySelectorAll("tbody td")).map(c => c.textContent)).toEqual(["Tea", "3"]);
+  expect(out.el.querySelector(".internal-embed")).toBeNull();
+});
+
+it("turns a slide embed into a picture of the slide", async () => {
+  const t = setup({ "main.md": { markdown: "", html: '<div class="internal-embed" src="deck.pptx#2"></div>' } }, { "deck.pptx": fixture("sample.pptx") });
+  const out = await renderNoteForExport(t.app, t.files.get("main.md")!, t.component);
+  const img = out.el.querySelector("img")!;
+  expect(img.getAttribute("alt")).toBe("deck, slide 2");
+  const pic = out.pictures.get(img)!;
+  expect([pic.ext, pic.bytes[0], pic.width > pic.height]).toEqual(["png", 137, true]);
+});
+
+it("brings an embedded Word document's text and pictures into the export", async () => {
+  globalThis.createImageBitmap = (async () => ({ width: 40, height: 20, close: () => undefined })) as unknown as typeof createImageBitmap;
+  const t = setup({ "main.md": { markdown: "", html: '<div class="internal-embed" src="report.docx"></div>' } }, { "report.docx": fixture("sample.docx") });
+  const out = await renderNoteForExport(t.app, t.files.get("main.md")!, t.component);
+  expect(out.el.textContent).toContain("Doc Heading");
+  const img = out.el.querySelector("img")!;
+  expect(out.pictures.get(img)).toMatchObject({ ext: "png", width: 40, height: 20 });
 });

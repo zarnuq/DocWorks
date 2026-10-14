@@ -2629,6 +2629,18 @@ textarea.pptx-notes {
   overflow: hidden;
 }
 
+/* Documents and slides are as wide as the note's text (readable line length), not the whole pane; sheets are as
+   wide as their cells, scrolling inside when wider than the note. */
+.dw-embed-file-docx,
+.dw-embed-file-pptx {
+  max-width: var(--file-line-width);
+}
+
+.dw-embed-file-xlsx {
+  width: fit-content;
+  max-width: 100%;
+}
+
 .dw-embed-title {
   padding: var(--size-4-1) var(--size-4-2);
   font-size: var(--font-ui-small);
@@ -2981,9 +2993,4 @@ textarea.pptx-notes {
 
 .dw-search-file + .dw-search-file {
   margin-top: var(--size-4-3);
-}
-
-.dw-embed-range + .dw-embed-sheet {
-  width: fit-content;
-  max-width: 100%;
 }
