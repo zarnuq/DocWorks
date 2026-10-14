@@ -291,8 +291,8 @@ export class Toolbar {
       .filter((g) => g.dataset.folded)
       .forEach((g, n) => {
         if (n) m.addSeparator();
-        for (const el of Array.from(g.children) as HTMLElement[]) {
-          const select = (el.matches("select") ? el : el.querySelector("select")) as HTMLSelectElement | null;
+        for (const el of Array.from(g.children)) {
+          const select = el.instanceOf(HTMLSelectElement) ? el : el.querySelector("select");
           const color = el.querySelector<HTMLInputElement>('input[type="color"]');
           // "Bold (Ctrl+B)" -> "Bold": the hint is for the tooltip.
           const label = (el.getAttribute("aria-label") ?? el.textContent ?? "").replace(/\s*\([^)]*\)$/, "");
@@ -310,8 +310,8 @@ export class Toolbar {
                 }, { checked: select.value === o.value });
               }
             });
-          } else if (el.matches("button")) {
-            menuItem(m, label, () => el.click(), { checked: el.classList.contains("is-active") || undefined, disabled: el.hasAttribute("disabled") });
+          } else if (el.instanceOf(HTMLButtonElement)) {
+            menuItem(m, label, () => el.click(), { checked: el.classList.contains("is-active") || undefined, disabled: el.disabled });
           }
         }
       });
