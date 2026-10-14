@@ -177,6 +177,8 @@ export function cellSelectionPlugin(): Plugin {
   };
   return new Plugin({
     props: {
+      // Kept on the editor (ProseMirror drops its hide-selection class once the browser selection moves during a drag).
+      attributes: (state): Record<string, string> => (state.selection instanceof CellSelection ? { class: "has-cell-selection" } : {}),
       decorations(state) {
         const sel = state.selection;
         if (!(sel instanceof CellSelection)) return null;

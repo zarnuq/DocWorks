@@ -161,8 +161,10 @@ describe("dragging across cells", () => {
       expect(view.state.selection).toBeInstanceOf(CellSelection);
       expect((view.state.selection as CellSelection).cells.map((p) => view.state.doc.nodeAt(p)!.textContent)).toEqual(["0,0", "0,1", "1,0", "1,1"]);
       expect(view.dom.querySelectorAll("td.is-cell-selected").length).toBe(4);
+      expect(view.dom.classList.contains("has-cell-selection")).toBe(true);
       tds[0].dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
       expect(view.state.selection).toBeInstanceOf(TextSelection);
+      expect(view.dom.classList.contains("has-cell-selection")).toBe(false);
       window.dispatchEvent(new MouseEvent("mouseup"));
       tds[5].dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
       expect(view.state.selection).toBeInstanceOf(TextSelection);

@@ -340,7 +340,7 @@
 
 /* A selection the editor draws itself (cells): the browser's own highlight and caret stay hidden. */
 .ProseMirror-hideselection *::selection,
-.ProseMirror table:has(td.is-cell-selected) ::selection {
+.ProseMirror.has-cell-selection ::selection {
   background: transparent;
 }
 
