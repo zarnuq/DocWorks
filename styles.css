@@ -3166,3 +3166,45 @@ textarea.pptx-notes {
   border: 1px dotted var(--interactive-accent);
   pointer-events: none;
 }
+
+/* Version history › Compare: changed text since a version. */
+.dw-changes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+  margin-top: var(--size-4-2);
+}
+
+.dw-change {
+  padding: var(--size-4-1) var(--size-4-2);
+  border-left: 3px solid var(--color-orange);
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
+  white-space: pre-wrap;
+}
+
+.dw-change.is-added {
+  border-left-color: var(--color-green);
+}
+
+.dw-change.is-removed {
+  border-left-color: var(--color-red);
+}
+
+.dw-change-where {
+  margin-right: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+}
+
+.dw-change del {
+  color: var(--color-red);
+  background: rgba(var(--color-red-rgb), 0.12);
+}
+
+.dw-change ins {
+  color: var(--color-green);
+  background: rgba(var(--color-green-rgb), 0.12);
+  text-decoration: none;
+}

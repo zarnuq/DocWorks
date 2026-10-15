@@ -68,7 +68,7 @@ If it saves you a trip to Office, please ⭐ the repo.
 - Find and replace with whole words, regular expressions and ignore accents, including speaker notes, comments and cell notes
 - Search inside every document, deck and sheet in the vault from a side panel
 - Read-only mode in settings: view files without any chance of changing them
-- Version history: earlier versions are kept (in the app, not the vault) before saving; File › Version history to preview and restore
+- Version history: earlier versions are kept (in the app, not the vault) before saving; File › Version history to preview, compare with the file now, and restore
 - Export to PDF; slides to PNG, sheets to CSV
 - New document / presentation / spreadsheet commands
 - No Office or other software needed; works offline and on mobile

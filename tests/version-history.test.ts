@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryVersionStore, VersionHistory } from "../src/presentation/common/version-history";
 
 const MIN = 60_000, DAY = 86_400_000, MB = 1024 * 1024;
@@ -173,6 +173,65 @@ describe("File › Version history", () => {
       await versionHistoryDialog(new App() as never, { file: new TFile("a.docx") } as never, true);
       expect(document.querySelectorAll(".dw-version")).toHaveLength(1);
       expect(document.querySelector(".dw-version button.mod-cta")).toBeNull();
+    } finally {
+      setVersionHistory(null);
+      document.body.empty();
+    }
+  });
+});
+
+describe("Version history › Compare", () => {
+  async function docx(...paras: string[]): Promise<Uint8Array> {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    zip.file("word/document.xml", `<w:document xmlns:w="${W}"><w:body>${paras.map((t) => `<w:p><w:r><w:t>${t}</w:t></w:r></w:p>`).join("")}</w:body></w:document>`);
+    return zip.generateAsync({ type: "uint8array" });
+  }
+
+  it("shows what changed since a version, words struck out and added", async () => {
+    const { App, TFile } = await import("./obsidian-stub");
+    const { setVersionHistory } = await import("../src/presentation/common/version-history");
+    const { versionHistoryDialog } = await import("../src/presentation/common/version-dialog");
+    const history = new VersionHistory(new MemoryVersionStore(), () => ({ enabled: true, days: 14 }));
+    setVersionHistory(history);
+    try {
+      const old = await docx("Title", "The quick fox", "Gone");
+      const now = await docx("Title", "The slow fox", "New end");
+      await history.beforeSave("a.docx", async () => old);
+      const app = new App();
+      app.vault.readBinary = async () => now.slice().buffer;
+      const saved: string[] = [];
+      const view = { file: new TFile("a.docx"), requestSave: async () => void saved.push("save") };
+      await versionHistoryDialog(app as never, view as never, true);
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".dw-version button")).find((b) => b.textContent === "Compare")!.click();
+      await vi.waitFor(() => expect(document.querySelectorAll(".dw-change")).toHaveLength(2));
+      expect(saved).toEqual(["save"]);
+      const changes = Array.from(document.querySelectorAll(".dw-change"));
+      expect(changes[0].querySelector("del")!.textContent).toBe("quick");
+      expect(changes[0].querySelector("ins")!.textContent).toBe("slow");
+      expect(changes[1].querySelector("del")!.textContent).toBe("Gone");
+      expect(changes[1].querySelector("ins")!.textContent).toBe("New end");
+    } finally {
+      setVersionHistory(null);
+      document.body.empty();
+    }
+  });
+
+  it("says when the text is the same", async () => {
+    const { App, TFile } = await import("./obsidian-stub");
+    const { setVersionHistory } = await import("../src/presentation/common/version-history");
+    const { versionHistoryDialog } = await import("../src/presentation/common/version-dialog");
+    const history = new VersionHistory(new MemoryVersionStore(), () => ({ enabled: true, days: 14 }));
+    setVersionHistory(history);
+    try {
+      const same = await docx("Title");
+      await history.beforeSave("a.docx", async () => same);
+      const app = new App();
+      app.vault.readBinary = async () => same.slice().buffer;
+      await versionHistoryDialog(app as never, { file: new TFile("a.docx"), requestSave: async () => {} } as never, true);
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".dw-version button")).find((b) => b.textContent === "Compare")!.click();
+      await vi.waitFor(() => expect(document.querySelector(".dw-version-preview")!.textContent).toContain("No text changes"));
     } finally {
       setVersionHistory(null);
       document.body.empty();

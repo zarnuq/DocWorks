@@ -6,6 +6,7 @@
 import JSZip from "jszip";
 import { NS } from "../core/utils/xml";
 import { SearchOptions, textMatches } from "../core/utils/text-matches";
+import { diff } from "../core/utils/diff";
 import { parseXml, resolvePath } from "./ooxml/ooxml-package";
 
 export interface TextPart {
@@ -97,4 +98,57 @@ export function searchText(parts: TextPart[], query: string, opts: SearchOptions
       after: text.length - m.end > 60 ? `${text.slice(m.end, m.end + 60)}…` : text.slice(m.end),
     }))
   );
+}
+
+export interface TextChange {
+  kind: "added" | "removed" | "changed";
+  /** "Slide 3", "Budget!B4"; "" in documents. */
+  where: string;
+  before?: string;
+  after?: string;
+}
+
+/** What changed between two `officeText` readings: paragraphs in order (documents, slides), cells by address (sheets). */
+export function compareText(ext: "docx" | "pptx" | "xlsx", before: TextPart[], after: TextPart[]): TextChange[] {
+  if (ext === "xlsx") return compareCells(before, after);
+  const out: TextChange[] = [];
+  let removed: TextPart[] = [], added: TextPart[] = [];
+  // A run of removed and added paragraphs: the first ones pair up as changed, the rest stay removed / added.
+  const flush = () => {
+    const paired = Math.min(removed.length, added.length);
+    for (let i = 0; i < paired; i++) out.push({ kind: "changed", where: added[i].label, before: removed[i].text, after: added[i].text });
+    for (const r of removed.slice(paired)) out.push({ kind: "removed", where: r.label, before: r.text });
+    for (const a of added.slice(paired)) out.push({ kind: "added", where: a.label, after: a.text });
+    removed = [];
+    added = [];
+  };
+  for (const op of diff(before, after, (x, y) => x.text === y.text)) {
+    if (op.kind === "same") flush();
+    else if (op.kind === "removed") removed.push(op.a);
+    else added.push(op.b);
+  }
+  flush();
+  return out;
+}
+
+function compareCells(before: TextPart[], after: TextPart[]): TextChange[] {
+  const was = new Map(before.map((p) => [p.label, p.text]));
+  const now = new Map(after.map((p) => [p.label, p.text]));
+  const sheets = [...new Set([...after, ...before].map((p) => p.label.slice(0, p.label.lastIndexOf("!"))))];
+  const key = (label: string) => {
+    const bang = label.lastIndexOf("!");
+    const m = /^([A-Z]+)(\d+)$/.exec(label.slice(bang + 1));
+    const col = m ? [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) : 0;
+    return [sheets.indexOf(label.slice(0, bang)), m ? Number(m[2]) : 0, col];
+  };
+  const out: TextChange[] = [];
+  for (const where of new Set([...was.keys(), ...now.keys()])) {
+    const b = was.get(where), a = now.get(where);
+    if (b === a) continue;
+    out.push(b === undefined ? { kind: "added", where, after: a } : a === undefined ? { kind: "removed", where, before: b } : { kind: "changed", where, before: b, after: a });
+  }
+  return out.sort((x, y) => {
+    const [s1, r1, c1] = key(x.where), [s2, r2, c2] = key(y.where);
+    return s1 - s2 || r1 - r2 || c1 - c2;
+  });
 }
