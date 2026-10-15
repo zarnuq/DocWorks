@@ -17,7 +17,7 @@ export function showBelow(menu: Menu, anchor: HTMLElement): void {
 const MENU_ICONS: Record<string, string> = {
   "Export…": "file-output", Undo: "undo-2", Redo: "redo-2", Cut: "scissors", Copy: "copy", Paste: "clipboard-paste",
   "Paste without formatting": "clipboard-type", "Paste values only": "clipboard-type", "Select all": "text-select", Delete: "trash-2",
-  "Find and replace": "replace", Editing: "pencil", Suggesting: "file-pen", "Page view": "file-text", Ruler: "ruler",
+  "Find and replace": "replace", Editing: "pencil", Suggesting: "file-pen", "Page view": "file-text", Ruler: "ruler", "Linked from": "links-coming-in",
   Outline: "list-tree", "Review panel": "messages-square", Zoom: "zoom-in", Light: "sun", Dark: "moon", Present: "play",
   "Present from start": "presentation", "Grid view": "layout-grid", "Format panel": "panel-right", Freeze: "snowflake",
   Image: "image", Table: "table", Drawing: "pen-tool", Chart: "chart-column", Equation: "sigma", "Special characters": "omega",
@@ -41,7 +41,7 @@ let menuBarIcons = false;
 
 /** Read-only files: the menus kept, and the items (or whole submenus) in them that only look at the file. */
 const VIEW_MENUS = new Set(["File", "Edit", "View", "Tools", "Help"]);
-const VIEW_ITEMS = new Set(["Export…", "Copy", "Copy as Markdown table", "Copy as Markdown outline", "Copy link to slide", "Copy link to cells", "Copy link to heading", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts"]);
+const VIEW_ITEMS = new Set(["Export…", "Copy", "Copy as Markdown table", "Copy as Markdown outline", "Copy link to slide", "Copy link to cells", "Copy link to heading", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts", "Linked from"]);
 /** Set while a read-only file's menu is being built: other items are left out. */
 let viewOnly = false;
 const hidden = (title: string) => viewOnly && !VIEW_ITEMS.has(title);

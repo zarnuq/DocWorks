@@ -3,6 +3,7 @@
  * (a package must not change while the previous save is zipping it), and a failed save keeps the edits and hands
  * Retry to the toolbar's SaveStatus. Read-only files are never saved.
  */
+import { type FileView, Notice } from "obsidian";
 import type { SaveStatus } from "./save-status";
 
 export interface AutosaveOptions {
@@ -27,6 +28,8 @@ export class Autosave {
   status: SaveStatus | null = null;
   private timer: number | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** When the last write ended (or now, while one runs). */
+  private lastWrite = 0;
 
   constructor(private opts: AutosaveOptions) {}
 
@@ -63,7 +66,12 @@ export class Autosave {
       const name = this.opts.name();
       this.dirty = false;
       try {
-        await this.opts.write();
+        this.lastWrite = Date.now();
+        try {
+          await this.opts.write();
+        } finally {
+          this.lastWrite = Date.now();
+        }
         if (this.dirty || this.opts.pending?.()) this.status?.saving();
         else this.status?.saved();
       } catch (err) {
@@ -75,8 +83,24 @@ export class Autosave {
     return this.queue;
   }
 
+  /** Whether a vault `modify` now is likely this editor's own save. */
+  wroteRecently(): boolean {
+    return Date.now() - this.lastWrite < 2000;
+  }
+
   private cancelTimer(): void {
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
   }
+}
+
+/** Reload the view's file when something else changes it (sync, Office), unless that would throw away unsaved edits. */
+export function reloadOnOutsideChange(view: FileView, autosave: Autosave, reload: () => Promise<void>): void {
+  view.registerEvent(
+    view.app.vault.on("modify", (f) => {
+      if (f !== view.file || autosave.wroteRecently()) return;
+      if (autosave.dirty) new Notice(`${f.name} changed on disk. Your unsaved edits here will replace that version.`);
+      else void reload();
+    })
+  );
 }

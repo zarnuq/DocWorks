@@ -21,10 +21,11 @@ import { showFindPreview } from "../common/find-preview";
 import { findBar } from "../common/find-bar";
 import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
-import { Autosave } from "../common/autosave";
+import { Autosave, reloadOnOutsideChange } from "../common/autosave";
 import { keepVersion, versions } from "../common/version-history";
 import { versionHistoryDialog } from "../common/version-dialog";
 import { sheetTarget } from "../common/embeds";
+import { LinkedFrom } from "../common/backlinks";
 import { copyLink } from "../common/copy-link";
 import { runEditCommand } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
@@ -56,6 +57,7 @@ const H_ALIGNS: [string, string][] = [["Left", "left"], ["Center", "center"], ["
 const V_ALIGNS: [string, string][] = [["Top", "top"], ["Middle", "center"], ["Bottom", "bottom"]];
 const FUNCTIONS = ["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "IF", "VLOOKUP", "CONCATENATE"];
 const FREEZES: [string, string][] = [["No rows", "r0"], ["1 row", "r1"], ["2 rows", "r2"], ["Up to current row", "rc"], ["No columns", "c0"], ["1 column", "c1"], ["2 columns", "c2"], ["Up to current column", "cc"]];
+const IMPORT = "Import CSV or TSV as new sheet…";
 const ZOOM_KEY = "doc-works-xlsx-zoom";
 /** Google Sheets' zoom levels. */
 const ZOOMS = ["0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
@@ -97,7 +99,6 @@ export class XlsxView extends FileView {
   private clip: Clip | null = null;
   /** The next paste event (from the menu) pastes values only. */
   private valuesOnly = false;
-  private lastWrite = 0;
   private autosave = new Autosave({
     delay: 800,
     readOnly: () => this.settings.readOnly,
@@ -107,13 +108,11 @@ export class XlsxView extends FileView {
       const file = this.file!;
       const bytes = await this.edits!.wb.pkg.save();
       await keepVersion(this.app, file);
-      // Our own write isn't an outside change.
-      this.lastWrite = Date.now();
       await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-      this.lastWrite = Date.now();
     },
   });
   private findEl: HTMLElement | null = null;
+  private linked = new LinkedFrom(this, "xlsx", () => this.grid?.render());
   /** Object URLs of images by zip path ("" while loading). */
   private imageUrls = new Map<string, string>();
   private cfCache = new Map<string, ConditionalFormats>();
@@ -169,11 +168,7 @@ export class XlsxView extends FileView {
       this.openFind();
       return false;
     });
-    this.registerEvent(
-      this.app.vault.on("modify", (f) => {
-        if (f === this.file && Date.now() - this.lastWrite > 2000) void this.onExternalChange();
-      })
-    );
+    reloadOnOutsideChange(this, this.autosave, () => this.onExternalChange());
   }
 
   getViewType(): string {
@@ -194,6 +189,7 @@ export class XlsxView extends FileView {
     addFileItems(this, menu, source);
     if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(this.app, this, this.settings.readOnly)));
     menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
+    if (!this.settings.readOnly) menu.addItem((i) => i.setTitle(IMPORT).setIcon("file-input").setSection("action").onClick(() => this.pickCsv()));
   }
 
   private get wb(): Workbook {
@@ -273,6 +269,7 @@ export class XlsxView extends FileView {
       toggleCheckboxes: (r) => this.change(() => toggleCheckboxes(this.edits!, this.sheet, r)),
       movePicture: (key, box) => this.change(() => movePicture(this.edits!, this.sheet, key, box)),
       pictureMenu: (key, e) => this.pictureMenu(key, e),
+      linked: () => this.linkedRanges(),
       deletePicture: (key) => this.change(() => deletePicture(this.edits!, this.sheet, key)),
       toggleGroup: (axis, g) => this.change(() => setGroupCollapsed(this.edits!, this.sheet, axis, g, !g.collapsed)),
     });
@@ -299,6 +296,7 @@ export class XlsxView extends FileView {
     window.requestAnimationFrame(() => this.grid?.render());
     this.grid.focusGrid();
     this.loaded = load;
+    void this.linked.refresh();
     this.goToPlace();
   }
 
@@ -353,13 +351,19 @@ export class XlsxView extends FileView {
     this.grid?.render();
   }
 
-  /** The file changed outside this view: reload it, unless there are edits it would throw away. */
+  /** Ranges on the shown sheet that notes link to (a link without a sheet names the first visible one). */
+  private linkedRanges(): Rect[] {
+    const names = this.wb.sheets.map((s) => s.name);
+    const first = this.wb.sheets.find((s) => s.ref.state === "visible")?.name;
+    return this.linked.groups.flatMap((g) => {
+      const t = g.subpath ? sheetTarget(g.subpath, names) : null;
+      return t?.range && (t.sheet ?? first) === this.sheet.name ? [t.range] : [];
+    });
+  }
+
+  /** The file changed outside this view: reload it in place. */
   private async onExternalChange(): Promise<void> {
     if (!this.file) return;
-    if (this.autosave.dirty) {
-      new Notice(`${this.file.name} changed on disk. Your unsaved edits here will replace that version.`);
-      return;
-    }
     const pos = this.grid ? { ...this.grid.active } : null;
     const index = this.sheetIndex;
     await this.onLoadFile(this.file);
@@ -733,16 +737,16 @@ export class XlsxView extends FileView {
     modal.open();
   }
 
-  /** File › Import: pick a .csv in the vault for a new sheet. */
+  /** File › Import: pick a .csv or .tsv in the vault for a new sheet. */
   private pickCsv(): void {
-    const files = this.app.vault.getFiles().filter((f) => f.extension.toLowerCase() === "csv");
-    if (!files.length) return void new Notice("No .csv files in this vault.");
+    const files = this.app.vault.getFiles().filter((f) => ["csv", "tsv"].includes(f.extension.toLowerCase()));
+    if (!files.length) return void new Notice("No .csv or .tsv files in this vault.");
     new FilePicker(this.app, files, (f) => void this.importCsvFile(f)).open();
   }
 
   private async importCsvFile(file: TFile): Promise<void> {
     if (!this.edits) return;
-    const rows = parseCsv(await this.app.vault.read(file));
+    const rows = parseCsv(await this.app.vault.read(file), file.extension.toLowerCase() === "tsv" ? "\t" : ",");
     let name = "";
     if (!this.change(() => (name = importCsv(this.edits!, rows, file.basename, this.sheetIndex)))) return;
     this.showSheet(this.wb.sheets.findIndex((s) => s.name === name));
@@ -1286,6 +1290,7 @@ export class XlsxView extends FileView {
         for (const z of ZOOMS) menuItem(s, `${Math.round(Number(z) * 100)}%`, () => zoomTo(z), { checked: zoom.value === z });
       });
       menuItem(m, "Comments", () => this.allCommentsDialog());
+      menuItem(m, "Linked from", () => this.linked.toggle());
       m.addSeparator();
       menuItem(m, "Light", () => this.setTheme("light"), { checked: this.theme === "light" });
       menuItem(m, "Dark", () => this.setTheme("dark"), { checked: this.theme === "dark" });
@@ -1342,7 +1347,7 @@ export class XlsxView extends FileView {
       this.groupItems(m, "row", r.r1, r.r2);
       this.groupItems(m, "col", r.c1, r.c2);
       m.addSeparator();
-      menuItem(m, "Import CSV as new sheet…", () => this.pickCsv());
+      menuItem(m, IMPORT, () => this.pickCsv());
     });
     menu("Tools", (m) => {
       menuItem(m, "Paint format", () => this.startPainting(false));
@@ -1350,6 +1355,7 @@ export class XlsxView extends FileView {
     });
     menu("Help", (m) => menuItem(m, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS])));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
     if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.allCommentsDialog());
 
     this.autosave.status = tb.end().status;

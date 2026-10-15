@@ -48,7 +48,7 @@ describe("read-only setting", () => {
     expect(view.contentEl.hasClass("dw-read-only")).toBe(true);
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Tools", "Help"]);
     expect(menuTitles(view, "Edit")).toEqual(["Copy", "Select all", "Copy link to heading", "---", "Find and replace"]);
-    expect(menuTitles(view, "View")).toEqual(["Page view", "Outline", "Zoom", "---", "Light", "Dark"]);
+    expect(menuTitles(view, "View")).toEqual(["Page view", "Outline", "Linked from", "Zoom", "---", "Light", "Dark"]);
     expect(menuTitles(view, "View", "Zoom").length).toBeGreaterThan(3);
     expect(menuTitles(view, "Tools")).toEqual(["Word count", "Find and replace"]);
     const labels = toolbarLabels(view);
@@ -91,7 +91,7 @@ describe("read-only setting", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { view, saved } = await mount(PptxView, fixture("sample.pptx"), "deck.pptx");
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Tools", "Help"]);
-    expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "---", "Grid view", "Zoom", "---", "Light", "Dark"]);
+    expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "---", "Grid view", "Linked from", "Zoom", "---", "Light", "Dark"]);
     const labels = toolbarLabels(view);
     expect(labels).toContain("Zoom");
     expect(labels).not.toContain("Insert text box");
@@ -114,7 +114,7 @@ describe("read-only setting", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { view, saved } = await mount(XlsxView, await xlsx(), "book.xlsx");
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Tools", "Help"]);
-    expect(menuTitles(view, "View")).toEqual(["Zoom", "---", "Light", "Dark"]);
+    expect(menuTitles(view, "View")).toEqual(["Zoom", "Linked from", "---", "Light", "Dark"]);
     expect(toolbarLabels(view)).toContain("Zoom");
     expect(toolbarLabels(view)).not.toContain("Bold (Ctrl+B)");
     const input = view.contentEl.querySelector<HTMLTextAreaElement>(".xlsx-editor")!;

@@ -78,6 +78,8 @@ export interface GridHost {
   movePicture?(key: string, box: { x: number; y: number; w: number; h: number }): void;
   /** A picture's right-click menu. */
   pictureMenu?(key: string, e: MouseEvent): void;
+  /** Ranges notes link to, outlined. */
+  linked?(): Rect[];
   /** Delete on a selected picture. */
   deletePicture?(key: string): void;
   /** A chart dragged (or resized from its corner) to `box`, in sheet pixels. */
@@ -822,6 +824,12 @@ export class Grid {
           const b = make("xlsx-ref", s.colX(r.c1) + q.ox - 1, s.rowY(r.r1) + q.oy - 1, s.colX(r.c2 + 1) - s.colX(r.c1) + 1, s.rowY(r.r2 + 1) - s.rowY(r.r1) + 1);
           b.setCssProps({ "--xlsx-ref": REF_COLORS[i % REF_COLORS.length] });
         });
+    }
+
+    // Ranges notes link to.
+    for (const r of this.host.linked?.() ?? []) {
+      if (r.r1 > view.r2 || r.r2 < view.r1 || r.c1 > view.c2 || r.c2 < view.c1) continue;
+      make("xlsx-linked", s.colX(r.c1) + q.ox - 1, s.rowY(r.r1) + q.oy - 1, s.colX(r.c2 + 1) - s.colX(r.c1) + 1, s.rowY(r.r2 + 1) - s.rowY(r.r1) + 1);
     }
 
     // Selection.

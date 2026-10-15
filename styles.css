@@ -3085,3 +3085,84 @@ textarea.pptx-notes {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
+
+/* Linked from (backlinks.ts): the drawer listing notes that link here, and markers on the linked places. */
+.dw-backlinks-drawer {
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--size-4-2);
+  outline: none;
+}
+
+.dw-backlinks-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: var(--font-semibold);
+  padding: var(--size-4-1) var(--size-4-2);
+}
+
+.dw-backlinks-place {
+  display: block;
+  width: 100%;
+  margin-top: var(--size-4-2);
+  text-align: left;
+  font-weight: var(--font-semibold);
+  font-size: var(--font-ui-small);
+  background: none;
+  box-shadow: none;
+}
+
+.dw-backlinks-place:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.dw-backlinks-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 var(--size-4-2);
+  padding: var(--size-4-1) var(--size-4-2) var(--size-4-1) var(--size-4-4);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.dw-backlinks-note:hover,
+.dw-backlinks-note:focus-visible {
+  background: var(--background-modifier-hover);
+}
+
+.dw-backlinks-icon {
+  grid-row: span 2;
+  color: var(--text-muted);
+}
+
+.dw-backlinks-text {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-linked-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: var(--radius-l);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+}
+
+.xlsx-linked {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--w);
+  height: var(--h);
+  border: 1px dotted var(--interactive-accent);
+  pointer-events: none;
+}

@@ -17,9 +17,10 @@ import { Origins, readDocx, startsWordPage } from "../../domain/docx/docx-reader
 import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
-import { Autosave } from "../common/autosave";
+import { Autosave, reloadOnOutsideChange } from "../common/autosave";
 import { keepVersion, versions } from "../common/version-history";
 import { versionHistoryDialog } from "../common/version-dialog";
+import { LinkedFrom } from "../common/backlinks";
 import { findHeading, headingLinkText, headings } from "../../domain/docx/headings";
 import { copyLink } from "../common/copy-link";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
@@ -147,6 +148,7 @@ export class DocxView extends FileView {
   private zoom: string = ZOOMS.includes(this.app.loadLocalStorage(ZOOM_KEY) as string) ? (this.app.loadLocalStorage(ZOOM_KEY) as string) : "fit";
   private zoomSelect: HTMLSelectElement | null = null;
   private hostEl: HTMLElement | null = null;
+  private linked = new LinkedFrom(this, "docx", () => this.renderOutline());
   private wordsEl: HTMLElement | null = null;
   private wordsTimer: number | null = null;
   private rulerFrame = 0;
@@ -193,6 +195,11 @@ export class DocxView extends FileView {
     // Obsidian binds these to its markdown editor (bold, italic, link...) or the user to other commands: inside the
     // document they belong to the document's editor, which handles them itself.
     shieldEditingKeys(this.scope);
+    reloadOnOutsideChange(this, this.autosave, async () => {
+      const top = this.hostEl?.scrollTop ?? 0;
+      if (this.file) await this.onLoadFile(this.file);
+      if (this.hostEl) this.hostEl.scrollTop = top;
+    });
   }
 
   onPaneMenu(menu: Menu, source: string): void {
@@ -412,6 +419,7 @@ export class DocxView extends FileView {
     this.renderOutline();
     void this.loadFonts();
     this.loaded = load;
+    void this.linked.refresh();
     this.goToPlace();
   }
 
@@ -710,6 +718,7 @@ export class DocxView extends FileView {
       menuItem(mn, "Ruler", () => this.toggleRuler(), { checked: this.rulerViewport?.style.display !== "none" });
       menuItem(mn, "Outline", () => this.toggleOutline(), { checked: this.outlineOpen });
       menuItem(mn, "Review panel", () => this.toggleReview(), { checked: this.reviewOpen });
+      menuItem(mn, "Linked from", () => this.linked.toggle());
       subMenu(mn, "Zoom", (z) => {
         for (const value of ZOOMS) menuItem(z, zoomLabel(value), () => this.setZoom(value), { checked: this.zoom === value });
       });
@@ -781,6 +790,7 @@ export class DocxView extends FileView {
     });
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...DOCS_SHORTCUTS])));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
     if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.toggleReview());
 
     mode.parentElement?.addClass("dw-push");
@@ -892,8 +902,16 @@ export class DocxView extends FileView {
     const active = [...entries].reverse().find(e => e.pos <= editor.state.selection.from)?.pos;
     // Nesting from the top heading level used (a document may start at Heading 2), as Google Docs' outline shows it.
     const top = Math.min(...entries.map((e) => e.level));
+    // Headings notes link to ([[file.docx#Heading]]), by position inside the heading.
+    const linked = new Map<number, number>();
+    for (const g of this.linked.groups) {
+      const h = g.subpath ? findHeading(editor.state.doc, g.subpath) : null;
+      if (h) linked.set(h.pos + 1, (linked.get(h.pos + 1) ?? 0) + g.links.length);
+    }
     for (const entry of entries) {
       const button = panel.createEl("button", { text: entry.text, cls: "docx-outline-entry", attr: { title: entry.text, "data-depth": String(Math.min(entry.level - top, 5)) } });
+      const n = linked.get(entry.pos);
+      if (n) button.createSpan({ cls: "dw-linked-badge", text: String(n), attr: { "aria-label": `Linked from ${n} note${n === 1 ? "" : "s"}` } });
       button.toggleClass("is-active", entry.pos === active);
       button.addEventListener("click", () => this.showHeading(entry.pos));
     }

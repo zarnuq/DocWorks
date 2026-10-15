@@ -15,6 +15,10 @@ describe("parseCsv", () => {
     ]);
   });
 
+  it("reads tab-separated text with a tab delimiter", () => {
+    expect(parseCsv('a\t"b\tc"\n1,5\t2\n', "\t")).toEqual([["a", "b\tc"], ["1,5", "2"]]);
+  });
+
   it("drops a byte order mark and keeps a last line without newline", () => {
     expect(parseCsv("﻿a,b\n1,2")).toEqual([["a", "b"], ["1", "2"]]);
   });

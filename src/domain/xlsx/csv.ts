@@ -8,7 +8,8 @@ import { addSheet } from "./sheet-edit";
 import { Sheet } from "./workbook-model";
 import type { Rect } from "./references";
 
-export function parseCsv(text: string): string[][] {
+/** RFC 4180 fields; `delimiter` "\t" reads tab-separated text. */
+export function parseCsv(text: string, delimiter = ","): string[][] {
   const rows: string[][] = [];
   let row: string[] = [], field = "", quoted = false;
   const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
@@ -19,7 +20,7 @@ export function parseCsv(text: string): string[][] {
       else if (s[i + 1] === '"') field += s[i++];
       else quoted = false;
     } else if (ch === '"') quoted = true;
-    else if (ch === ",") {
+    else if (ch === delimiter) {
       row.push(field);
       field = "";
     } else if (ch === "\n" || ch === "\r") {

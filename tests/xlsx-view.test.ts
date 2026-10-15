@@ -435,6 +435,21 @@ describe("XlsxView data tools", () => {
     await v.importCsvFile(new TFile("in/prices.csv"));
     expect(v.sheet.name).toBe("prices");
     expect(v.sheet.cell("B2")!.value).toBe(2);
+    v.app.vault.read = async () => "x\ty\n3\t4\n";
+    await v.importCsvFile(new TFile("in/more.tsv"));
+    expect(v.sheet.name).toBe("more");
+    expect(v.sheet.cell("B2")!.value).toBe(4);
+  });
+
+  it("offers Import in the File menu, as Google Sheets does, but not on a read-only file", async () => {
+    const { view } = await mount();
+    const menu = new Menu();
+    view.onPaneMenu(menu as never, "more-options");
+    expect(menu.items.map((i) => i.title)).toContain("Import CSV or TSV as new sheet…");
+    (view as any).settings.readOnly = true;
+    const viewing = new Menu();
+    view.onPaneMenu(viewing as never, "more-options");
+    expect(viewing.items.map((i) => i.title)).not.toContain("Import CSV or TSV as new sheet…");
   });
 });
 
@@ -501,7 +516,7 @@ describe("XlsxView menus", () => {
     expect(menuTitles(view, "File")).toEqual(["Export…"]);
     expect(menuTitles(view, "Insert")).toEqual(["Sheet", "Image", "Chart", "Pivot table", "Function", "Link", "Checkbox", "Comment", "Note", "Dropdown", "Special characters"]);
     expect(menuTitles(view, "Format")).toEqual(["Number", "Text", "Alignment", "Wrap text", "Merge cells", "Conditional formatting", "Clear formatting"]);
-    expect(menuTitles(view, "Data")).toEqual(["Sort A → Z", "Sort Z → A", "Create a filter", "Data validation", "Remove duplicates…", "Split text to columns…", "Named ranges…", "Group rows 2 - 2", "Group columns A - A", "Import CSV as new sheet…"]);
+    expect(menuTitles(view, "Data")).toEqual(["Sort A → Z", "Sort Z → A", "Create a filter", "Data validation", "Remove duplicates…", "Split text to columns…", "Named ranges…", "Group rows 2 - 2", "Group columns A - A", "Import CSV or TSV as new sheet…"]);
     for (const l of ["Data", "Freeze", "Insert pivot table", "Conditional formatting", "Find and replace (Ctrl+F)"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).toBeNull();
     for (const l of ["Format as currency", "Format as percent", "Decrease decimal places", "Increase decimal places", "Remove fill color"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`)!.classList.contains("dw-icon"), l).toBe(true);
     for (const l of ["Undo (Ctrl+Z)", "Number format", "Font", "Bold (Ctrl+B)", "Fill color", "Borders", "Horizontal align", "Wrap text", "Add comment (Ctrl+Alt+M)", "Insert chart", "Create or remove a filter", "Functions"]) expect(view.contentEl.querySelector(`.dw-toolbar [aria-label="${l}"]`), l).not.toBeNull();

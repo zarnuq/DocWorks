@@ -83,6 +83,8 @@ If it saves you a trip to Office, please ⭐ the repo.
 - **Links to a place in a file:** `[[deck.pptx#5]]`, `[[budget.xlsx#Sheet2!B4]]`, `[[report.docx#Results]]` open at that slide, cell or heading; Edit › Copy link makes them
 - **A section of a document:** `![[report.docx#Results]]` embeds just that heading's section
 - **Live cell values:** `` `cell: budget.xlsx#Sheet2!H9` `` in a note shows the cell's value and follows the sheet
+- **Linked from:** see which notes link to a file, grouped by slide, cell range or heading; linked slides, headings and cells are marked
+- Files changed by sync or another app reload by themselves; sheets import .csv and .tsv files as new tabs (File › Import)
 
 ![A note with an embedded slide and a sheet range](docs/embeds.png)
 

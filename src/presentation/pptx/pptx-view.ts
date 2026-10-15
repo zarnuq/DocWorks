@@ -47,9 +47,10 @@ import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
 import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
-import { Autosave } from "../common/autosave";
+import { Autosave, reloadOnOutsideChange } from "../common/autosave";
 import { keepVersion, versions } from "../common/version-history";
 import { versionHistoryDialog } from "../common/version-dialog";
+import { LinkedFrom } from "../common/backlinks";
 import { slideIndex } from "../common/embeds";
 import { copyLink } from "../common/copy-link";
 import { deckToMarkdown } from "../../domain/pptx/outline";
@@ -217,6 +218,7 @@ export class PptxView extends FileView {
   /** Slide index being dragged in the thumbnail pane. */
   private dragFrom: number | null = null;
   private toolbar: Toolbar | null = null;
+  private linked = new LinkedFrom(this, "pptx", () => this.markLinked());
   private narrowWatch: ReturnType<typeof watchNarrow> | null = null;
   private closeDrawer: (() => void) | null = null;
 
@@ -259,6 +261,11 @@ export class PptxView extends FileView {
       });
     }
     registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS]));
+    reloadOnOutsideChange(this, this.autosave, async () => {
+      const index = this.index;
+      if (this.file) await this.onLoadFile(this.file);
+      if (this.doc) this.goTo(Math.min(index, this.doc.slides().length - 1));
+    });
     // Google's grid view shortcut.
     this.scope.register(["Mod", "Alt"], "1", () => {
       this.setGridView(!this.gridView);
@@ -468,6 +475,7 @@ export class PptxView extends FileView {
     this.renderAll();
     void this.loadFonts();
     this.loaded = load;
+    void this.linked.refresh();
     this.goToPlace();
   }
 
@@ -622,6 +630,16 @@ export class PptxView extends FileView {
     }
   }
 
+  /** Slides other notes link to: a badge with the count on the thumbnail. */
+  private markLinked(): void {
+    if (!this.doc) return;
+    Array.from(this.thumbsEl.children).forEach((item, i) => {
+      item.querySelector(".dw-linked-badge")?.remove();
+      const n = this.linked.count(`#${i + 1}`);
+      if (n) item.querySelector(".pptx-thumb-num")?.createSpan({ cls: "dw-linked-badge", text: String(n), attr: { "aria-label": `Linked from ${n} note${n === 1 ? "" : "s"}` } });
+    });
+  }
+
   private renderThumbs(): void {
     if (!this.doc) return;
     this.thumbsEl.empty();
@@ -673,6 +691,7 @@ export class PptxView extends FileView {
     // Empty sections at the end have no slide to sit on.
     sections.forEach((sec, k) => sec.start >= slides.length && header(this.thumbsEl, k));
     this.thumbsEl.setAttribute("aria-activedescendant", `${this.thumbsEl.id}-slide-${this.index}`);
+    this.markLinked();
     if (this.settings.readOnly) return;
     const add = this.thumbsEl.createEl("button", { cls: "pptx-thumb-add", attr: { "aria-label": "New slide" } });
     setIcon(add, "plus");
@@ -2709,6 +2728,7 @@ export class PptxView extends FileView {
       menuItem(mn, "Grid view", () => this.setGridView(!this.gridView), { checked: this.gridView });
       menuItem(mn, "Format panel", () => this.toggleProps(), { checked: this.showProps });
       menuItem(mn, "Comments", () => this.commentsDialog());
+      menuItem(mn, "Linked from", () => this.linked.toggle());
       subMenu(mn, "Zoom", (s) => {
         for (const z of ZOOMS) menuItem(s, zoomLabel(z), () => this.setZoom(z), { checked: this.zoom === z });
       });
@@ -2784,6 +2804,7 @@ export class PptxView extends FileView {
     });
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS])));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
     if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.commentsDialog());
 
     const end = tb.end();

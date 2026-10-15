@@ -32,7 +32,7 @@ export const Platform = { isDesktopApp: true, isMobile: false, isMacOS: false };
 
 export class App {
   scope = new Scope();
-  workspace = { getActiveViewOfType: (_type: unknown): unknown => null };
+  workspace = { getActiveViewOfType: (_type: unknown): unknown => null, trigger: (_name: string, ..._args: unknown[]) => {} };
   fileManager = { generateMarkdownLink: (f: TFile, _source: string, subpath = "") => `[[${f.basename}.${f.extension}${subpath}]]` };
   loadLocalStorage(key: string): unknown {
     return localData.get(key) ?? null;
@@ -49,6 +49,13 @@ export class App {
     modify: async (_f: TFile, _data: string) => {},
     getAbstractFileByPath: (_path: string): TFile | null => null,
     getFiles: (): TFile[] => [],
+    on: (_name: string, _cb: Fn) => ({}),
+    cachedRead: async (_f: TFile): Promise<string> => "",
+  };
+  metadataCache = {
+    resolvedLinks: {} as Record<string, Record<string, number>>,
+    getFileCache: (_f: TFile): unknown => null,
+    getFirstLinkpathDest: (_link: string, _source: string): TFile | null => null,
     on: (_name: string, _cb: Fn) => ({}),
   };
 }

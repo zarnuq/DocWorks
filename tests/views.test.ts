@@ -65,6 +65,55 @@ describe("PptxView Copy as Markdown outline", () => {
   });
 });
 
+describe("outside changes", () => {
+  /** A view whose vault `modify` listener the test can fire. */
+  async function watched<V extends PptxView | DocxView>(View: new (leaf: RealLeaf) => V, name: string, path: string) {
+    const app = new App();
+    app.vault.readBinary = async () => fixture(name).buffer as ArrayBuffer;
+    const handlers: ((f: unknown) => void)[] = [];
+    app.vault.on = (event: string, cb: (f: unknown) => void) => (event === "modify" && handlers.push(cb), {});
+    const view = new View(new WorkspaceLeaf(app) as unknown as RealLeaf);
+    document.body.appendChild(view.containerEl);
+    const file = await open(view, path);
+    const loads = vi.spyOn(view as unknown as { onLoadFile(f: unknown): Promise<void> }, "onLoadFile");
+    return { view, file, loads, modify: () => handlers.forEach((h) => h(file)) };
+  }
+
+  it("a document changed by sync or Word reloads", async () => {
+    const { loads, modify } = await watched(DocxView, "sample.docx", "a.docx");
+    modify();
+    await Promise.resolve();
+    expect(loads).toHaveBeenCalledTimes(1);
+  });
+
+  it("a presentation changed outside reloads on the same slide", async () => {
+    const { view, loads, modify } = await watched(PptxView, "sample.pptx", "a.pptx");
+    (view as unknown as { goTo(i: number): void }).goTo(1);
+    modify();
+    await vi.waitFor(() => expect(loads).toHaveBeenCalledTimes(1));
+    await loads.mock.results[0].value;
+    expect((view as unknown as { index: number }).index).toBe(1);
+  });
+
+  it("its own save isn't an outside change", async () => {
+    const { view, loads, modify } = await watched(DocxView, "sample.docx", "a.docx");
+    view.app.vault.modifyBinary = async () => modify();
+    const editor = (view as unknown as { editor: import("prosemirror-view").EditorView }).editor;
+    editor.dispatch(editor.state.tr.insertText("x", 2));
+    await view.requestSave();
+    expect(loads).not.toHaveBeenCalled();
+  });
+
+  it("unsaved edits aren't thrown away", async () => {
+    const { view, loads, modify } = await watched(DocxView, "sample.docx", "a.docx");
+    const editor = (view as unknown as { editor: import("prosemirror-view").EditorView }).editor;
+    editor.dispatch(editor.state.tr.insertText("x", 2));
+    modify();
+    await Promise.resolve();
+    expect(loads).not.toHaveBeenCalled();
+  });
+});
+
 describe("PptxView on a phone", () => {
   it("fits the slide to a stage narrower than 320 px", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
@@ -1292,7 +1341,7 @@ describe("PptxView menus", () => {
     expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Copy as Markdown outline", "Copy link to slide", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
     expect(view.contentEl.querySelector('.dw-toolbar [aria-label^="Insert link"]')).not.toBeNull();
-    expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "Grid view", "Format panel", "Comments", "Zoom", "Light", "Dark"]);
+    expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "Grid view", "Format panel", "Comments", "Linked from", "Zoom", "Light", "Dark"]);
     expect(menuTitles(view, "Insert")).toEqual(["Text box", "Image", "Audio or video", "Shape", "Table", "Chart", "Link", "Field", "Special characters", "Comment", "New slide"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Align", "Line spacing", "Character spacing", "Bulleted list", "Numbered list", "Clear formatting"]);
     expect(menuTitles(view, "Arrange")).toEqual(["Order", "Align", "Distribute", "Group", "Ungroup"]);
@@ -1626,7 +1675,7 @@ describe("DocxView menus", () => {
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Tools", "Help"]);
     expect(menuTitles(view, "File")).toEqual(["Export…"]);
     expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Copy link to heading", "Delete", "Find and replace"]);
-    expect(menuTitles(view, "View")).toEqual(["Editing", "Suggesting", "Page view", "Ruler", "Outline", "Review panel", "Zoom", "Light", "Dark"]);
+    expect(menuTitles(view, "View")).toEqual(["Editing", "Suggesting", "Page view", "Ruler", "Outline", "Review panel", "Linked from", "Zoom", "Light", "Dark"]);
     expect(menuTitles(view, "Insert")).toEqual(["Image", "Table", "Drawing", "Chart", "Equation", "Special characters", "Horizontal line", "Break", "Footnote", "Comment", "Link", "Table of contents", "Header & footer", "Watermark"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Paragraph style", "Align", "Line spacing", "Paragraph…", "Columns…", "Bulleted list", "Numbered list", "Clear formatting"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Word count", "Find and replace"]);
