@@ -255,7 +255,7 @@ export class Toolbar {
     this.group.dataset.view = "true";
   }
 
-  /** The current group never folds into ⋮. */
+  /** The current group folds into ⋮ only after every unpinned one. */
   pin(): void {
     this.group.dataset.pinned = "true";
   }
@@ -282,7 +282,7 @@ export class Toolbar {
     return Array.from(this.el.querySelectorAll<HTMLElement>(":scope > .dw-group")).filter((g) => g.childElementCount && !g.classList.contains("is-off"));
   }
 
-  /** Fold unpinned groups from the right into ⋮ until the row fits on one line. */
+  /** Fold unpinned groups from the right into ⋮ until the row fits on one line; on a phone, pinned ones too (never the first). */
   fit(): void {
     for (const g of Array.from(this.el.querySelectorAll<HTMLElement>(":scope > .dw-group"))) {
       g.hidden = g.classList.contains("is-off");
@@ -293,7 +293,8 @@ export class Toolbar {
     if (this.more) this.more.hidden = false;
     // Right to left, the selection's own tools last: they're what the user is working with.
     const foldable = this.groups().filter((g) => !g.dataset.pinned).reverse();
-    const order = [...foldable.filter((g) => !this.tests.has(g)), ...foldable.filter((g) => this.tests.has(g))];
+    const pinned = this.groups().slice(1).filter((g) => g.dataset.pinned).reverse();
+    const order = [...foldable.filter((g) => !this.tests.has(g)), ...foldable.filter((g) => this.tests.has(g)), ...pinned];
     for (const g of order) {
       if (!this.overflows()) break;
       g.hidden = true;

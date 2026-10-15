@@ -91,10 +91,32 @@ describe("overflow", () => {
     expect(clicks).toEqual(["b3"]);
   });
 
-  it("never folds pinned groups", () => {
+  it("never folds the first group", () => {
     const { tb, setRoom } = bar();
     setRoom(0);
     expect(tb.el.querySelector<HTMLElement>(".dw-group")!.hidden).toBe(false);
+  });
+
+  it("folds other pinned groups last, when a phone-wide row can't hold them", () => {
+    const tb = new Toolbar(document.body.createDiv());
+    tb.button("U", "Undo", () => {});
+    tb.pin();
+    tb.gap();
+    tb.button("F", "Font", () => {});
+    tb.pin();
+    tb.gap();
+    tb.button("B", "Bold", () => {});
+    tb.end();
+    const groups = Array.from(tb.el.querySelectorAll<HTMLElement>(".dw-group")).filter((g) => g.childElementCount);
+    let room = 2;
+    tb.overflows = () => groups.filter((g) => !g.hidden).length > room;
+    tb.fit();
+    expect(groups.map((g) => g.hidden)).toEqual([false, false, true]);
+    room = 1;
+    tb.fit();
+    expect(groups.map((g) => g.hidden)).toEqual([false, true, true]);
+    more(tb).click();
+    expect(titles(Menu.last)).toEqual(["Font", "---", "Bold"]);
   });
 
   it("unfolds when room returns", () => {

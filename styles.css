@@ -62,6 +62,11 @@
   display: none;
 }
 
+/* Phone-wide rows: "Saved" gives way to the tools; "Couldn't save" + Retry still shows. */
+.is-narrow .dw-status[role="status"]:not(.is-error) {
+  display: none;
+}
+
 /* A native select is as wide as its longest option ("Update 'Heading 1' to match"); cap it so the row fits more. */
 /* Value dropdown (Font, Size, Zoom…): a button with the value and a caret, opening a menu. */
 .dw-toolbar .dw-select {
@@ -2138,7 +2143,9 @@ textarea.pptx-notes {
   background: var(--background-secondary);
 }
 
-.xlsx-name-box {
+/* Outranks Obsidian's mobile `.is-mobile input[type="text"] { width: 100% }`. */
+.xlsx-formula-bar input[type="text"].xlsx-name-box {
+  flex: none;
   width: 96px;
   font-size: var(--font-ui-smaller);
 }
@@ -2151,6 +2158,7 @@ textarea.pptx-notes {
 
 .xlsx-formula-input {
   flex: 1;
+  min-width: 0;
   min-height: var(--input-height);
   height: var(--input-height);
   resize: vertical;

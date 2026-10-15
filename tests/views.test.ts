@@ -65,6 +65,18 @@ describe("PptxView Copy as Markdown outline", () => {
   });
 });
 
+describe("PptxView on a phone", () => {
+  it("fits the slide to a stage narrower than 320 px", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("pptx-stage") ? 300 : 0;
+    });
+    const view = mount(PptxView, "sample.pptx");
+    await open(view, "deck.pptx");
+    const stage = view.contentEl.querySelector<HTMLElement>(".pptx-stage")!;
+    expect(stage.style.getPropertyValue("--pptx-slide-width")).toBe("252px");
+  });
+});
+
 describe("PptxView motion editor", () => {
   it("keeps slide creation in the Slide dropdown without a duplicate toolbar button", async () => {
     const view = mount(PptxView, "sample.pptx");

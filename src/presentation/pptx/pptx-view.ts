@@ -848,7 +848,7 @@ export class PptxView extends FileView {
     this.model = parseSlide(this.doc, this.editPart ?? slides[this.index].path);
 
     this.lastStageWidth = this.stageEl.clientWidth;
-    const width = this.zoom === "fit" ? Math.max(320, Math.min((this.lastStageWidth || 1008) - 48, 1400)) : (this.doc.slideSize.cx / EMU_PER_PX) * Number(this.zoom);
+    const width = this.zoom === "fit" ? Math.max(160, Math.min((this.lastStageWidth || 1008) - 48, 1400)) : (this.doc.slideSize.cx / EMU_PER_PX) * Number(this.zoom);
     this.scale = width / this.doc.slideSize.cx;
     // The notes box lines up with the slide.
     this.stageEl.setCssProps({ "--pptx-slide-width": `${width}px` });
