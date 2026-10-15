@@ -16,9 +16,12 @@ export interface DocWorksSettings {
   openXlsx: boolean;
   /** Open every file as a viewer: no editing controls, nothing is ever saved. */
   readOnly: boolean;
+  /** Keep earlier versions of files before saving over them (File › Version history), for `historyDays` days. */
+  history: boolean;
+  historyDays: number;
 }
 
-export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document", author: "", paper: "default", openDocx: true, openPptx: true, openXlsx: true, readOnly: false };
+export const DEFAULT_SETTINGS: DocWorksSettings = { pageSize: "document", author: "", paper: "default", openDocx: true, openPptx: true, openXlsx: true, readOnly: false, history: true, historyDays: 14 };
 
 /** The theme a view opens with: the setting, or the view's own default. */
 export function paperFor(settings: DocWorksSettings, viewDefault: "light" | "dark"): "light" | "dark" {

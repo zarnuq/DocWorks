@@ -68,6 +68,7 @@ If it saves you a trip to Office, please ⭐ the repo.
 - Find and replace with whole words, regular expressions and ignore accents, including speaker notes, comments and cell notes
 - Search inside every document, deck and sheet in the vault from a side panel
 - Read-only mode in settings: view files without any chance of changing them
+- Version history: earlier versions are kept (in the app, not the vault) before saving; File › Version history to preview and restore
 - Export to PDF; slides to PNG, sheets to CSV
 - New document / presentation / spreadsheet commands
 - No Office or other software needed; works offline and on mobile
@@ -79,6 +80,9 @@ If it saves you a trip to Office, please ⭐ the repo.
 - **Export current note to .docx** also brings in embedded files: sheets as tables, slides as pictures, documents as their content
 - Embed a file in a note: `![[report.docx]]`, `![[deck.pptx#3]]`, `![[budget.xlsx#Sheet2]]`, or just a range: `![[budget.xlsx#Sheet2!A1:D10]]`
 - **Copy as Markdown:** a sheet range as a Markdown table, a deck as a headed outline
+- **Links to a place in a file:** `[[deck.pptx#5]]`, `[[budget.xlsx#Sheet2!B4]]`, `[[report.docx#Results]]` open at that slide, cell or heading; Edit › Copy link makes them
+- **A section of a document:** `![[report.docx#Results]]` embeds just that heading's section
+- **Live cell values:** `` `cell: budget.xlsx#Sheet2!H9` `` in a note shows the cell's value and follows the sheet
 
 ![A note with an embedded slide and a sheet range](docs/embeds.png)
 

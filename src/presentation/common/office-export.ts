@@ -15,7 +15,8 @@ import { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { renderSlide } from "../pptx/slide-renderer";
-import { embedRange, sheetTarget, slideIndex } from "./embeds";
+import { embedRange, sectionOf, sheetTarget, slideIndex } from "./embeds";
+import { readDocx } from "../../domain/docx/docx-reader";
 import { PNG_WIDTH, renderPng } from "./png";
 
 export type ExportPicture = { bytes: Uint8Array; ext: string; width: number; height: number };
@@ -30,7 +31,7 @@ export async function officeEmbedForExport(app: App, file: TFile, subpath: strin
   const ext = file.extension.toLowerCase();
   if (ext === "xlsx") return sheetTable(bytes, subpath);
   if (ext === "pptx") return slidePicture(bytes, subpath, file.basename, pictures);
-  if (ext === "docx") return documentContent(app, bytes, file, component, pictures);
+  if (ext === "docx") return documentContent(app, bytes, file, subpath, component, pictures);
   return null;
 }
 
@@ -78,8 +79,11 @@ async function slidePicture(bytes: ArrayBuffer, subpath: string, name: string, p
   }
 }
 
-async function documentContent(app: App, bytes: ArrayBuffer, file: TFile, component: Component, pictures: Map<HTMLImageElement, ExportPicture>): Promise<HTMLElement> {
-  const result = await docxToMarkdown(await DocxDocument.load(bytes), PICTURES);
+async function documentContent(app: App, bytes: ArrayBuffer, file: TFile, subpath: string, component: Component, pictures: Map<HTMLImageElement, ExportPicture>): Promise<HTMLElement> {
+  const docx = await DocxDocument.load(bytes);
+  // ![[report.docx#Results]]: just that heading's section.
+  const section = subpath ? sectionOf(readDocx(docx.body, { imageSrc: () => null, hyperlinkHref: (id) => docx.hyperlinkHref(id) }).doc, subpath) : undefined;
+  const result = await docxToMarkdown(docx, PICTURES, section);
   const el = createDiv();
   await MarkdownRenderer.render(app, result.markdown, el, file.path, component);
   // Its pictures aren't in the vault: put the extracted bytes behind the pictures the Markdown points at.

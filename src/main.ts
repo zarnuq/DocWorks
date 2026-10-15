@@ -3,6 +3,8 @@ import { exportDocxFile } from "./presentation/common/export-markdown";
 import { registerEmbeds } from "./presentation/common/embeds";
 import { canExportPdf } from "./presentation/common/pdf";
 import { OfficeSearchView, VIEW_TYPE_SEARCH } from "./presentation/common/office-search";
+import { registerCellValues } from "./presentation/common/cell-values";
+import { IndexedDbVersionStore, setVersionHistory, VersionHistory, versions } from "./presentation/common/version-history";
 import { App, FileView, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
 import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
@@ -47,6 +49,11 @@ export default class DocWorksPlugin extends Plugin {
   async onload() {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<DocWorksSettings> | null) };
     this.addSettingTab(new DocWorksSettingTab(this.app, this));
+    // Earlier versions of files, kept in the app's storage (not the vault) before Doc Works saves over them.
+    setVersionHistory(new VersionHistory(new IndexedDbVersionStore(`doc-works-history/${this.app.vault.getName()}`), () => ({ enabled: this.settings.history, days: this.settings.historyDays })));
+    const office = (f: unknown): f is TFile => f instanceof TFile && ["docx", "pptx", "xlsx"].includes(f.extension.toLowerCase());
+    this.registerEvent(this.app.vault.on("rename", (f, old) => office(f) && void versions?.renamed(old, f.path)));
+    this.registerEvent(this.app.vault.on("delete", (f) => office(f) && void versions?.deleted(f.path)));
     this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf, this.settings, () => this.saveSettings()));
     this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf, this.settings));
     this.registerView(VIEW_TYPE_XLSX, (leaf: WorkspaceLeaf) => new XlsxView(leaf, this.settings));
@@ -57,6 +64,8 @@ export default class DocWorksPlugin extends Plugin {
     // Previews in notes (![[deck.pptx#3]]) for the same file types.
     const kinds = (["docx", "pptx", "xlsx"] as const).filter((k) => this.settings[k === "docx" ? "openDocx" : k === "pptx" ? "openPptx" : "openXlsx"]);
     registerEmbeds(this, kinds);
+    // `cell: Budget.xlsx#Sheet!B4` in notes shows the cell's value.
+    if (this.settings.openXlsx) registerCellValues(this);
     // Search inside the same file types, in a side panel.
     this.registerView(VIEW_TYPE_SEARCH, (leaf: WorkspaceLeaf) => new OfficeSearchView(leaf, () => kinds));
     this.addCommand({ id: "search-office-files", name: "Search in documents, presentations and spreadsheets", callback: () => void this.openSearch() });
@@ -149,6 +158,10 @@ export default class DocWorksPlugin extends Plugin {
     );
   }
 
+  onunload(): void {
+    setVersionHistory(null);
+  }
+
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
     // Tabs not shown since startup hold a placeholder view until they're opened.
@@ -198,6 +211,9 @@ export default class DocWorksPlugin extends Plugin {
 
 const READ_ONLY = { name: "Read only", desc: "Open documents, presentations and spreadsheets for viewing only: no editing tools, and files are never changed." };
 
+const HISTORY = { name: "Version history", desc: "Before saving over a file, keep the version it replaces (File › Version history). Kept in the app, not in the vault." };
+const HISTORY_DAYS = { name: "Keep versions for", desc: "Older versions are deleted. At most 10 per file and 200 MB in all.", options: { "7": "1 week", "14": "2 weeks", "30": "30 days" } };
+
 const AUTHOR = { name: "Comment author", desc: "Your name on comments you add to Word documents." };
 
 const PAPER = {
@@ -231,11 +247,19 @@ class DocWorksSettingTab extends PluginSettingTab {
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
       { name: READ_ONLY.name, desc: READ_ONLY.desc, control: { type: "toggle", key: "readOnly", defaultValue: false } },
+      { name: HISTORY.name, desc: HISTORY.desc, control: { type: "toggle", key: "history", defaultValue: true } },
+      { name: HISTORY_DAYS.name, desc: HISTORY_DAYS.desc, control: { type: "dropdown", key: "historyDays", options: HISTORY_DAYS.options, defaultValue: "14" } },
       { name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } },
       { name: AUTHOR.name, desc: AUTHOR.desc, control: { type: "text", key: "author", defaultValue: "" } },
       { name: PAPER.name, desc: PAPER.desc, control: { type: "dropdown", key: "paper", options: PAPER.options, defaultValue: "default" } },
       ...OPEN.map(([key, name]) => ({ name, desc: OPEN_DESC, control: { type: "toggle" as const, key, defaultValue: true } })),
     ];
+  }
+
+  // The days dropdown's options are text.
+  getControlValue(key: string): unknown {
+    const value = (this.plugin.settings as unknown as Record<string, unknown>)[key];
+    return key === "historyDays" ? String(value) : value;
   }
 
   async setControlValue(key: string, value: unknown): Promise<void> {
@@ -245,6 +269,8 @@ class DocWorksSettingTab extends PluginSettingTab {
     for (const [open] of OPEN) if (key === open) this.plugin.settings[open] = value !== false;
     const reopen = key === "readOnly" && this.plugin.settings.readOnly !== (value === true);
     if (key === "readOnly") this.plugin.settings.readOnly = value === true;
+    if (key === "history") this.plugin.settings.history = value !== false;
+    if (key === "historyDays") this.plugin.settings.historyDays = Number(value) || 14;
     await this.plugin.saveSettings();
     if (reopen) await this.plugin.reopenViews();
   }
@@ -256,6 +282,14 @@ class DocWorksSettingTab extends PluginSettingTab {
       .setName(READ_ONLY.name)
       .setDesc(READ_ONLY.desc)
       .addToggle((t) => t.setValue(this.plugin.settings.readOnly).onChange((v) => void this.setControlValue("readOnly", v)));
+    new Setting(this.containerEl)
+      .setName(HISTORY.name)
+      .setDesc(HISTORY.desc)
+      .addToggle((t) => t.setValue(this.plugin.settings.history).onChange((v) => void this.setControlValue("history", v)));
+    new Setting(this.containerEl)
+      .setName(HISTORY_DAYS.name)
+      .setDesc(HISTORY_DAYS.desc)
+      .addDropdown((d) => d.addOptions(HISTORY_DAYS.options).setValue(String(this.plugin.settings.historyDays)).onChange((v) => void this.setControlValue("historyDays", v)));
     new Setting(this.containerEl)
       .setName(PAGE_SIZE.name)
       .setDesc(PAGE_SIZE.desc)

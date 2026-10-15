@@ -9,6 +9,8 @@ import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { readDocx } from "../../domain/docx/docx-reader";
+import { headingSection } from "../../domain/docx/headings";
+import type { Node as PMNode } from "prosemirror-model";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { parseSlide } from "../../domain/pptx/slide-model";
 import { Edits } from "../../domain/xlsx/commands";
@@ -154,11 +156,17 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
   };
 }
 
+/** Just the "#Heading" section of a document (the whole document when there's no such heading). */
+export function sectionOf(doc: PMNode, subpath: string): PMNode {
+  const r = subpath ? headingSection(doc, subpath) : null;
+  return r ? doc.copy(doc.content.cut(r.from, r.to)) : doc;
+}
+
 /** The document's text flow, read-only (no page view: the note is the page). */
-export async function renderDocxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint8Array): Promise<() => void> {
+export async function renderDocxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint8Array, subpath = ""): Promise<() => void> {
   const docx = await DocxDocument.load(bytes);
   const urls = await docx.imageUrls();
-  const { doc } = readDocx(docx.body, { imageSrc: (id) => urls.get(id) ?? null, hyperlinkHref: (id) => docx.hyperlinkHref(id) });
+  const doc = sectionOf(readDocx(docx.body, { imageSrc: (id) => urls.get(id) ?? null, hyperlinkHref: (id) => docx.hyperlinkHref(id) }).doc, subpath);
   const styles = new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml());
   const host = el.createDiv({ cls: "docx-editor-host dw-embed-doc" });
   const view = new EditorView(host, {

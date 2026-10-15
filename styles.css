@@ -2994,3 +2994,86 @@ textarea.pptx-notes {
 .dw-search-file + .dw-search-file {
   margin-top: var(--size-4-3);
 }
+
+/* `cell: Budget.xlsx#Sheet!B4` in a note: the cell's value, marked as coming from a sheet. */
+.dw-cell-value {
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px dotted var(--text-accent);
+}
+
+.dw-cell-value.is-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+}
+
+/* File › Version history. */
+.dw-version {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-1) 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.dw-version-when {
+  flex: 1;
+}
+
+.dw-version-size {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* Wide enough to read a page; the preview takes the room below the list. */
+.dw-versions-modal {
+  width: min(1000px, 94vw);
+  max-height: 92vh;
+}
+
+.dw-version-preview .dw-embed-doc {
+  max-height: none;
+  padding: var(--size-4-4) var(--size-4-8);
+}
+
+.dw-version-preview:not(:empty) {
+  margin-top: var(--size-4-3);
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.dw-version-preview-title {
+  padding: var(--size-4-1) var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+/* Version history and Comments at the right end of the menu row. */
+.dw-menubar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  margin-left: auto;
+}
+
+/* Sheets' list of every comment. */
+.dw-comment-list-item {
+  padding: var(--size-4-1) var(--size-4-2);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.dw-comment-list-item:hover,
+.dw-comment-list-item:focus-visible {
+  background: var(--background-modifier-hover);
+}
+
+.dw-comment-list-item.is-resolved {
+  opacity: 0.6;
+}
+
+.dw-comment-list-where {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}

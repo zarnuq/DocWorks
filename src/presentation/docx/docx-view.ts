@@ -18,6 +18,10 @@ import { writeBody } from "../../domain/docx/docx-writer";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { docxSchema as schema, Align } from "../../domain/docx/schema";
 import { Autosave } from "../common/autosave";
+import { keepVersion, versions } from "../common/version-history";
+import { versionHistoryDialog } from "../common/version-dialog";
+import { findHeading, headingLinkText, headings } from "../../domain/docx/headings";
+import { copyLink } from "../common/copy-link";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
 import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems } from "../common/toolbar";
@@ -125,6 +129,7 @@ export class DocxView extends FileView {
       const file = this.file!, docx = this.docx!;
       writeBody(docx.body, this.editor!.state.doc, this.origins, docx);
       const bytes = await docx.save();
+      await keepVersion(this.app, file);
       await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
     },
   });
@@ -193,6 +198,7 @@ export class DocxView extends FileView {
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
     addFileItems(this, menu, source);
+    if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(this.app, this, this.settings.readOnly)));
     menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
   }
 
@@ -405,6 +411,50 @@ export class DocxView extends FileView {
     this.fitDocument();
     this.renderOutline();
     void this.loadFonts();
+    this.loaded = load;
+    this.goToPlace();
+  }
+
+  /** A link's place in the file (#3, #Sheet!B4, #Heading), kept until the file has loaded. */
+  private place: string | null = null;
+  /** The onLoadFile call that last finished (equal to `loads` once the newest one has). */
+  private loaded = 0;
+
+  setEphemeralState(state: unknown): void {
+    super.setEphemeralState(state);
+    const subpath = (state as { subpath?: string } | null)?.subpath;
+    if (!subpath) return;
+    this.place = subpath;
+    this.goToPlace();
+  }
+
+  /** Go to the link's place, once the file is in. */
+  private goToPlace(): void {
+    if (!this.place || this.loaded !== this.loads) return;
+    const place = this.place;
+    this.place = null;
+    const heading = this.editor && findHeading(this.editor.state.doc, place);
+    if (heading) this.showHeading(heading.pos + 1);
+  }
+
+  /** A link to the heading the cursor is under ([[report.docx#Results]]) for a note. */
+  private copyHeadingLink(): void {
+    const from = this.editor?.state.selection.from ?? 0;
+    const heading = this.editor && [...headings(this.editor.state.doc)].reverse().find((h) => h.pos < from);
+    if (!heading) return void new Notice("No heading above this point to link to.");
+    copyLink(this.app, this.file, `#${headingLinkText(heading.text)}`, "heading");
+  }
+
+  /** Put the cursor on the heading at `pos` and scroll it to the top. */
+  private showHeading(pos: number): void {
+    const editor = this.editor;
+    if (!editor) return;
+    editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, pos)));
+    editor.focus();
+    const heading = editor.nodeDOM(pos - 1);
+    if (heading instanceof HTMLElement && this.hostEl) {
+      this.hostEl.scrollTop = Math.max(0, this.hostEl.scrollTop + heading.getBoundingClientRect().top - this.hostEl.getBoundingClientRect().top - 16);
+    }
   }
 
   /** Removes the document's embedded fonts from the page. */
@@ -647,6 +697,7 @@ export class DocxView extends FileView {
         });
       }
       menuItem(mn, "Select all", () => run(selectAll));
+      menuItem(mn, "Copy link to heading", () => this.copyHeadingLink());
       menuItem(mn, "Delete", () => run(deleteSelection));
       mn.addSeparator();
       menuItem(mn, "Find and replace", () => this.openFind());
@@ -729,6 +780,8 @@ export class DocxView extends FileView {
       menuItem(mn, "Find and replace", () => this.openFind());
     });
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...DOCS_SHORTCUTS])));
+    if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.toggleReview());
 
     mode.parentElement?.addClass("dw-push");
     const end = tb.end();
@@ -842,14 +895,7 @@ export class DocxView extends FileView {
     for (const entry of entries) {
       const button = panel.createEl("button", { text: entry.text, cls: "docx-outline-entry", attr: { title: entry.text, "data-depth": String(Math.min(entry.level - top, 5)) } });
       button.toggleClass("is-active", entry.pos === active);
-      button.addEventListener("click", () => {
-        editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, entry.pos)));
-        editor.focus();
-        const heading = editor.nodeDOM(entry.pos - 1);
-        if (heading instanceof HTMLElement && this.hostEl) {
-          this.hostEl.scrollTop = Math.max(0, this.hostEl.scrollTop + heading.getBoundingClientRect().top - this.hostEl.getBoundingClientRect().top - 16);
-        }
-      });
+      button.addEventListener("click", () => this.showHeading(entry.pos));
     }
   }
 

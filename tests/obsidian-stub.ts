@@ -33,6 +33,7 @@ export const Platform = { isDesktopApp: true, isMobile: false, isMacOS: false };
 export class App {
   scope = new Scope();
   workspace = { getActiveViewOfType: (_type: unknown): unknown => null };
+  fileManager = { generateMarkdownLink: (f: TFile, _source: string, subpath = "") => `[[${f.basename}.${f.extension}${subpath}]]` };
   loadLocalStorage(key: string): unknown {
     return localData.get(key) ?? null;
   }
@@ -67,6 +68,7 @@ export class FileView {
   }
   registerEvent(_ref: unknown) {}
   onPaneMenu(_menu: Menu, _source: string) {}
+  setEphemeralState(_state: unknown) {}
 }
 
 export class ItemView {
@@ -192,3 +194,10 @@ export function parseLinktext(link: string) {
   return hash < 0 ? { path: link, subpath: "" } : { path: link.slice(0, hash), subpath: link.slice(hash) };
 }
 export function resolveSubpath(_cache: unknown, _subpath: string): any { return null; }
+
+export class MarkdownRenderChild extends Component {
+  constructor(public containerEl: HTMLElement) {
+    super();
+  }
+  registerEvent(_ref: unknown) {}
+}

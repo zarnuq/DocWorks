@@ -55,6 +55,23 @@ describe("embeds in notes", () => {
     done();
   });
 
+  it("shows just a heading's section for #Heading, or the whole document when there's no such heading", async () => {
+    const { noteToDocx } = await import("../src/domain/docx/from-html");
+    const { blankDocx } = await import("../src/infrastructure/blank");
+    const html = document.createElement("div");
+    html.innerHTML = "<p>Intro</p><h1>Results</h1><p>Clearer water</p><h2>Detail</h2><p>Sites</p><h1>Next</h1><p>Permits</p>";
+    const bytes = await noteToDocx(await blankDocx(), html, () => null);
+    const text = async (subpath: string) => {
+      const el = document.body.createDiv();
+      const done = await renderDocxEmbed(el, bytes, subpath);
+      const out = Array.from(el.querySelectorAll(".ProseMirror > *")).map((p) => p.textContent);
+      done();
+      return out;
+    };
+    expect(await text("#Results")).toEqual(["Results", "Clearer water", "Detail", "Sites"]);
+    expect(await text("#Missing")).toEqual(["Intro", "Results", "Clearer water", "Detail", "Sites", "Next", "Permits"]);
+  });
+
   it("shows a document's text, read-only", async () => {
     const el = document.body.createDiv();
     const done = await renderDocxEmbed(el, readFileSync("tests/fixtures/sample.docx"));

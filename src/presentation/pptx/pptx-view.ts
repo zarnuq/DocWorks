@@ -48,6 +48,10 @@ import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCU
 import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { Autosave } from "../common/autosave";
+import { keepVersion, versions } from "../common/version-history";
+import { versionHistoryDialog } from "../common/version-dialog";
+import { slideIndex } from "../common/embeds";
+import { copyLink } from "../common/copy-link";
 import { deckToMarkdown } from "../../domain/pptx/outline";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
@@ -176,6 +180,7 @@ export class PptxView extends FileView {
     write: async () => {
       const file = this.file!;
       const bytes = await this.doc!.save();
+      await keepVersion(this.app, file);
       await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
     },
   });
@@ -295,6 +300,7 @@ export class PptxView extends FileView {
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
     addFileItems(this, menu, source);
+    if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(this.app, this, this.settings.readOnly)));
     if (canExportPdf()) menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
   }
 
@@ -461,6 +467,29 @@ export class PptxView extends FileView {
     this.setPaperTheme(paperFor(this.settings, "dark"));
     this.renderAll();
     void this.loadFonts();
+    this.loaded = load;
+    this.goToPlace();
+  }
+
+  /** A link's place in the file (#3, #Sheet!B4, #Heading), kept until the file has loaded. */
+  private place: string | null = null;
+  /** The onLoadFile call that last finished (equal to `loads` once the newest one has). */
+  private loaded = 0;
+
+  setEphemeralState(state: unknown): void {
+    super.setEphemeralState(state);
+    const subpath = (state as { subpath?: string } | null)?.subpath;
+    if (!subpath) return;
+    this.place = subpath;
+    this.goToPlace();
+  }
+
+  /** Go to the link's place, once the file is in. */
+  private goToPlace(): void {
+    if (!this.place || this.loaded !== this.loads) return;
+    const place = this.place;
+    this.place = null;
+    if (this.doc && /^#\d+$/.test(place)) this.goTo(slideIndex(place, this.doc.slides().length));
   }
 
   /** Removes the deck's embedded fonts from the page. */
@@ -691,6 +720,7 @@ export class PptxView extends FileView {
     item("Duplicate slide", "copy", () => this.mutate((d) => (this.index = d.duplicateSlide(i))));
     item("Copy slide", "clipboard-copy", () => void this.copySlide(false));
     item("Cut slide", "scissors", () => void this.copySlide(true));
+    item("Copy link to slide", "link", () => copyLink(this.app, this.file, `#${i + 1}`, "slide"));
     if (slideClipboard) item("Paste slide", "clipboard-paste", () => void this.pasteSlides());
     item("Delete slide", "trash", () => this.mutate((d) => d.deleteSlide(i)));
     item(this.doc?.isHidden(i) ? "Show slide" : "Hide slide", "eye-off", () => this.mutate((d) => d.setHidden(i, !d.isHidden(i))));
@@ -2663,6 +2693,7 @@ export class PptxView extends FileView {
         this.flushCommit();
         void navigator.clipboard.writeText(deckToMarkdown(this.doc)).then(() => new Notice("Copied the slides as a Markdown outline."));
       });
+      menuItem(mn, "Copy link to slide", () => copyLink(this.app, this.file, `#${this.index + 1}`, "slide"));
       menuItem(mn, "Paste", () => this.paste(), { disabled: !clipboard });
       // In a text box: the clipboard's plain text; otherwise as Paste.
       menuItem(mn, "Paste without formatting", () => (activeDocument.activeElement?.closest(".pptx-text") ? void runEditCommand("pasteAndMatchStyle") : this.paste()));
@@ -2677,6 +2708,7 @@ export class PptxView extends FileView {
       mn.addSeparator();
       menuItem(mn, "Grid view", () => this.setGridView(!this.gridView), { checked: this.gridView });
       menuItem(mn, "Format panel", () => this.toggleProps(), { checked: this.showProps });
+      menuItem(mn, "Comments", () => this.commentsDialog());
       subMenu(mn, "Zoom", (s) => {
         for (const z of ZOOMS) menuItem(s, zoomLabel(z), () => this.setZoom(z), { checked: this.zoom === z });
       });
@@ -2751,6 +2783,8 @@ export class PptxView extends FileView {
       menuItem(mn, "Find and replace", () => this.openFind());
     });
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS])));
+    if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.commentsDialog());
 
     const end = tb.end();
     this.autosave.status = end.status;

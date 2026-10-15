@@ -524,7 +524,7 @@ describe("XlsxView menus", () => {
   it("has Select all, Delete and a Tools menu like the other editors", async () => {
     const { view, file } = await mount();
     const v = view as any;
-    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Copy as Markdown table", "Paste", "Paste values only", "Select all", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Copy as Markdown table", "Copy link to cells", "Paste", "Paste values only", "Select all", "Delete", "Find and replace"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
     runMenu(view, "Edit", "Select all");
     expect(v.grid.selection()).toMatchObject({ r1: 0, c1: 0, r2: 1048575, c2: 16383 });

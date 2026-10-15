@@ -153,3 +153,15 @@ it("brings an embedded Word document's text and pictures into the export", async
   const img = out.el.querySelector("img")!;
   expect(out.pictures.get(img)).toMatchObject({ ext: "png", width: 40, height: 20 });
 });
+
+it("brings in just the heading's section of an embedded Word document", async () => {
+  const { noteToDocx } = await import("../src/domain/docx/from-html");
+  const { blankDocx } = await import("../src/infrastructure/blank");
+  const html = document.createElement("div");
+  html.innerHTML = "<p>Intro</p><h1>Results</h1><p>Clearer water</p><h1>Next</h1><p>Permits</p>";
+  const t = setup({ "main.md": { markdown: "", html: '<div class="internal-embed" src="report.docx#Results"></div>' } }, { "report.docx": await noteToDocx(await blankDocx(), html, () => null) });
+  const out = await renderNoteForExport(t.app, t.files.get("main.md")!, t.component);
+  expect(out.el.textContent).toContain("Clearer water");
+  expect(out.el.textContent).not.toContain("Intro");
+  expect(out.el.textContent).not.toContain("Permits");
+});

@@ -47,7 +47,7 @@ describe("read-only setting", () => {
     const { view, saved } = await mount(DocxView, fixture("sample.docx"), "doc.docx");
     expect(view.contentEl.hasClass("dw-read-only")).toBe(true);
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Tools", "Help"]);
-    expect(menuTitles(view, "Edit")).toEqual(["Copy", "Select all", "---", "Find and replace"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Copy", "Select all", "Copy link to heading", "---", "Find and replace"]);
     expect(menuTitles(view, "View")).toEqual(["Page view", "Outline", "Zoom", "---", "Light", "Dark"]);
     expect(menuTitles(view, "View", "Zoom").length).toBeGreaterThan(3);
     expect(menuTitles(view, "Tools")).toEqual(["Word count", "Find and replace"]);

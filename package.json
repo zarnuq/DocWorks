@@ -1,6 +1,6 @@
 {
   "name": "obsidian-doc-works",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "View and edit Word (.docx), PowerPoint (.pptx) and Excel (.xlsx) files, with faithful rendering, live formulas and lossless saving.",
   "author": "zarnuq",
   "main": "main.js",
@@ -27,6 +27,8 @@
     "prosemirror-view": "^1.33.9"
   },
   "devDependencies": {
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.38.6",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.1",
     "esbuild": "^0.28.2",

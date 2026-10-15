@@ -22,6 +22,10 @@ import { findBar } from "../common/find-bar";
 import * as ops from "../../domain/xlsx/sheet-edit";
 import { numText } from "../../domain/xlsx/formula-evaluator";
 import { Autosave } from "../common/autosave";
+import { keepVersion, versions } from "../common/version-history";
+import { versionHistoryDialog } from "../common/version-dialog";
+import { sheetTarget } from "../common/embeds";
+import { copyLink } from "../common/copy-link";
 import { runEditCommand } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
 import { insertCheckboxes, toggleCheckboxes } from "../../domain/xlsx/checkbox";
@@ -102,6 +106,7 @@ export class XlsxView extends FileView {
     write: async () => {
       const file = this.file!;
       const bytes = await this.edits!.wb.pkg.save();
+      await keepVersion(this.app, file);
       // Our own write isn't an outside change.
       this.lastWrite = Date.now();
       await this.app.vault.modifyBinary(file, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
@@ -187,6 +192,7 @@ export class XlsxView extends FileView {
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
     addFileItems(this, menu, source);
+    if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(this.app, this, this.settings.readOnly)));
     menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
   }
 
@@ -292,6 +298,36 @@ export class XlsxView extends FileView {
     this.grid.render();
     window.requestAnimationFrame(() => this.grid?.render());
     this.grid.focusGrid();
+    this.loaded = load;
+    this.goToPlace();
+  }
+
+  /** A link's place in the file (#3, #Sheet!B4, #Heading), kept until the file has loaded. */
+  private place: string | null = null;
+  /** The onLoadFile call that last finished (equal to `loads` once the newest one has). */
+  private loaded = 0;
+
+  setEphemeralState(state: unknown): void {
+    super.setEphemeralState(state);
+    const subpath = (state as { subpath?: string } | null)?.subpath;
+    if (!subpath) return;
+    this.place = subpath;
+    this.goToPlace();
+  }
+
+  /** Go to the link's place, once the file is in. */
+  private goToPlace(): void {
+    if (!this.place || this.loaded !== this.loads) return;
+    const place = this.place;
+    this.place = null;
+    if (!this.edits || !this.grid) return;
+    const target = sheetTarget(place, this.wb.sheets.map((s) => s.name));
+    const index = this.wb.sheets.findIndex((s) => s.name === target.sheet);
+    if (index >= 0 && index !== this.sheetIndex) this.showSheet(index);
+    if (target.range) {
+      this.grid.select({ row: target.range.r1, col: target.range.c1 }, { row: target.range.r2, col: target.range.c2 });
+      this.grid.reveal({ row: target.range.r1, col: target.range.c1 });
+    }
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
@@ -822,6 +858,44 @@ export class XlsxView extends FileView {
   }
 
   /** Format › Clear formatting: the selection back to the default style. */
+  /** Every comment thread in the workbook; one opens its cell and the thread. */
+  private allCommentsDialog(): void {
+    if (!this.edits) return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Comments");
+    const list = modal.contentEl.createDiv({ cls: "dw-comment-list" });
+    for (const [index, sheet] of this.wb.sheets.entries()) {
+      for (const [ref, threads] of commentsOf(this.wb.pkg, sheet.ref.path)) {
+        const cell = parseCellRef(ref);
+        if (!cell) continue;
+        for (const thread of threads) {
+          const first = thread.messages[0];
+          const item = list.createDiv({ cls: "dw-comment-list-item", attr: { tabindex: "0" } });
+          item.toggleClass("is-resolved", thread.resolved);
+          item.createDiv({ cls: "dw-comment-list-where", text: `${sheet.name}!${ref}` });
+          item.createDiv({ cls: "dw-comment-list-text", text: `${first?.author ? `${first.author}: ` : ""}${first?.text ?? ""}${thread.messages.length > 1 ? ` (+${thread.messages.length - 1})` : ""}` });
+          const open = () => {
+            modal.close();
+            if (index !== this.sheetIndex) this.showSheet(index);
+            this.grid?.select({ row: cell.row, col: cell.col });
+            this.grid?.reveal({ row: cell.row, col: cell.col });
+            this.commentDialog(cell.row, cell.col);
+          };
+          item.addEventListener("click", open);
+          item.addEventListener("keydown", (e) => e.key === "Enter" && open());
+        }
+      }
+    }
+    if (!list.childElementCount) list.createDiv({ cls: "dw-muted", text: "No comments in this workbook. Add one with Insert › Comment." });
+    modal.open();
+  }
+
+  /** A link to the selected cells ([[book.xlsx#Sheet!B2:C4]]) for a note. */
+  private copyCellLink(): void {
+    const name = this.sheet.name.includes("!") ? `'${this.sheet.name.replace(/'/g, "''")}'` : this.sheet.name;
+    copyLink(this.app, this.file, `#${name}!${rangeName(this.sel)}`, this.sel.r1 === this.sel.r2 && this.sel.c1 === this.sel.c2 ? "cell" : "range");
+  }
+
   /** The selection as a Markdown table, for pasting into a note. */
   private copyMarkdown(): void {
     const md = rangeToMarkdown(this.sheet, this.sel);
@@ -1196,6 +1270,7 @@ export class XlsxView extends FileView {
       menuItem(m, "Cut", () => this.editCommand("cut"));
       menuItem(m, "Copy", () => this.editCommand("copy"));
       menuItem(m, "Copy as Markdown table", () => this.copyMarkdown());
+      menuItem(m, "Copy link to cells", () => this.copyCellLink());
       menuItem(m, "Paste", () => this.editCommand("paste"));
       menuItem(m, "Paste values only", () => this.editCommand("paste", true));
       menuItem(m, "Select all", () => this.grid?.selectAll());
@@ -1210,6 +1285,7 @@ export class XlsxView extends FileView {
       subMenu(m, "Zoom", (s) => {
         for (const z of ZOOMS) menuItem(s, `${Math.round(Number(z) * 100)}%`, () => zoomTo(z), { checked: zoom.value === z });
       });
+      menuItem(m, "Comments", () => this.allCommentsDialog());
       m.addSeparator();
       menuItem(m, "Light", () => this.setTheme("light"), { checked: this.theme === "light" });
       menuItem(m, "Dark", () => this.setTheme("dark"), { checked: this.theme === "dark" });
@@ -1273,6 +1349,8 @@ export class XlsxView extends FileView {
       menuItem(m, "Find and replace", () => this.openFind());
     });
     menu("Help", (m) => menuItem(m, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS])));
+    if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.allCommentsDialog());
 
     this.autosave.status = tb.end().status;
   }
@@ -1504,6 +1582,7 @@ export class XlsxView extends FileView {
     item("Cut", "scissors", () => this.editCommand("cut"));
     item("Copy", "copy", () => this.editCommand("copy"));
     item("Copy as Markdown table", "table", () => this.copyMarkdown());
+    item("Copy link to cells", "link", () => this.copyCellLink());
     item("Paste", "clipboard", () => this.editCommand("paste"));
     item("Paste values only", "clipboard-type", () => this.editCommand("paste", true));
     menu.addSeparator();

@@ -34,14 +34,14 @@ const MENU_ICONS: Record<string, string> = {
   "Word count": "whole-word", "Sort A → Z": "arrow-down-az", "Sort Z → A": "arrow-down-za", "Create a filter": "filter",
   "Remove filter": "filter-x", "Data validation": "list-checks", "Remove duplicates…": "list-x", "Split text to columns…": "columns-2",
   "Named ranges…": "tag", "Import CSV as new sheet…": "file-input", Bold: "bold", Italic: "italic", Underline: "underline",
-  "Keyboard shortcuts": "keyboard", "Copy as Markdown table": "table", "Copy as Markdown outline": "list-tree", Checkbox: "square-check", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
+  "Keyboard shortcuts": "keyboard", "Copy as Markdown table": "table", "Copy as Markdown outline": "list-tree", "Copy link to slide": "link", "Copy link to cells": "link", "Copy link to heading": "link", Comments: "messages-square", Checkbox: "square-check", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
 };
 /** Set while a menu bar menu is being built: its items get MENU_ICONS. */
 let menuBarIcons = false;
 
 /** Read-only files: the menus kept, and the items (or whole submenus) in them that only look at the file. */
 const VIEW_MENUS = new Set(["File", "Edit", "View", "Tools", "Help"]);
-const VIEW_ITEMS = new Set(["Export…", "Copy", "Copy as Markdown table", "Copy as Markdown outline", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts"]);
+const VIEW_ITEMS = new Set(["Export…", "Copy", "Copy as Markdown table", "Copy as Markdown outline", "Copy link to slide", "Copy link to cells", "Copy link to heading", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts"]);
 /** Set while a read-only file's menu is being built: other items are left out. */
 let viewOnly = false;
 const hidden = (title: string) => viewOnly && !VIEW_ITEMS.has(title);
@@ -201,11 +201,7 @@ export class Toolbar {
   /** A menu in the menu row above the toolbar; `build` runs each time it opens, so items show the current state. */
   menu(name: string, build: (m: Menu) => void, open?: (e: MouseEvent) => boolean): HTMLButtonElement {
     if (this.readOnly && !VIEW_MENUS.has(name)) return createEl("button");
-    if (!this.menubar) {
-      this.menubar = createDiv({ cls: "dw-menubar" });
-      this.el.parentElement?.insertBefore(this.menubar, this.el);
-    }
-    const b = this.menubar.createEl("button", { text: name, cls: "dw-menu-btn", attr: { "aria-haspopup": "menu" } });
+    const b = this.menuRow().createEl("button", { text: name, cls: "dw-menu-btn", attr: { "aria-haspopup": "menu" } });
     b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", (e) => {
       if (open?.(e)) return;
@@ -226,6 +222,26 @@ export class Toolbar {
       e.preventDefault();
       b.click();
     });
+    return b;
+  }
+
+  private menuRow(): HTMLElement {
+    if (!this.menubar) {
+      this.menubar = createDiv({ cls: "dw-menubar" });
+      this.el.parentElement?.insertBefore(this.menubar, this.el);
+    }
+    return this.menubar;
+  }
+
+  private sideEl: HTMLElement | null = null;
+
+  /** An icon button at the right end of the menu row, as Google's version history and comments buttons. */
+  side(icon: string, title: string, onClick: () => void): HTMLButtonElement {
+    this.sideEl ??= this.menuRow().createDiv({ cls: "dw-menubar-end" });
+    const b = this.sideEl.createEl("button", { cls: "clickable-icon dw-menubar-icon", attr: { "aria-label": title } });
+    setIcon(b, icon);
+    b.addEventListener("mousedown", (e) => e.preventDefault());
+    b.addEventListener("click", onClick);
     return b;
   }
 
