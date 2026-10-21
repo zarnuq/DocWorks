@@ -77,7 +77,7 @@ If it saves you a trip to Office, please ⭐ the repo.
 
 - **Companion note:** the notebook button beside history and comments creates or reopens a Markdown note beside the Office file, with a source link and editable tags, project and status properties
 - **Create note from selection** in Edit: document text, selected slide text or the current slide, and spreadsheet cells become a new note with a link back to the source heading, slide or range
-- **Export current note to .docx:** headings, lists, tasks, callouts, code, tables, equations, pictures and links back to Obsidian
+- **Export current note to .docx:** headings, lists, tasks, callouts, code (with syntax highlighting), tables, equations, pictures and links back to Obsidian
 - **Export to Markdown** from a Word file, keeping frontmatter, tasks, callouts and code languages from notes exported here
 - **Export current note to .docx** also brings in embedded files: sheets as tables, slides as pictures, documents as their content
 - Embed a file in a note: `![[report.docx]]`, `![[deck.pptx#3]]`, `![[budget.xlsx#Sheet2]]`, or just a range: `![[budget.xlsx#Sheet2!A1:D10]]`
