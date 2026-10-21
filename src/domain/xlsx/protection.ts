@@ -3,7 +3,7 @@ import type { Edits } from "./commands";
 import { child } from "./sheet-edit";
 import type { Sheet } from "./workbook-model";
 
-export type ProtectedAction = "formatCells" | "formatColumns" | "formatRows" | "insertColumns" | "insertRows" | "deleteColumns" | "deleteRows" | "sort" | "autoFilter" | "objects" | "sheet";
+type ProtectedAction = "formatCells" | "formatColumns" | "formatRows" | "insertColumns" | "insertRows" | "deleteColumns" | "deleteRows" | "sort" | "autoFilter" | "objects" | "sheet";
 const truth = (value: string | null | undefined, fallback: boolean) => value == null ? fallback : value === "1" || value === "true";
 export function isProtected(sheet: Sheet): boolean {
   return truth(sheet.first(sheet.doc.documentElement, "sheetProtection")?.getAttribute("sheet"), false);
@@ -72,7 +72,7 @@ const join = (a: Uint8Array, b: Uint8Array) => {
 };
 
 /** Whether `pw` matches the sheet's protection password (legacy or salted, spun hash as Excel writes it). */
-export async function checkPassword(sheet: Sheet, pw: string): Promise<boolean> {
+async function checkPassword(sheet: Sheet, pw: string): Promise<boolean> {
   const p = sheet.first(sheet.doc.documentElement, "sheetProtection");
   if (!p) return true;
   const legacy = p.getAttribute("password");

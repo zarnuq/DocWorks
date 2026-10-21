@@ -2,10 +2,10 @@
  * Shape fill, outline and shadow: read from a:spPr with the p:style theme
  * references as fallback, convert to CSS, and write back in schema order.
  */
-import { NS } from "../../core/utils/xml";
+import { NS, kid, kids } from "../../core/utils/xml";
 import { ColorContext, resolveColor } from "./color";
 
-export interface GradientStop {
+interface GradientStop {
   /** 0..1 */
   pos: number;
   color: string;
@@ -51,9 +51,6 @@ export interface ThemeStyles {
   effects: Element[];
 }
 
-const kid = (el: Element | null | undefined, local: string) =>
-  Array.from(el?.children ?? []).find((c) => c.namespaceURI === NS.a && c.localName === local) ?? null;
-const kids = (el: Element | null | undefined) => Array.from(el?.children ?? []);
 const num = (el: Element | null | undefined, attr: string) => {
   const v = el?.getAttribute(attr);
   return v === null || v === undefined || v === "" ? null : Number(v);
@@ -83,7 +80,7 @@ function fillOf(el: Element, ctx: ColorContext): Fill | null | undefined {
       return color ? { type: "solid", color } : null;
     }
     case "pattFill": {
-      const color = resolveColor(kid(el, "fgClr"), ctx);
+      const color = resolveColor(kid(el, "fgClr", NS.a), ctx);
       return color ? { type: "solid", color } : null;
     }
     case "gradFill": {
@@ -92,7 +89,7 @@ function fillOf(el: Element, ctx: ColorContext): Fill | null | undefined {
         .filter((s) => s.color)
         .sort((a, b) => a.pos - b.pos);
       if (!stops.length) return null;
-      return { type: "gradient", radial: !!kid(el, "path"), angle: (num(kid(el, "lin"), "ang") ?? 0) / 60000, stops };
+      return { type: "gradient", radial: !!kid(el, "path", NS.a), angle: (num(kid(el, "lin", NS.a), "ang") ?? 0) / 60000, stops };
     }
     default:
       return undefined;
@@ -107,7 +104,7 @@ export function readFill(spPr: Element | null, styleEl: Element | null, ctx: Col
     const f = fillOf(own, ctx);
     if (f !== undefined) return f;
   }
-  return readFillRef(kid(styleEl, "fillRef"), ctx, theme);
+  return readFillRef(kid(styleEl, "fillRef", NS.a), ctx, theme);
 }
 
 /** Fill from a theme reference: a:fillRef (idx 1-999 = fill styles) or p:bgRef (1001+ = background fills). */
@@ -136,8 +133,8 @@ const arrow = (el: Element | null): Arrow | null => {
 
 /** The outline of a shape; null = none. Unset parts come from the theme line style. */
 export function readLine(spPr: Element | null, styleEl: Element | null, ctx: ColorContext, theme: ThemeStyles | null): Line | null {
-  const ln = kid(spPr, "ln");
-  const ref = styleRef(kid(styleEl, "lnRef"), (i) => theme?.lines[i - 1], ctx);
+  const ln = kid(spPr, "ln", NS.a);
+  const ref = styleRef(kid(styleEl, "lnRef", NS.a), (i) => theme?.lines[i - 1], ctx);
   // Look in the shape's a:ln first, then the theme's.
   const layers: [Element, ColorContext][] = [];
   if (ln) layers.push([ln, ctx]);
@@ -172,23 +169,23 @@ function lineOf(layers: [Element, ColorContext][], ln: Element | null): Line | n
   return {
     color,
     width: pick((l) => num(l, "w")) ?? 12700,
-    dash: pick((l) => kid(l, "prstDash")?.getAttribute("val") ?? null) ?? "solid",
+    dash: pick((l) => kid(l, "prstDash", NS.a)?.getAttribute("val") ?? null) ?? "solid",
     cap: (pick((l) => l.getAttribute("cap")) as Line["cap"] | null) ?? "flat",
-    head: ln ? arrow(kid(ln, "headEnd")) : null,
-    tail: ln ? arrow(kid(ln, "tailEnd")) : null,
+    head: ln ? arrow(kid(ln, "headEnd", NS.a)) : null,
+    tail: ln ? arrow(kid(ln, "tailEnd", NS.a)) : null,
   };
 }
 
 /** The outer shadow; an explicit a:effectLst on the shape overrides the theme effect style. */
 export function readShadow(spPr: Element | null, styleEl: Element | null, ctx: ColorContext, theme: ThemeStyles | null): Shadow | null {
-  let list = kid(spPr, "effectLst");
+  let list = kid(spPr, "effectLst", NS.a);
   let c = ctx;
-  if (!list && !kid(spPr, "effectDag")) {
-    const ref = styleRef(kid(styleEl, "effectRef"), (i) => theme?.effects[i - 1], ctx);
-    list = ref ? kid(ref.entry, "effectLst") : null;
+  if (!list && !kid(spPr, "effectDag", NS.a)) {
+    const ref = styleRef(kid(styleEl, "effectRef", NS.a), (i) => theme?.effects[i - 1], ctx);
+    list = ref ? kid(ref.entry, "effectLst", NS.a) : null;
     if (ref) c = ref.ctx;
   }
-  const sh = kid(list, "outerShdw");
+  const sh = kid(list, "outerShdw", NS.a);
   const color = sh && resolveColor(sh, c);
   if (!sh || !color) return null;
   return { color, blur: num(sh, "blurRad") ?? 0, dist: num(sh, "dist") ?? 0, dir: (num(sh, "dir") ?? 0) / 60000 };
@@ -254,7 +251,7 @@ export function writeFill(spPr: Element, fill: Fill | null | undefined, order = 
 /** Change some outline properties (null = no outline), keeping everything else on a:ln. */
 export function writeLine(spPr: Element, patch: Partial<Line> | null): void {
   const doc = spPr.ownerDocument;
-  const ln = kid(spPr, "ln") ?? place(spPr, a(doc, "ln"), SPPR_ORDER);
+  const ln = kid(spPr, "ln", NS.a) ?? place(spPr, a(doc, "ln"), SPPR_ORDER);
   const setChild = (local: string, el: Element | null) => {
     kids(ln)
       .filter((c) => slot(c) === local)
@@ -282,8 +279,8 @@ export function writeLine(spPr: Element, patch: Partial<Line> | null): void {
 /** Set or remove the outer shadow. Removing leaves an empty a:effectLst so the theme effect stays off. */
 export function writeShadow(spPr: Element, shadow: Shadow | null): void {
   const doc = spPr.ownerDocument;
-  const list = kid(spPr, "effectLst") ?? place(spPr, a(doc, "effectLst"), SPPR_ORDER);
-  kid(list, "outerShdw")?.remove();
+  const list = kid(spPr, "effectLst", NS.a) ?? place(spPr, a(doc, "effectLst"), SPPR_ORDER);
+  kid(list, "outerShdw", NS.a)?.remove();
   if (!shadow) return;
   const sh = a(doc, "outerShdw", {
     blurRad: Math.round(shadow.blur),

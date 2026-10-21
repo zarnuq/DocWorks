@@ -150,7 +150,7 @@ const MIN_LINES = 2;
 /** Word's own page break is followed when the page is at least this full; emptier, the text before it was cut since. */
 const WORD_BREAK_FILL = 0.8;
 
-export interface LayoutOptions {
+interface LayoutOptions {
   /** Px a page may run past its text height (into the bottom margin) instead of starting another page. */
   squeeze?: number;
 }

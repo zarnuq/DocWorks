@@ -2,8 +2,8 @@ import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
 import type { ChartModel } from "../../domain/pptx/chart";
 import { renderChart } from "../pptx/chart-renderer";
+import { EMU_PER_PX } from "../../core/utils/xml";
 
-const EMU_PER_PX = 9525;
 
 /** A native Word chart, drawn from its chart part; double-click opens the chart editor. */
 export class ChartView implements NodeView {

@@ -14,7 +14,7 @@ interface RefEnd {
   absCol: boolean;
 }
 
-export interface RefToken {
+interface RefToken {
   kind: "ref";
   text: string;
   /** Unquoted sheet name, if qualified. */
@@ -122,7 +122,7 @@ export type Node =
   | { type: "missing" }
   | { type: "unsupported"; text: string };
 
-export const funcName = (text: string) => text.replace(/^(_xlfn\.|_xlws\.)+/i, "").toUpperCase();
+const funcName = (text: string) => text.replace(/^(_xlfn\.|_xlws\.)+/i, "").toUpperCase();
 
 /** Rectangle of a reference token (whole columns / rows span the sheet). */
 export function refRect(t: RefToken): Rect {

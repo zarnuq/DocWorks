@@ -284,7 +284,7 @@ export function footnoteIds(doc: PMNode): string[] {
 }
 
 /** Headings 1–3 for the table of contents. */
-export function tocEntries(doc: PMNode): { level: number; text: string; pos: number }[] {
+function tocEntries(doc: PMNode): { level: number; text: string; pos: number }[] {
   const out: { level: number; text: string; pos: number }[] = [];
   doc.descendants((node, pos) => {
     const style = node.type === schema.nodes.paragraph ? attrsOf<ParagraphAttrs>(node).style : null;

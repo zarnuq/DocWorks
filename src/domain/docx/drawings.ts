@@ -1,13 +1,13 @@
 /** Native Word shapes and groups. Edited properties are patched into each shape's original XML. */
 import { NS } from '../../core/utils/xml';
 import { parseXml } from '../../infrastructure/ooxml/ooxml-package';
-import { EMU_PER_PX } from "./docx-reader";
 import { Placement, placementOf, setPlacement } from './drawing';
 import { presetGeometry, customGeometry, Geometry } from '../pptx/geometry';
+import { EMU_PER_PX } from "../../core/utils/xml";
 
-export const WPS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
-export const WPG = 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup';
-export interface DrawingShape {
+const WPS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+const WPG = 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup';
+interface DrawingShape {
   id: string; kind: string; x: number; y: number; w: number; h: number;
   fill: string | null; line: string | null; text: string;
   /** Original shape XML, retained for properties this editor does not model. */

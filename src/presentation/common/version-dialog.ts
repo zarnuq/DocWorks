@@ -5,7 +5,7 @@ import { keepVersion, versions } from "./version-history";
 import { diffWords } from "../../core/utils/diff";
 import { compareText, officeText, type TextChange } from "../../infrastructure/office-text";
 
-export interface VersionedView {
+interface VersionedView {
   file: TFile | null;
   requestSave(): Promise<void>;
   onUnloadFile(file: TFile): Promise<void>;

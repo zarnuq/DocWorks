@@ -4,7 +4,7 @@
  */
 import { NS } from "../../core/utils/xml";
 
-export interface Revision {
+interface Revision {
   id: string;
   kind: "insert" | "delete" | "format";
   author: string;
@@ -146,7 +146,7 @@ export function rejectRevisions(root: Element, ids?: Set<string>): number {
 }
 
 /** One suggestion as Google Docs lists it: the revisions one edit made (same author and time, side by side). */
-export interface RevisionGroup {
+interface RevisionGroup {
   ids: Set<string>;
   kind: Revision["kind"] | "replace";
   author: string;

@@ -2,7 +2,7 @@
  * Google Slides' paint format: copy a shape's look (fill, outline, shadow, and its first text run's style and
  * alignment) and apply it to other shapes. Writes only the properties copied; everything else stays.
  */
-import { NS, childNS } from "../../core/utils/xml";
+import { NS, kid } from "../../core/utils/xml";
 import { Fill, Line, Shadow, writeFill, writeLine, writeShadow } from "./shape-style";
 import { Align, RunProps, ShapeModel } from "./slide-model";
 import { writeParagraphs } from "./slide-edit";
@@ -24,7 +24,7 @@ export function copyFormat(shape: ShapeModel): ShapeFormat {
 }
 
 export function applyFormat(shape: ShapeModel, f: ShapeFormat): void {
-  const spPr = childNS(shape.el, NS.p, "spPr");
+  const spPr = kid(shape.el, "spPr", NS.p);
   if (f.look && spPr && shape.kind === "sp") {
     // Lines (connectors) have no fill.
     if (shape.el.localName === "sp") writeFill(spPr, f.look.fill);

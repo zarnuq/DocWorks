@@ -24,7 +24,7 @@ export interface TextWatermark {
   diagonal: boolean;
 }
 
-export interface ImageWatermark {
+interface ImageWatermark {
   kind: "image";
   /** New picture bytes, or `path`: one already in the package. */
   data?: Uint8Array;

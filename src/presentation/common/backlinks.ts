@@ -5,7 +5,7 @@
 import { App, type FileView, parseLinktext, setIcon, TFile } from "obsidian";
 import { openDrawer } from "./narrow";
 
-export interface Backlink {
+interface Backlink {
   source: TFile;
   /** "#3", "#Budget!B4", "#Heading" or "" for the whole file. */
   subpath: string;
@@ -15,7 +15,7 @@ export interface Backlink {
   text: string;
 }
 
-export interface BacklinkGroup {
+interface BacklinkGroup {
   subpath: string;
   label: string;
   links: Backlink[];

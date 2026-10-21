@@ -1,6 +1,6 @@
 /** Sequence and word diffs for comparing a kept version with the file now. */
 
-export type DiffOp<T> = { kind: "same"; a: T; b: T } | { kind: "removed"; a: T } | { kind: "added"; b: T };
+type DiffOp<T> = { kind: "same"; a: T; b: T } | { kind: "removed"; a: T } | { kind: "added"; b: T };
 
 /** Above this many cells the middle isn't aligned: it's all removed, then all added. */
 const MAX_CELLS = 4_000_000;
@@ -40,7 +40,7 @@ export function diff<T>(a: T[], b: T[], eq: (x: T, y: T) => boolean = (x, y) => 
   return ops;
 }
 
-export interface WordChange {
+interface WordChange {
   kind: "same" | "removed" | "added";
   text: string;
 }

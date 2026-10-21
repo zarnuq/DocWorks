@@ -12,6 +12,7 @@ import { dateToSerial, Scalar, serialToDate } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
 import { DxfStyle } from "./styles";
 import { Sheet } from "./workbook-model";
+import { escapeXml, kids } from "../../core/utils/xml";
 
 export interface CfStyle extends DxfStyle {
   /** A data bar: the part of the cell's width it fills. */
@@ -45,7 +46,6 @@ export interface CfRule {
   colors: string[];
 }
 
-const kids = (el: Element | null | undefined, tag: string) => (el ? Array.from(el.children).filter((c) => c.localName === tag) : []);
 const on = (el: Element, attr: string, dflt: boolean) => (el.hasAttribute(attr) ? ["1", "true"].includes(el.getAttribute(attr)!) : dflt);
 
 const X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
@@ -397,7 +397,6 @@ export interface NewRule {
   colors?: string[];
 }
 
-const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 /** A typed value as a rule formula: numbers as they are, "=..." as a formula, anything else as quoted text. */
 function operand(raw: string): string {
   const t = raw.trim();
@@ -422,7 +421,7 @@ export function addRule(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewRule): 
     const dxf = sheet.wb.styles.addDxf(rule.style ?? { fill: "#B7E1CD" });
     sheet.wb.touchStyles();
     const head = (attrs: string) => `<cfRule type="${rule.type}" dxfId="${dxf}" priority="${priority}"${attrs}>`;
-    const f = (x: string) => `<formula>${escape(x)}</formula>`;
+    const f = (x: string) => `<formula>${escapeXml(x)}</formula>`;
     switch (rule.type) {
       case "cellIs":
         body = head(` operator="${rule.operator ?? "equal"}"`) + values.slice(0, rule.operator === "between" || rule.operator === "notBetween" ? 2 : 1).map((v) => f(operand(v))).join("") + "</cfRule>";
@@ -431,16 +430,16 @@ export function addRule(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewRule): 
         body = head("") + f(operand(values[0] ?? "=TRUE").replace(/^"(.*)"$/, "$1")) + "</cfRule>";
         break;
       case "containsText":
-        body = head(` operator="containsText" text="${escape(values[0] ?? "")}"`) + f(`NOT(ISERROR(SEARCH("${q}",${first})))`) + "</cfRule>";
+        body = head(` operator="containsText" text="${escapeXml(values[0] ?? "")}"`) + f(`NOT(ISERROR(SEARCH("${q}",${first})))`) + "</cfRule>";
         break;
       case "notContainsText":
-        body = head(` operator="notContains" text="${escape(values[0] ?? "")}"`) + f(`ISERROR(SEARCH("${q}",${first}))`) + "</cfRule>";
+        body = head(` operator="notContains" text="${escapeXml(values[0] ?? "")}"`) + f(`ISERROR(SEARCH("${q}",${first}))`) + "</cfRule>";
         break;
       case "beginsWith":
-        body = head(` operator="beginsWith" text="${escape(values[0] ?? "")}"`) + f(`LEFT(${first},LEN("${q}"))="${q}"`) + "</cfRule>";
+        body = head(` operator="beginsWith" text="${escapeXml(values[0] ?? "")}"`) + f(`LEFT(${first},LEN("${q}"))="${q}"`) + "</cfRule>";
         break;
       case "endsWith":
-        body = head(` operator="endsWith" text="${escape(values[0] ?? "")}"`) + f(`RIGHT(${first},LEN("${q}"))="${q}"`) + "</cfRule>";
+        body = head(` operator="endsWith" text="${escapeXml(values[0] ?? "")}"`) + f(`RIGHT(${first},LEN("${q}"))="${q}"`) + "</cfRule>";
         break;
       case "containsBlanks":
         body = head("") + f(`LEN(TRIM(${first}))=0`) + "</cfRule>";

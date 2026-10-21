@@ -4,18 +4,18 @@
  */
 import type { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { WORKSHEET_ORDER } from "./sheet-edit";
+import { kids } from "../../core/utils/xml";
 
 const S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-const kids = (el: Element | null, name: string) => Array.from(el?.children ?? []).filter((c) => c.namespaceURI === S && c.localName === name);
 
 /** The sheet's links by cell reference (a range's links are listed at its first cell): a web address, or "#" + location. */
 export function linksOf(pkg: XlsxWorkbook, sheetPath: string): Map<string, string> {
   const out = new Map<string, string>();
   const root = pkg.xml(sheetPath)?.documentElement ?? null;
   const rels = new Map(pkg.rels(sheetPath).map((r) => [r.id, r.target]));
-  for (const h of kids(kids(root, "hyperlinks")[0] ?? null, "hyperlink")) {
+  for (const h of kids(kids(root, "hyperlinks", S)[0] ?? null, "hyperlink", S)) {
     const ref = (h.getAttribute("ref") ?? "").split(":")[0];
     const id = h.getAttributeNS(R, "id");
     const target = id ? rels.get(id) : h.hasAttribute("location") ? `#${h.getAttribute("location")}` : undefined;
@@ -28,8 +28,8 @@ export function linksOf(pkg: XlsxWorkbook, sheetPath: string): Map<string, strin
 export function setLink(pkg: XlsxWorkbook, sheetPath: string, ref: string, url: string | null): void {
   const doc = pkg.xml(sheetPath)!;
   const root = doc.documentElement;
-  let list = kids(root, "hyperlinks")[0] ?? null;
-  for (const h of kids(list, "hyperlink")) {
+  let list = kids(root, "hyperlinks", S)[0] ?? null;
+  for (const h of kids(list, "hyperlink", S)) {
     if ((h.getAttribute("ref") ?? "").split(":")[0] !== ref) continue;
     const id = h.getAttributeNS(R, "id");
     h.remove();
@@ -46,6 +46,6 @@ export function setLink(pkg: XlsxWorkbook, sheetPath: string, ref: string, url: 
     if (url.startsWith("#")) h.setAttribute("location", url.slice(1));
     else h.setAttributeNS(R, "r:id", pkg.addLinkRel(sheetPath, url));
   }
-  if (list && !kids(list, "hyperlink").length) list.remove();
+  if (list && !kids(list, "hyperlink", S).length) list.remove();
   pkg.touch(sheetPath);
 }

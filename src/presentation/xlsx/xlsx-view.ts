@@ -24,6 +24,7 @@ import { numText } from "../../domain/xlsx/formula-evaluator";
 import { Autosave, reloadOnOutsideChange } from "../common/autosave";
 import { keepVersion, versions } from "../common/version-history";
 import { versionHistoryDialog } from "../common/version-dialog";
+import { createSelectionNote, openCompanionNote } from "../common/office-notes";
 import { sheetTarget } from "../common/embeds";
 import { LinkedFrom } from "../common/backlinks";
 import { copyLink } from "../common/copy-link";
@@ -33,7 +34,7 @@ import { insertCheckboxes, toggleCheckboxes } from "../../domain/xlsx/checkbox";
 import { COMMON_SHORTCUTS, registerShortcutsKey, SHEETS_SHORTCUTS, shortcutsDialog } from "../common/shortcuts";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
-import { FONTS, menuItem, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems } from "../common/toolbar";
+import { FONTS, menuItem, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
 import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
 import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
@@ -60,7 +61,7 @@ const FREEZES: [string, string][] = [["No rows", "r0"], ["1 row", "r1"], ["2 row
 const IMPORT = "Import CSV or TSV as new sheet…";
 const ZOOM_KEY = "doc-works-xlsx-zoom";
 /** Google Sheets' zoom levels. */
-const ZOOMS = ["0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
+const SHEET_ZOOMS = ZOOMS.slice(1);
 const FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 18, 24, 36];
 const WHOLE_COL = (c1: number, c2: number): Rect => ({ r1: 0, c1, r2: 1048575, c2 });
 
@@ -907,6 +908,12 @@ export class XlsxView extends FileView {
     void navigator.clipboard.writeText(md).then(() => new Notice("Copied as a Markdown table."));
   }
 
+  private extractNote(): void {
+    if (!this.grid) return;
+    const name = this.sheet.name.includes("!") ? `'${this.sheet.name.replace(/'/g, "''")}'` : this.sheet.name;
+    void createSelectionNote(this.app, this.file, `#${name}!${rangeName(this.sel)}`, rangeToMarkdown(this.sheet, this.sel));
+  }
+
   private clearFormatting(): void {
     if (this.grid) this.change(() => this.edits!.restyle(this.sheet, this.grid!.selection(), () => 0));
   }
@@ -1086,7 +1093,7 @@ export class XlsxView extends FileView {
   /** The zoom picked last (100% by default). */
   private savedZoom(): string {
     const z = this.app.loadLocalStorage(ZOOM_KEY) as string | null;
-    return z && ZOOMS.includes(z) ? z : "1";
+    return z && SHEET_ZOOMS.includes(z) ? z : "1";
   }
 
   // ---------------------------------------------------------------------------
@@ -1216,7 +1223,7 @@ export class XlsxView extends FileView {
     tb.icon("redo-2", "Redo (Ctrl+Y)", () => this.redo());
     tb.pin();
     tb.gap();
-    const zoom = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [`${Math.round(Number(z) * 100)}%`, z]), zoomTo);
+    const zoom = tb.select("Zoom", "Zoom", SHEET_ZOOMS.map((z) => [zoomLabel(z), z]), zoomTo);
     zoom.value = this.savedZoom();
     tb.keep();
     tb.gap();
@@ -1275,6 +1282,7 @@ export class XlsxView extends FileView {
       menuItem(m, "Copy", () => this.editCommand("copy"));
       menuItem(m, "Copy as Markdown table", () => this.copyMarkdown());
       menuItem(m, "Copy link to cells", () => this.copyCellLink());
+      menuItem(m, "Create note from selection", () => this.extractNote());
       menuItem(m, "Paste", () => this.editCommand("paste"));
       menuItem(m, "Paste values only", () => this.editCommand("paste", true));
       menuItem(m, "Select all", () => this.grid?.selectAll());
@@ -1287,7 +1295,7 @@ export class XlsxView extends FileView {
         for (const [label, v] of FREEZES) menuItem(s, label, () => this.freeze(v));
       });
       subMenu(m, "Zoom", (s) => {
-        for (const z of ZOOMS) menuItem(s, `${Math.round(Number(z) * 100)}%`, () => zoomTo(z), { checked: zoom.value === z });
+        for (const z of SHEET_ZOOMS) menuItem(s, zoomLabel(z), () => zoomTo(z), { checked: zoom.value === z });
       });
       menuItem(m, "Comments", () => this.allCommentsDialog());
       menuItem(m, "Linked from", () => this.linked.toggle());
@@ -1355,6 +1363,7 @@ export class XlsxView extends FileView {
     });
     menu("Help", (m) => menuItem(m, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS])));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    tb.side("notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file));
     const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
     if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.allCommentsDialog());
 
@@ -1589,6 +1598,7 @@ export class XlsxView extends FileView {
     item("Copy", "copy", () => this.editCommand("copy"));
     item("Copy as Markdown table", "table", () => this.copyMarkdown());
     item("Copy link to cells", "link", () => this.copyCellLink());
+    item("Create note from selection", "file-plus", () => this.extractNote());
     item("Paste", "clipboard", () => this.editCommand("paste"));
     item("Paste values only", "clipboard-type", () => this.editCommand("paste", true));
     menu.addSeparator();

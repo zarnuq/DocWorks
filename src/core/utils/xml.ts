@@ -28,11 +28,23 @@ export function escapeXml(str: string): string {
     .replace(/'/g, "&apos;");
 }
 
-export function childNS(el: Element, ns: string, local: string): Element | null {
+/** Child elements named `local` (all of them without it), in any namespace or only `ns`. */
+export const kids = (el: Element | null | undefined, local?: string, ns?: string): Element[] =>
+  el ? Array.from(el.children).filter((c) => (!local || c.localName === local) && (!ns || c.namespaceURI === ns)) : [];
+
+/** The first child element named `local`, in any namespace or only `ns`. */
+export function kid(el: Element | null | undefined, local: string, ns?: string): Element | null {
+  if (!el) return null;
   for (let i = 0; i < el.children.length; i++) {
-    if (el.children[i].localName === local && el.children[i].namespaceURI === ns) {
-      return el.children[i];
-    }
+    const c = el.children[i];
+    if (c.localName === local && (!ns || c.namespaceURI === ns)) return c;
   }
   return null;
 }
+
+/** English Metric Units: OOXML's lengths. */
+export const EMU_PER_PX = 9525;
+export const EMU_PER_PT = 12700;
+
+/** A new GUID in braces, as Office writes ids. */
+export const guid = () => `{${crypto.randomUUID().toUpperCase()}}`;

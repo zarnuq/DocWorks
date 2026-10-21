@@ -5,6 +5,7 @@
 import { parseRange, Rect } from "./references";
 import { Scalar } from "./number-format";
 import { Sheet } from "./workbook-model";
+import { kid } from "../../core/utils/xml";
 
 const X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
 
@@ -32,7 +33,6 @@ export interface Sparkline {
   rtl: boolean;
 }
 
-const kid = (el: Element | null | undefined, name: string) => (el ? Array.from(el.children).find((c) => c.localName === name) ?? null : null);
 const on = (el: Element, attr: string) => ["1", "true"].includes(el.getAttribute(attr) ?? "");
 
 /** The numbers in a sheet-qualified range ("Data!A1:A5"); null where a cell is blank or not a number. */

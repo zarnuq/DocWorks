@@ -19,7 +19,7 @@ export interface ExportFormat {
   options?: (el: HTMLElement) => void;
 }
 
-export type ExportTarget = { vault: string } | { outside: string };
+type ExportTarget = { vault: string } | { outside: string };
 
 export interface ExportChoice {
   format: string;

@@ -1,5 +1,5 @@
 import { setLinkAttrs } from "./links";
-import { NS, childNS, escapeXml } from "../../core/utils/xml";
+import { NS, kid, escapeXml, kids } from "../../core/utils/xml";
 import { Para, Rect, Run, Spacing, TextBody, TextStyle, resolveLevel, runProps } from "./slide-model";
 import { fitTable } from "./table";
 
@@ -24,8 +24,6 @@ const FILL_TAGS = new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattF
 const AFTER_LATIN = new Set(["ea", "cs", "sym", "hlinkClick", "hlinkMouseOver", "rtl", "extLst"]);
 
 const el = (doc: Document, name: string) => doc.createElementNS(NS.a, `a:${name}`);
-const kids = (parent: Element | null, local: string) =>
-  parent ? Array.from(parent.children).filter((c) => c.localName === local && c.namespaceURI === NS.a) : [];
 
 function insertBeforeFirst(parent: Element, child: Element, after: Set<string>): void {
   const anchor = Array.from(parent.children).find((c) => after.has(c.localName)) ?? null;
@@ -60,7 +58,7 @@ function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>
     else rPr.removeAttribute("baseline");
   }
   if ((run.highlight ?? null)?.toUpperCase() !== (base.highlight ?? null)?.toUpperCase()) {
-    childNS(rPr, NS.a, "highlight")?.remove();
+    kid(rPr, "highlight", NS.a)?.remove();
     if (run.highlight) {
       const mark = el(doc, "highlight");
       mark.appendChild(el(doc, "srgbClr")).setAttribute("val", run.highlight.replace("#", "").toUpperCase());
@@ -68,7 +66,7 @@ function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>
     }
   }
   if (run.link !== base.link) {
-    childNS(rPr, NS.a, "hlinkClick")?.remove();
+    kid(rPr, "hlinkClick", NS.a)?.remove();
     if (run.link && style.links) {
       const h = el(doc, "hlinkClick");
       setLinkAttrs(h, style.links.add(run.link));
@@ -88,12 +86,12 @@ function writeRunProps(rPr: Element, run: Run, base: ReturnType<typeof runProps>
     clr.setAttribute("val", run.color.replace("#", "").toUpperCase());
     fill.appendChild(clr);
     // Fill follows an optional a:ln and precedes everything else.
-    const ln = childNS(rPr, NS.a, "ln");
+    const ln = kid(rPr, "ln", NS.a);
     rPr.insertBefore(fill, ln ? ln.nextSibling : rPr.firstChild);
   }
 
   if (run.font !== base.font) {
-    let latin = childNS(rPr, NS.a, "latin");
+    let latin = kid(rPr, "latin", NS.a);
     if (!latin) {
       latin = el(doc, "latin");
       insertBeforeFirst(rPr, latin, AFTER_LATIN);
@@ -111,7 +109,7 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
   const txBody = body.el;
   const doc = txBody.ownerDocument;
   const style = body.style;
-  const original = kids(txBody, "p");
+  const original = kids(txBody, "p", NS.a);
   const paras: ParaInput[] = input.length ? input : [{ ...(body.paras[0] ?? { align: "l" as const, lvl: 0, bullet: null }), runs: [] }];
 
   const written = paras.map((para, k) => {
@@ -119,7 +117,7 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
     const template = same ?? original[original.length - 1] ?? null;
     const p = el(doc, "p");
 
-    const pPr = (kids(template, "pPr")[0]?.cloneNode(true) as Element | undefined) ?? el(doc, "pPr");
+    const pPr = (kids(template, "pPr", NS.a)[0]?.cloneNode(true) as Element | undefined) ?? el(doc, "pPr");
     // An explicit lvl="0" stays when the level didn't change.
     if (para.lvl !== Number(pPr.getAttribute("lvl") ?? 0)) {
       if (para.lvl) pPr.setAttribute("lvl", String(para.lvl));
@@ -152,7 +150,7 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
         p.appendChild(twin.cloneNode(true));
         return;
       }
-      const baseRPr = kids(origItems[j] ?? origItems[origItems.length - 1] ?? null, "rPr")[0];
+      const baseRPr = kids(origItems[j] ?? origItems[origItems.length - 1] ?? null, "rPr", NS.a)[0];
       const rPr = (baseRPr?.cloneNode(true) as Element | undefined) ?? el(doc, "rPr");
       writeRunProps(rPr, run, runProps(rPr, level.defaults, style), style);
       const hasProps = rPr.attributes.length > 0 || rPr.children.length > 0;
@@ -182,7 +180,7 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
       });
     });
 
-    const endPr = kids(template, "endParaRPr")[0];
+    const endPr = kids(template, "endParaRPr", NS.a)[0];
     if (endPr) p.appendChild(endPr.cloneNode(true));
     return p;
   });
@@ -191,7 +189,7 @@ export function writeParagraphs(body: TextBody, input: ParaInput[]): void {
   written.forEach((p) => txBody.appendChild(p));
 }
 
-export interface BodyPrPatch {
+interface BodyPrPatch {
   anchor?: "t" | "ctr" | "b";
   insets?: { l: number; t: number; r: number; b: number };
   wrap?: boolean;
@@ -203,7 +201,7 @@ const AUTOFIT_TAGS = new Set(["noAutofit", "normAutofit", "spAutoFit"]);
 /** Change text box settings on a:bodyPr (anchor, insets, wrapping, autofit). */
 export function writeBodyPr(txBody: Element, patch: BodyPrPatch): void {
   const doc = txBody.ownerDocument;
-  const bodyPr = kids(txBody, "bodyPr")[0] ?? txBody.insertBefore(el(doc, "bodyPr"), txBody.firstChild);
+  const bodyPr = kids(txBody, "bodyPr", NS.a)[0] ?? txBody.insertBefore(el(doc, "bodyPr"), txBody.firstChild);
   if (patch.anchor) bodyPr.setAttribute("anchor", patch.anchor);
   if (patch.insets) {
     for (const [k, attr] of [["l", "lIns"], ["t", "tIns"], ["r", "rIns"], ["b", "bIns"]] as const) {
@@ -221,7 +219,7 @@ export function writeBodyPr(txBody: Element, patch: BodyPrPatch): void {
       if (fit.lnSpcReduction) child.setAttribute("lnSpcReduction", String(Math.round(fit.lnSpcReduction * 100000)));
     }
     // a:prstTxWarp comes first; autofit precedes scene3d, sp3d, flatTx, extLst.
-    const warp = kids(bodyPr, "prstTxWarp")[0];
+    const warp = kids(bodyPr, "prstTxWarp", NS.a)[0];
     bodyPr.insertBefore(child, warp ? warp.nextSibling : bodyPr.firstChild);
   }
 }
@@ -232,7 +230,7 @@ export function writeBodyPr(txBody: Element, patch: BodyPrPatch): void {
 
 function ensureChild(parent: Element, ns: string, qname: string, afterLocal: string | null): Element {
   const local = qname.split(":")[1];
-  let child = childNS(parent, ns, local);
+  let child = kid(parent, local, ns);
   if (!child) {
     child = parent.ownerDocument.createElementNS(ns, qname);
     const after = afterLocal ? Array.from(parent.children).find((c) => c.localName.startsWith(afterLocal)) : null;
@@ -274,7 +272,7 @@ export function appendShape(doc: Document, xml: string): Element {
   ).documentElement.firstElementChild!;
   const node = doc.importNode(frag, true);
   const tree = doc.getElementsByTagNameNS(NS.p, "spTree")[0];
-  tree.insertBefore(node, childNS(tree, NS.p, "extLst"));
+  tree.insertBefore(node, kid(tree, "extLst", NS.p));
   return node;
 }
 
@@ -355,7 +353,7 @@ export function setTransform(shape: Element, t: { rot?: number; flipH?: boolean;
 export function setAdjust(shape: Element, name: string, value: number): void {
   const prstGeom = shape.getElementsByTagNameNS(NS.a, "prstGeom")[0];
   if (!prstGeom) return;
-  const avLst = childNS(prstGeom, NS.a, "avLst") ?? prstGeom.appendChild(el(shape.ownerDocument, "avLst"));
+  const avLst = kid(prstGeom, "avLst", NS.a) ?? prstGeom.appendChild(el(shape.ownerDocument, "avLst"));
   const gd = Array.from(avLst.children).find((g) => g.getAttribute("name") === name) ?? avLst.appendChild(el(shape.ownerDocument, "gd"));
   gd.setAttribute("name", name);
   gd.setAttribute("fmla", `val ${Math.round(value)}`);
@@ -372,7 +370,7 @@ export function reorder(shape: Element, to: ZOrder): void {
     to === "front" ? null : to === "back" ? shapes[0] : to === "forward" ? (shapes[i + 1]?.nextSibling ?? null) : shapes[i - 1];
   if (to === "forward" && i === shapes.length - 1) return;
   if (to === "backward" && i === 0) return;
-  tree.insertBefore(shape, target === null ? childNS(tree, NS.p, "extLst") : target);
+  tree.insertBefore(shape, target === null ? kid(tree, "extLst", NS.p) : target);
 }
 
 export interface Glue {
@@ -386,20 +384,20 @@ export interface Glue {
 export function connect(cxn: Element, end: "st" | "end", target: Glue | null): void {
   const nv = cxn.getElementsByTagNameNS(NS.p, "cNvCxnSpPr")[0];
   if (!nv) return;
-  childNS(nv, NS.a, `${end}Cxn`)?.remove();
+  kid(nv, `${end}Cxn`, NS.a)?.remove();
   if (!target) return;
   const g = el(cxn.ownerDocument, `${end}Cxn`);
   g.setAttribute("id", target.id);
   g.setAttribute("idx", String(target.idx));
   // a:cxnSpLocks, a:stCxn, a:endCxn, a:extLst
-  const before = end === "st" ? (childNS(nv, NS.a, "endCxn") ?? childNS(nv, NS.a, "extLst")) : childNS(nv, NS.a, "extLst");
+  const before = end === "st" ? (kid(nv, "endCxn", NS.a) ?? kid(nv, "extLst", NS.a)) : kid(nv, "extLst", NS.a);
   nv.insertBefore(g, before);
 }
 
 export function connections(cxn: Element): { st: Glue | null; end: Glue | null } {
   const nv = cxn.getElementsByTagNameNS(NS.p, "cNvCxnSpPr")[0];
   const read = (end: string): Glue | null => {
-    const g = nv && childNS(nv, NS.a, `${end}Cxn`);
+    const g = nv && kid(nv, `${end}Cxn`, NS.a);
     return g ? { id: g.getAttribute("id") ?? "", idx: Number(g.getAttribute("idx")) } : null;
   };
   return { st: read("st"), end: read("end") };
@@ -438,13 +436,13 @@ const paragraphText = (p: Element) =>
  */
 export function writePlainParagraphs(txBody: Element, text: string): void {
   const doc = txBody.ownerDocument;
-  const original = kids(txBody, "p");
+  const original = kids(txBody, "p", NS.a);
   const written = text.split("\n").map((line, k) => {
     const same = original[k];
     if (same && paragraphText(same) === line && !same.getElementsByTagNameNS(NS.a, "br").length) return same;
     const template = same ?? original[original.length - 1] ?? null;
     const p = el(doc, "p");
-    const pPr = kids(template, "pPr")[0];
+    const pPr = kids(template, "pPr", NS.a)[0];
     if (pPr) p.appendChild(pPr.cloneNode(true));
     if (line) {
       const r = p.appendChild(el(doc, "r"));
@@ -452,7 +450,7 @@ export function writePlainParagraphs(txBody: Element, text: string): void {
       if (rPr) r.appendChild(rPr.cloneNode(true));
       r.appendChild(el(doc, "t")).textContent = line;
     }
-    const end = kids(template, "endParaRPr")[0];
+    const end = kids(template, "endParaRPr", NS.a)[0];
     if (end) p.appendChild(end.cloneNode(true));
     return p;
   });
@@ -525,16 +523,16 @@ export function readCrop(pic: Element): Crop | null {
 /** Crop a picture like PowerPoint: the image keeps its scale and the frame shrinks or grows around it. */
 // ponytail: ignores rotation; a rotated picture's frame moves along unrotated axes.
 export function setCrop(pic: Element, next: Crop): void {
-  const blipFill = childNS(pic, NS.p, "blipFill");
-  const xfrm = childNS(childNS(pic, NS.p, "spPr") ?? pic, NS.a, "xfrm");
+  const blipFill = kid(pic, "blipFill", NS.p);
+  const xfrm = kid(kid(pic, "spPr", NS.p) ?? pic, "xfrm", NS.a);
   if (!blipFill || !xfrm) return;
   const old = readCrop(pic) ?? { l: 0, t: 0, r: 0, b: 0 };
   const clamp = (v: number) => Math.min(0.95, Math.max(0, v || 0));
   const c = { l: clamp(next.l), t: clamp(next.t), r: clamp(next.r), b: clamp(next.b) };
   if (c.l + c.r > 0.95) c.r = 0.95 - c.l;
   if (c.t + c.b > 0.95) c.b = 0.95 - c.t;
-  const off = childNS(xfrm, NS.a, "off")!;
-  const ext = childNS(xfrm, NS.a, "ext")!;
+  const off = kid(xfrm, "off", NS.a)!;
+  const ext = kid(xfrm, "ext", NS.a)!;
   const r = { x: Number(off.getAttribute("x")), y: Number(off.getAttribute("y")), w: Number(ext.getAttribute("cx")), h: Number(ext.getAttribute("cy")) };
   // A file can crop away the whole image; treat that as 5% left visible.
   const fullW = r.w / Math.max(0.05, 1 - old.l - old.r);
@@ -545,6 +543,6 @@ export function setCrop(pic: Element, next: Crop): void {
   if (!SIDES.some((k) => c[k])) return;
   const src = pic.ownerDocument.createElementNS(NS.a, "a:srcRect");
   for (const k of SIDES) if (c[k]) src.setAttribute(k, String(Math.round(c[k] * 100000)));
-  const blip = childNS(blipFill, NS.a, "blip");
+  const blip = kid(blipFill, "blip", NS.a);
   blipFill.insertBefore(src, blip ? blip.nextSibling : blipFill.firstChild);
 }

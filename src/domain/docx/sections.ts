@@ -24,7 +24,7 @@ const parse = (xml: string) => new DOMParser().parseFromString(xml, "application
 const child = (el: Element, local: string) => Array.from(el.children).find((c) => c.namespaceURI === NS.w && c.localName === local) ?? null;
 const on = (v: string | null) => v === "1" || v === "true" || v === "on";
 
-export function columnsOf(sectPr: string | null): Columns {
+function columnsOf(sectPr: string | null): Columns {
   const cols = sectPr ? child(parse(sectPr), "cols") : null;
   if (!cols) return ONE_COLUMN;
   return {
@@ -75,7 +75,7 @@ export function withType(sectPr: string, type: string): string {
 export const DEFAULT_SECTPR = `<w:sectPr xmlns:w="${NS.w}"><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`;
 
 /** Top-level blocks with column sections opened up. */
-export function flatten(doc: PMNode): PMNode[] {
+function flatten(doc: PMNode): PMNode[] {
   const out: PMNode[] = [];
   doc.forEach((n) => (n.type === schema.nodes.columns ? n.forEach((c) => out.push(c)) : out.push(n)));
   return out;

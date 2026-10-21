@@ -3,7 +3,7 @@
  * style resolved per cell, and grid edits that keep merges and the frame size valid.
  * Every row holds one a:tc per grid column; merged-away cells carry hMerge / vMerge.
  */
-import { NS, escapeXml } from "../../core/utils/xml";
+import { NS, escapeXml, kid, kids } from "../../core/utils/xml";
 import type { ColorContext } from "./color";
 import { resolveColor } from "./color";
 import type { Rect } from "./geometry";
@@ -44,13 +44,11 @@ const FLAGS: (keyof TableFlags)[] = ["firstRow", "lastRow", "firstCol", "lastCol
 const TCPR_ORDER = ["lnL", "lnR", "lnT", "lnB", "lnTlToBr", "lnBlToTr", "cell3D", "fill", "headers", "extLst"];
 const SIDE_TAG: Record<Side, string> = { l: "lnL", r: "lnR", t: "lnT", b: "lnB" };
 
-const kids = (el: Element | null | undefined, local: string) => Array.from(el?.children ?? []).filter((c) => c.localName === local && c.namespaceURI === A);
-const kid = (el: Element | null | undefined, local: string) => kids(el, local)[0] ?? null;
 const int = (el: Element, attr: string) => Number(el.getAttribute(attr)) || 0;
 
-const rowsOf = (tbl: Element) => kids(tbl, "tr");
-const gridCols = (tbl: Element) => kids(kid(tbl, "tblGrid"), "gridCol");
-const cellAt = (tbl: Element, r: number, c: number): Element | null => kids(rowsOf(tbl)[r], "tc")[c] ?? null;
+const rowsOf = (tbl: Element) => kids(tbl, "tr", A);
+const gridCols = (tbl: Element) => kids(kid(tbl, "tblGrid", A), "gridCol", A);
+const cellAt = (tbl: Element, r: number, c: number): Element | null => kids(rowsOf(tbl)[r], "tc", A)[c] ?? null;
 const flag = (tc: Element | null, attr: string) => tc?.getAttribute(attr) === "1" || tc?.getAttribute(attr) === "true";
 const span = (tc: Element, attr: string) => Math.max(1, int(tc, attr));
 
@@ -88,7 +86,7 @@ function regions(style: Element | null, f: TableFlags, r: number, c: number, nr:
   if (!style) return [];
   const out: Region[] = [];
   const add = (name: string, r0: number, r1: number, c0: number, c1: number) => {
-    const part = kid(style, name);
+    const part = kid(style, name, A);
     if (part && r >= r0 && r <= r1 && c >= c0 && c <= c1) out.push({ part, r0, r1, c0, c1 });
   };
   const top = f.firstRow ? 1 : 0;
@@ -107,16 +105,16 @@ function regions(style: Element | null, f: TableFlags, r: number, c: number, nr:
 
 /** The border element a region gives side `s` of cell (r, c): its outer edge, or insideH / insideV within it. */
 function regionBorder(g: Region, s: Side, r: number, c: number): Element | null {
-  const bdr = kid(kid(g.part, "tcStyle"), "tcBdr");
+  const bdr = kid(kid(g.part, "tcStyle", A), "tcBdr", A);
   const edge = s === "t" ? r === g.r0 : s === "b" ? r === g.r1 : s === "l" ? c === g.c0 : c === g.c1;
   const name = edge ? { l: "left", r: "right", t: "top", b: "bottom" }[s] : s === "t" || s === "b" ? "insideH" : "insideV";
-  return kid(bdr, name);
+  return kid(bdr, name, A);
 }
 
 export function readTable(tbl: Element, styles: Document | null, ctx: ColorContext): TableModel {
-  const tblPr = kid(tbl, "tblPr");
+  const tblPr = kid(tbl, "tblPr", A);
   const flags = Object.fromEntries(FLAGS.map((k) => [k, flag(tblPr, k)])) as TableFlags;
-  const styleId = kid(tblPr, "tableStyleId")?.textContent?.trim() || null;
+  const styleId = kid(tblPr, "tableStyleId", A)?.textContent?.trim() || null;
   const style = styleId
     ? (Array.from(styles?.getElementsByTagNameNS(A, "tblStyle") ?? []).find((s) => s.getAttribute("styleId") === styleId) ?? null)
     : null;
@@ -126,23 +124,23 @@ export function readTable(tbl: Element, styles: Document | null, ctx: ColorConte
   const nc = cols.length;
 
   const cells = rows.map((tr, r) =>
-    kids(tr, "tc").map((el, c): TableCell => {
+    kids(tr, "tc", A).map((el, c): TableCell => {
       const applied = regions(style, flags, r, c, nr, nc);
       let fill: Fill | null = null;
       const text: TableCell["text"] = { b: null, color: null };
       for (const g of applied) {
-        const f = kid(kid(g.part, "tcStyle"), "fill");
+        const f = kid(kid(g.part, "tcStyle", A), "fill", A);
         if (f) fill = readFill(f, null, ctx, null);
-        const tx = kid(g.part, "tcTxStyle");
+        const tx = kid(g.part, "tcTxStyle", A);
         if (tx) {
           const b = tx.getAttribute("b");
           if (b === "on" || b === "off") text.b = b === "on";
           // The direct color child wins over the fontRef's.
-          const color = resolveColor(Array.from(tx.children).find((ch) => ch.localName !== "fontRef") ?? null, ctx) ?? resolveColor(kid(tx, "fontRef"), ctx);
+          const color = resolveColor(Array.from(tx.children).find((ch) => ch.localName !== "fontRef") ?? null, ctx) ?? resolveColor(kid(tx, "fontRef", A), ctx);
           if (color) text.color = color;
         }
       }
-      const tcPr = kid(el, "tcPr");
+      const tcPr = kid(el, "tcPr", A);
       const own = tcPr && Array.from(tcPr.children).find((ch) => /^(noFill|solidFill|gradFill|pattFill)$/.test(ch.localName));
       if (own) fill = readFill(tcPr, null, ctx, null);
 
@@ -150,10 +148,10 @@ export function readTable(tbl: Element, styles: Document | null, ctx: ColorConte
       for (const s of ["l", "r", "t", "b"] as Side[]) {
         let line: Line | null = null;
         for (const g of applied) {
-          const ln = kid(regionBorder(g, s, r, c), "ln");
+          const ln = kid(regionBorder(g, s, r, c), "ln", A);
           if (ln) line = lineFrom(ln, ctx);
         }
-        const mine = kid(tcPr, SIDE_TAG[s]);
+        const mine = kid(tcPr, SIDE_TAG[s], A);
         if (mine) line = lineFrom(mine, ctx);
         borders[s] = line;
       }
@@ -198,7 +196,7 @@ function parseA(doc: Document, xml: string): Element {
 /** An empty cell carrying `like`'s formatting (tcPr), without its merge. */
 function newCell(like: Element | null, doc: Document): Element {
   const tc = parseA(doc, `<a:tc>${EMPTY_BODY}</a:tc>`);
-  const tcPr = kid(like, "tcPr");
+  const tcPr = kid(like, "tcPr", A);
   tc.appendChild(tcPr ? tcPr.cloneNode(true) : parseA(doc, "<a:tcPr/>"));
   return tc;
 }
@@ -229,7 +227,7 @@ export function insertRow(tbl: Element, at: number, below: boolean): void {
   const next = below ? at + 1 : at;
   const tr = src.cloneNode(false) as Element;
   const grown = new Set<string>();
-  kids(src, "tc").forEach((like, c) => {
+  kids(src, "tc", A).forEach((like, c) => {
     const tc = tr.appendChild(newCell(like, doc));
     // Inside a vertical merge when the cell the new row pushes down continues one.
     if (flag(cellAt(tbl, next, c), "vMerge")) {
@@ -258,7 +256,7 @@ export function insertCol(tbl: Element, at: number, right: boolean): void {
       setFlag(tc, "vMerge", flag(like, "vMerge"));
       growMerge(tbl, grown, r, next, "gridSpan", 1);
     }
-    tr.insertBefore(tc, kids(tr, "tc")[next] ?? null);
+    tr.insertBefore(tc, kids(tr, "tc", A)[next] ?? null);
   });
   syncFrame(tbl);
 }
@@ -268,7 +266,7 @@ export function deleteRow(tbl: Element, r: number): void {
   const rows = rowsOf(tbl);
   if (!rows[r] || rows.length <= 1) return;
   const shrunk = new Set<string>();
-  kids(rows[r], "tc").forEach((tc, c) => {
+  kids(rows[r], "tc", A).forEach((tc, c) => {
     if (flag(tc, "hMerge") && !flag(tc, "vMerge")) return;
     if (flag(tc, "vMerge")) growMerge(tbl, shrunk, r, c, "rowSpan", -1);
     else if (span(tc, "rowSpan") > 1) {
@@ -276,8 +274,8 @@ export function deleteRow(tbl: Element, r: number): void {
       setSpan(heir, "rowSpan", span(tc, "rowSpan") - 1);
       setSpan(heir, "gridSpan", span(tc, "gridSpan"));
       for (let k = 0; k < span(tc, "gridSpan"); k++) setFlag(cellAt(tbl, r + 1, c + k)!, "vMerge", false);
-      const body = kid(tc, "txBody");
-      if (body) kid(heir, "txBody")?.replaceWith(body);
+      const body = kid(tc, "txBody", A);
+      if (body) kid(heir, "txBody", A)?.replaceWith(body);
     }
   });
   rows[r].remove();
@@ -289,7 +287,7 @@ export function deleteCol(tbl: Element, c: number): void {
   if (!cols[c] || cols.length <= 1) return;
   const shrunk = new Set<string>();
   rowsOf(tbl).forEach((tr, r) => {
-    const tc = kids(tr, "tc")[c];
+    const tc = kids(tr, "tc", A)[c];
     if (!tc || (flag(tc, "vMerge") && !flag(tc, "hMerge"))) return;
     if (flag(tc, "hMerge")) growMerge(tbl, shrunk, r, c, "gridSpan", -1);
     else if (span(tc, "gridSpan") > 1) {
@@ -297,11 +295,11 @@ export function deleteCol(tbl: Element, c: number): void {
       setSpan(heir, "gridSpan", span(tc, "gridSpan") - 1);
       setSpan(heir, "rowSpan", span(tc, "rowSpan"));
       for (let k = 0; k < span(tc, "rowSpan"); k++) setFlag(cellAt(tbl, r + k, c + 1)!, "hMerge", false);
-      const body = kid(tc, "txBody");
-      if (body) kid(heir, "txBody")?.replaceWith(body);
+      const body = kid(tc, "txBody", A);
+      if (body) kid(heir, "txBody", A)?.replaceWith(body);
     }
   });
-  rowsOf(tbl).forEach((tr) => kids(tr, "tc")[c]?.remove());
+  rowsOf(tbl).forEach((tr) => kids(tr, "tc", A)[c]?.remove());
   cols[c].remove();
   syncFrame(tbl);
 }
@@ -314,23 +312,23 @@ export function mergeCells(tbl: Element, range: CellRange): void {
   if (r1 === r2 && c1 === c2) return;
   for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) splitCell(tbl, r, c);
   const origin = cellAt(tbl, r1, c1)!;
-  const body = kid(origin, "txBody");
+  const body = kid(origin, "txBody", A);
   if (!body) return;
-  if (!hasText(body)) kids(body, "p").forEach((p) => p.remove());
+  if (!hasText(body)) kids(body, "p", A).forEach((p) => p.remove());
   for (let r = r1; r <= r2; r++) {
     for (let c = c1; c <= c2; c++) {
       if (r === r1 && c === c1) continue;
       const tc = cellAt(tbl, r, c)!;
-      const other = kid(tc, "txBody");
+      const other = kid(tc, "txBody", A);
       if (hasText(other)) {
-        kids(other, "p").forEach((p) => body.appendChild(p));
+        kids(other, "p", A).forEach((p) => body.appendChild(p));
         other.replaceWith(parseA(tbl.ownerDocument, EMPTY_BODY));
       }
       setFlag(tc, "hMerge", c > c1);
       setFlag(tc, "vMerge", r > r1);
     }
   }
-  if (!kids(body, "p").length) body.appendChild(parseA(tbl.ownerDocument, `<a:p><a:endParaRPr lang="en-US"/></a:p>`));
+  if (!kids(body, "p", A).length) body.appendChild(parseA(tbl.ownerDocument, `<a:p><a:endParaRPr lang="en-US"/></a:p>`));
   setSpan(origin, "gridSpan", c2 - c1 + 1);
   setSpan(origin, "rowSpan", r2 - r1 + 1);
 }
@@ -355,7 +353,7 @@ export function splitCell(tbl: Element, r: number, c: number): void {
 const normalize = ([r1, c1, r2, c2]: CellRange): CellRange => [Math.min(r1, r2), Math.min(c1, c2), Math.max(r1, r2), Math.max(c1, c2)];
 
 function tcPrOf(tc: Element): Element {
-  return kid(tc, "tcPr") ?? tc.appendChild(parseA(tc.ownerDocument, "<a:tcPr/>"));
+  return kid(tc, "tcPr", A) ?? tc.appendChild(parseA(tc.ownerDocument, "<a:tcPr/>"));
 }
 
 /** Give cells their own fill; null goes back to the table style's. */
@@ -379,7 +377,7 @@ export function setCellBorders(tbl: Element, range: CellRange, mode: BorderMode,
       for (const s of ["l", "r", "t", "b"] as Side[]) {
         if (mode === "outer" ? !outer[s] : mode === "inside" ? outer[s] : false) continue;
         const tcPr = tcPrOf(tc);
-        kid(tcPr, SIDE_TAG[s])?.remove();
+        kid(tcPr, SIDE_TAG[s], A)?.remove();
         const xml = line
           ? `<a:${SIDE_TAG[s]} w="${Math.round(line.width)}" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:srgbClr val="${line.color.slice(1, 7).toUpperCase()}"/></a:solidFill><a:prstDash val="solid"/></a:${SIDE_TAG[s]}>`
           : `<a:${SIDE_TAG[s]}><a:noFill/></a:${SIDE_TAG[s]}>`;
@@ -396,13 +394,13 @@ export function setCellBorders(tbl: Element, range: CellRange, mode: BorderMode,
 }
 
 export function setTableFlags(tbl: Element, flags: Partial<TableFlags>): void {
-  const tblPr = kid(tbl, "tblPr") ?? tbl.insertBefore(parseA(tbl.ownerDocument, "<a:tblPr/>"), tbl.firstChild);
+  const tblPr = kid(tbl, "tblPr", A) ?? tbl.insertBefore(parseA(tbl.ownerDocument, "<a:tblPr/>"), tbl.firstChild);
   for (const [k, on] of Object.entries(flags)) setFlag(tblPr, k, !!on);
 }
 
 export function setTableStyleId(tbl: Element, id: string | null): void {
-  const tblPr = kid(tbl, "tblPr") ?? tbl.insertBefore(parseA(tbl.ownerDocument, "<a:tblPr/>"), tbl.firstChild);
-  kid(tblPr, "tableStyleId")?.remove();
+  const tblPr = kid(tbl, "tblPr", A) ?? tbl.insertBefore(parseA(tbl.ownerDocument, "<a:tblPr/>"), tbl.firstChild);
+  kid(tblPr, "tableStyleId", A)?.remove();
   if (id) tblPr.appendChild(parseA(tbl.ownerDocument, `<a:tableStyleId>${escapeXml(id)}</a:tableStyleId>`));
 }
 

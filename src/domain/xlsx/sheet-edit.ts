@@ -223,7 +223,7 @@ function uniqueName(e: Edits, base: (n: number) => string, start: number): strin
   for (let n = start; ; n++) if (!e.wb.sheet(base(n))) return base(n);
 }
 
-export function validateSheetName(e: Edits, name: string, except?: Sheet): void {
+function validateSheetName(e: Edits, name: string, except?: Sheet): void {
   if (!name.trim()) throw new Error("A sheet name can't be empty.");
   if (name.length > 31) throw new Error("A sheet name can be at most 31 characters.");
   if (/[\\/?*[\]:]/.test(name)) throw new Error("A sheet name can't contain the character \\ / ? * [ ] or :.");

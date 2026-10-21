@@ -6,7 +6,7 @@
 import { type FileView, Notice } from "obsidian";
 import type { SaveStatus } from "./save-status";
 
-export interface AutosaveOptions {
+interface AutosaveOptions {
   /** Milliseconds after the last change. */
   delay: number;
   readOnly: () => boolean;

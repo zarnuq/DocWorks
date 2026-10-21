@@ -1,8 +1,8 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
-import { NS, escapeXml } from "../../core/utils/xml";
+import { NS, escapeXml, EMU_PER_PX } from "../../core/utils/xml";
 import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, TableAttrs, TableBorders, XmlAttrs } from "./schema";
 import { placementAttrs, placementOf, setPlacement } from "./drawing";
-import { bordersOf, cropOf, EMU_PER_PX, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
+import { bordersOf, cropOf, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
 
 export interface WriteContext {
   /** Unique id for a new wp:docPr. */

@@ -9,7 +9,7 @@ import { Scalar } from "./number-format";
 import { Rect } from "./references";
 import { Sheet } from "./workbook-model";
 
-export interface ClipCell {
+interface ClipCell {
   value: Scalar;
   formula?: string;
   style: number;

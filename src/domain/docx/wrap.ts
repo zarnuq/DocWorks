@@ -130,4 +130,4 @@ export function wrapsBothSides(x: number, width: number, column: number, align: 
 }
 
 /** Narrowest strip of text beside a picture worth wrapping into (0.5 in). */
-export const MIN_SIDE = 48;
+const MIN_SIDE = 48;

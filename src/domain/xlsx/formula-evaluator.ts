@@ -10,12 +10,12 @@ import { Rect } from "./references";
 import { ErrorValue, Scalar, dateToSerial, formatValue, parseInput, serialToDate } from "./number-format";
 import type { Sheet, Workbook } from "./workbook-model";
 
-export interface RangeValue {
+interface RangeValue {
   kind: "range";
   sheet: Sheet;
   rect: Rect;
 }
-export interface Matrix {
+interface Matrix {
   kind: "matrix";
   rows: Scalar[][];
 }
@@ -173,7 +173,7 @@ function binary(op: string, a: Scalar, b: Scalar): Scalar {
 /** Trim binary noise from sums (0.1 + 0.2 -> 0.3) at 15 significant digits. */
 const fix = (n: number) => checked(Number(n.toPrecision(15)));
 
-export function evalNode(node: Node, ctx: EvalContext): Value {
+function evalNode(node: Node, ctx: EvalContext): Value {
   try {
     return evalInner(node, ctx);
   } catch (e) {

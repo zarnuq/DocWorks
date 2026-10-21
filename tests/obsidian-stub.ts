@@ -103,8 +103,6 @@ export class Notice {
 export class Menu {
   /** Items added, by title, so tests can run one. Separators are `{ title: "---" }`. */
   items: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu; icon?: string }[] = [];
-  /** Obsidian's (unlisted) MenuItem.setSubmenu; tests turn it off to check the fallback. */
-  static noSubmenus = false;
   addItem(cb: Fn) {
     const entry: { title: string; run?: Fn; checked?: boolean | null; disabled?: boolean; submenu?: Menu; icon?: string } = { title: "" };
     const item: any = {
@@ -113,7 +111,7 @@ export class Menu {
       setChecked: (c: boolean | null) => ((entry.checked = c), item),
       setDisabled: (d: boolean) => ((entry.disabled = d), item),
     };
-    if (!Menu.noSubmenus) item.setSubmenu = () => (entry.submenu ??= new Menu());
+    item.setSubmenu = () => (entry.submenu ??= new Menu()); // Obsidian's (unlisted) MenuItem.setSubmenu
     cb(item);
     this.items.push(entry);
     return this;

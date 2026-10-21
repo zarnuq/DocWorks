@@ -87,7 +87,7 @@ export function setPrintSettings(e: Edits, sheet: Sheet, ps: PrintSettings): voi
   });
 }
 
-export interface PrintPage {
+interface PrintPage {
   r1: number;
   c1: number;
   r2: number;

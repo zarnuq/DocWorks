@@ -1,7 +1,7 @@
 import { App, Modal, Platform, Scope } from "obsidian";
 
 /** Sections of [action, keys]; keys are written with Ctrl / Alt and shown as ⌘ / ⌥ on macOS. */
-export type ShortcutSection = [title: string, rows: [action: string, keys: string][]];
+type ShortcutSection = [title: string, rows: [action: string, keys: string][]];
 
 /** What every editor shares. */
 export const COMMON_SHORTCUTS: ShortcutSection[] = [

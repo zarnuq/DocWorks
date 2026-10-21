@@ -3,7 +3,7 @@
  * shape definitions into SVG path data, text rectangles, connection sites and
  * adjust handles, all in shape coordinates (EMU, origin top-left).
  */
-import { NS } from "../../core/utils/xml";
+import { NS, kids } from "../../core/utils/xml";
 import { PRESETS } from "./preset-shapes";
 
 export interface Rect {
@@ -13,7 +13,7 @@ export interface Rect {
   h: number;
 }
 
-export type PathFill = "norm" | "none" | "lighten" | "lightenLess" | "darken" | "darkenLess";
+type PathFill = "norm" | "none" | "lighten" | "lightenLess" | "darken" | "darkenLess";
 
 /** One path, in shape coordinates (w x h = the shape size). */
 export interface GeomPath {
@@ -241,26 +241,24 @@ export function presetGeometry(name: string, w: number, h: number, adj: Record<s
   return def ? build(def, w, h, adj) : null;
 }
 
-const kids = (el: Element | null | undefined, local: string) =>
-  Array.from(el?.children ?? []).filter((c) => c.namespaceURI === NS.a && c.localName === local);
 const gds = (el: Element | null | undefined): [string, string][] =>
-  kids(el, "gd").map((gd) => [gd.getAttribute("name") ?? "", gd.getAttribute("fmla") ?? ""]);
+  kids(el, "gd", NS.a).map((gd) => [gd.getAttribute("name") ?? "", gd.getAttribute("fmla") ?? ""]);
 
 const TAGS: Record<string, string> = { moveTo: "M", lnTo: "L", cubicBezTo: "C", quadBezTo: "Q", close: "Z", arcTo: "A" };
 
 export function customGeometry(custGeom: Element, w: number, h: number): Geometry {
-  const rect = kids(custGeom, "rect")[0];
+  const rect = kids(custGeom, "rect", NS.a)[0];
   return build(
     {
-      av: gds(kids(custGeom, "avLst")[0]),
-      gd: gds(kids(custGeom, "gdLst")[0]),
+      av: gds(kids(custGeom, "avLst", NS.a)[0]),
+      gd: gds(kids(custGeom, "gdLst", NS.a)[0]),
       rect: rect ? ["l", "t", "r", "b"].map((k) => rect.getAttribute(k) ?? "0") : null,
-      sites: kids(kids(custGeom, "cxnLst")[0], "cxn").map((c) => {
-        const pos = kids(c, "pos")[0];
+      sites: kids(kids(custGeom, "cxnLst", NS.a)[0], "cxn", NS.a).map((c) => {
+        const pos = kids(c, "pos", NS.a)[0];
         return [c.getAttribute("ang") ?? "0", pos?.getAttribute("x") ?? "0", pos?.getAttribute("y") ?? "0"];
       }),
       handles: [],
-      paths: kids(kids(custGeom, "pathLst")[0], "path").map((p) => ({
+      paths: kids(kids(custGeom, "pathLst", NS.a)[0], "path", NS.a).map((p) => ({
         w: p.hasAttribute("w") ? Number(p.getAttribute("w")) : null,
         h: p.hasAttribute("h") ? Number(p.getAttribute("h")) : null,
         fill: (p.getAttribute("fill") ?? "norm") as PathFill,

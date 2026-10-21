@@ -9,9 +9,9 @@ import type { Edits } from "./commands";
 import type { Rect } from "./references";
 import { NS_FPB } from "./styles";
 import type { Sheet, Workbook } from "./workbook-model";
+import { kids } from "../../core/utils/xml";
 
 const bagsOf = (doc: Document) => Array.from(doc.documentElement.children).filter((b) => b.localName === "bag");
-const kids = (el: Element, name: string) => Array.from(el.children).filter((c) => c.localName === name);
 const bagRef = (bag: Element | undefined, key: string) => {
   const id = bag && kids(bag, "bagId").find((b) => b.getAttribute("k") === key)?.textContent;
   return id === undefined || id === null ? null : Number(id);

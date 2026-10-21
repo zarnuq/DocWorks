@@ -1,7 +1,7 @@
 /** Fonts carried inside a deck, made available to the page while the deck is open. */
 import { invalidateTextMetrics } from "./text-fit";
 
-export interface EmbeddedFont {
+interface EmbeddedFont {
   family: string;
   bold: boolean;
   italic: boolean;

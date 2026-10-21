@@ -3,7 +3,7 @@
  * (a:lum) and recolor (a:grayscl, or a:duotone between black / white and a theme accent, PowerPoint's "Accent N
  * Dark / Light"). Drawn with an SVG filter so the editor, thumbnails, slideshow and PDF all match.
  */
-import { NS, childNS } from "../../core/utils/xml";
+import { NS, kid } from "../../core/utils/xml";
 import { ColorContext, resolveColor } from "./color";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 
@@ -27,17 +27,17 @@ export const ACCENTS = ["accent1", "accent2", "accent3", "accent4", "accent5", "
 const OURS = new Set(["alphaModFix", "lum", "grayscl", "duotone"]);
 const pct = (el: Element | null, attr: string) => Number(el?.getAttribute(attr) ?? 0) / 100000;
 
-export function blipOf(pic: Element): Element | null {
+function blipOf(pic: Element): Element | null {
   return pic.getElementsByTagNameNS(NS.a, "blip")[0] ?? null;
 }
 
 export function readAdjust(pic: Element, colors: ColorContext): PictureAdjust {
   const blip = blipOf(pic);
   if (!blip) return { ...NO_ADJUST };
-  const alpha = childNS(blip, NS.a, "alphaModFix");
-  const lum = childNS(blip, NS.a, "lum");
-  const duo = childNS(blip, NS.a, "duotone");
-  let recolor = childNS(blip, NS.a, "grayscl") ? "gray" : "none";
+  const alpha = kid(blip, "alphaModFix", NS.a);
+  const lum = kid(blip, "lum", NS.a);
+  const duo = kid(blip, "duotone", NS.a);
+  let recolor = kid(blip, "grayscl", NS.a) ? "gray" : "none";
   let duotone: [string, string] | null = null;
   if (duo) {
     const [a, b] = Array.from(duo.children);
@@ -87,7 +87,7 @@ export function setPictureAdjust(pic: Element, adj: PictureAdjust): void {
     if (adj.contrast) attrs.contrast = round(adj.contrast);
     add.push(x(doc, "lum", attrs));
   }
-  const extLst = childNS(blip, NS.a, "extLst");
+  const extLst = kid(blip, "extLst", NS.a);
   for (const el of add) blip.insertBefore(el, extLst);
 }
 
@@ -119,7 +119,7 @@ export function replacePicture(doc: PptxDocument, part: string, pic: Element, by
   blip.setAttributeNS(NS.r, "r:embed", doc.addImage(part, bytes, ext));
   // Office 2016+ keeps an SVG version in a:extLst, which would still be drawn instead of the new image.
   for (const ext of Array.from(blip.getElementsByTagNameNS(NS.a, "ext"))) if (ext.getElementsByTagNameNS("*", "svgBlip").length || ext.getAttribute("uri") === "{96DAC541-7B7A-43D3-8B79-37D633B846F1}") ext.remove();
-  const list = childNS(blip, NS.a, "extLst");
+  const list = kid(blip, "extLst", NS.a);
   if (list && !list.children.length) list.remove();
   doc.touch(part);
 }

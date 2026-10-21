@@ -5,19 +5,17 @@
  * and removed in the data model, and the drawing of a diagram laid out in a row or column is spread again over the
  * same space (PowerPoint redoes its own layout from the data).
  */
-import { NS } from "../../core/utils/xml";
+import { NS, kid, kids, guid } from "../../core/utils/xml";
 
-export interface SmartArtItem {
+interface SmartArtItem {
   id: string;
   text: string;
   /** 0 for top-level items, 1 for their children... */
   depth: number;
 }
 
-const kids = (el: Element | null, ns: string, name: string) => Array.from(el?.children ?? []).filter((c) => c.namespaceURI === ns && c.localName === name);
-const kid = (el: Element | null, ns: string, name: string) => kids(el, ns, name)[0] ?? null;
 
-const textOf = (body: Element | null) => kids(body, NS.a, "p").map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join("")).join("\n");
+const textOf = (body: Element | null) => kids(body, "p", NS.a).map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join("")).join("\n");
 
 /** The diagram's items (its data points, not its connectors or presentation shapes), in order and by level. */
 export function smartArtItems(data: Document): SmartArtItem[] {
@@ -36,7 +34,7 @@ export function smartArtItems(data: Document): SmartArtItem[] {
     for (const { id: child } of (children.get(id) ?? []).sort((a, b) => a.ord - b.ord)) {
       const p = points.get(child);
       if (!p || !["node", null].includes(p.getAttribute("type"))) continue;
-      out.push({ id: child, text: textOf(kid(p, NS.dgm, "t")), depth });
+      out.push({ id: child, text: textOf(kid(p, "t", NS.dgm)), depth });
       walk(child, depth + 1);
     }
   };
@@ -47,9 +45,9 @@ export function smartArtItems(data: Document): SmartArtItem[] {
 /** Replace a text body's paragraphs with `text` (one per line), keeping the first paragraph's and run's formatting. */
 function setBody(body: Element, text: string): void {
   const doc = body.ownerDocument;
-  const paras = kids(body, NS.a, "p");
-  const pPr = kid(paras[0] ?? null, NS.a, "pPr");
-  const rPr = paras.flatMap((p) => kids(p, NS.a, "r")).map((r) => kid(r, NS.a, "rPr")).find(Boolean) ?? kid(paras[0] ?? null, NS.a, "endParaRPr");
+  const paras = kids(body, "p", NS.a);
+  const pPr = kid(paras[0] ?? null, "pPr", NS.a);
+  const rPr = paras.flatMap((p) => kids(p, "r", NS.a)).map((r) => kid(r, "rPr", NS.a)).find(Boolean) ?? kid(paras[0] ?? null, "endParaRPr", NS.a);
   paras.forEach((p) => p.remove());
   for (const line of text.split("\n")) {
     const p = body.appendChild(doc.createElementNS(NS.a, "a:p"));
@@ -67,13 +65,13 @@ function setBody(body: Element, text: string): void {
 /** Set item `id`'s text in the data model and in the drawing shapes that show it. */
 export function setSmartArtText(data: Document, drawing: Document | null, id: string, text: string): void {
   const point = Array.from(data.getElementsByTagNameNS(NS.dgm, "pt")).find((p) => p.getAttribute("modelId") === id);
-  const body = kid(point ?? null, NS.dgm, "t");
+  const body = kid(point ?? null, "t", NS.dgm);
   if (body) setBody(body, text);
   if (!drawing) return;
   // Presentation points standing for this item; the drawing's shapes carry their ids.
-  const shownBy = new Set(Array.from(data.getElementsByTagNameNS(NS.dgm, "pt")).filter((p) => p.getAttribute("type") === "pres" && kid(p, NS.dgm, "prSet")?.getAttribute("presAssocID") === id).map((p) => p.getAttribute("modelId")));
+  const shownBy = new Set(Array.from(data.getElementsByTagNameNS(NS.dgm, "pt")).filter((p) => p.getAttribute("type") === "pres" && kid(p, "prSet", NS.dgm)?.getAttribute("presAssocID") === id).map((p) => p.getAttribute("modelId")));
   for (const sp of Array.from(drawing.getElementsByTagNameNS(NS.dsp, "sp"))) {
-    const tx = kid(sp, NS.dsp, "txBody");
+    const tx = kid(sp, "txBody", NS.dsp);
     if (tx && shownBy.has(sp.getAttribute("modelId"))) setBody(tx, text);
   }
 }
@@ -92,7 +90,6 @@ export function smartArtParts(doc: { relTarget(part: string, rId: string): strin
 // Adding and removing items
 // -----------------------------------------------------------------------------
 
-const guid = () => `{${crypto.randomUUID().toUpperCase()}}`;
 const pointsOf = (data: Document) => Array.from(data.getElementsByTagNameNS(NS.dgm, "pt"));
 const cxnsOf = (data: Document) => Array.from(data.getElementsByTagNameNS(NS.dgm, "cxn"));
 const isParOf = (c: Element) => (c.getAttribute("type") ?? "parOf") === "parOf";
@@ -101,16 +98,16 @@ const ptById = (data: Document, id: string | null) => pointsOf(data).find((p) =>
 
 interface Box { x: number; y: number; w: number; h: number }
 /** The shape's own transform and its text box, both moved together. */
-const xfrmsOf = (sp: Element) => [kid(kid(sp, NS.dsp, "spPr"), NS.a, "xfrm"), kid(sp, NS.dsp, "txXfrm")].filter((x): x is Element => !!x);
+const xfrmsOf = (sp: Element) => [kid(kid(sp, "spPr", NS.dsp), "xfrm", NS.a), kid(sp, "txXfrm", NS.dsp)].filter((x): x is Element => !!x);
 function boxOf(x: Element): Box {
-  const off = kid(x, NS.a, "off"), ext = kid(x, NS.a, "ext");
+  const off = kid(x, "off", NS.a), ext = kid(x, "ext", NS.a);
   return { x: Number(off?.getAttribute("x") ?? 0), y: Number(off?.getAttribute("y") ?? 0), w: Number(ext?.getAttribute("cx") ?? 0), h: Number(ext?.getAttribute("cy") ?? 0) };
 }
 function setBox(x: Element, b: Box): void {
-  kid(x, NS.a, "off")?.setAttribute("x", String(Math.round(b.x)));
-  kid(x, NS.a, "off")?.setAttribute("y", String(Math.round(b.y)));
-  kid(x, NS.a, "ext")?.setAttribute("cx", String(Math.round(b.w)));
-  kid(x, NS.a, "ext")?.setAttribute("cy", String(Math.round(b.h)));
+  kid(x, "off", NS.a)?.setAttribute("x", String(Math.round(b.x)));
+  kid(x, "off", NS.a)?.setAttribute("y", String(Math.round(b.y)));
+  kid(x, "ext", NS.a)?.setAttribute("cx", String(Math.round(b.w)));
+  kid(x, "ext", NS.a)?.setAttribute("cy", String(Math.round(b.h)));
 }
 const union = (boxes: Box[]): Box => {
   const x = Math.min(...boxes.map((b) => b.x)), y = Math.min(...boxes.map((b) => b.y));
@@ -120,7 +117,7 @@ const union = (boxes: Box[]): Box => {
 /** Drawing shapes standing for data point `id` (through the presentation points associated with it). */
 function shapesFor(data: Document, drawing: Document, id: string | null): Element[] {
   if (!id) return [];
-  const pres = new Set(pointsOf(data).filter((p) => p.getAttribute("type") === "pres" && kid(p, NS.dgm, "prSet")?.getAttribute("presAssocID") === id).map((p) => p.getAttribute("modelId")));
+  const pres = new Set(pointsOf(data).filter((p) => p.getAttribute("type") === "pres" && kid(p, "prSet", NS.dgm)?.getAttribute("presAssocID") === id).map((p) => p.getAttribute("modelId")));
   return Array.from(drawing.getElementsByTagNameNS(NS.dsp, "sp")).filter((sp) => pres.has(sp.getAttribute("modelId")));
 }
 
@@ -199,7 +196,7 @@ export function addSmartArtItem(data: Document, drawing: Document | null, afterI
   // Data: the item, its two transition points, and its connection, ordered after `afterId`.
   const pt = node.cloneNode(true) as Element;
   pt.setAttribute("modelId", id);
-  const body = kid(pt, NS.dgm, "t");
+  const body = kid(pt, "t", NS.dgm);
   if (body) setBody(body, text);
   const trans = (from: string | null, newId: string) => {
     const t = ptById(data, from);
@@ -220,12 +217,12 @@ export function addSmartArtItem(data: Document, drawing: Document | null, afterI
   // drawing shapes stand for points in the data like every other shape.
   const map = new Map<string, string>([[afterId, id], [cxn.getAttribute("parTransId") ?? "", parT], [cxn.getAttribute("sibTransId") ?? "", sibT]]);
   const clonePres = (assoc: string, to: string) => {
-    for (const p of pointsOf(data).filter((p) => p.getAttribute("type") === "pres" && kid(p, NS.dgm, "prSet")?.getAttribute("presAssocID") === assoc)) {
+    for (const p of pointsOf(data).filter((p) => p.getAttribute("type") === "pres" && kid(p, "prSet", NS.dgm)?.getAttribute("presAssocID") === assoc)) {
       const copy = p.cloneNode(true) as Element;
       const fresh = guid();
       map.set(p.getAttribute("modelId") ?? "", fresh);
       copy.setAttribute("modelId", fresh);
-      kid(copy, NS.dgm, "prSet")?.setAttribute("presAssocID", to);
+      kid(copy, "prSet", NS.dgm)?.setAttribute("presAssocID", to);
       p.parentElement!.appendChild(copy);
     }
   };
@@ -253,7 +250,7 @@ export function addSmartArtItem(data: Document, drawing: Document | null, afterI
   let last = src.gap[src.gap.length - 1] ?? src.shapes[src.shapes.length - 1];
   for (const sp of src.shapes) shapes.push((last = shapeCopy(sp, last)));
   for (const sp of shapes) {
-    const tx = kid(sp, NS.dsp, "txBody");
+    const tx = kid(sp, "txBody", NS.dsp);
     if (tx) setBody(tx, text);
   }
   const added: Group = { shapes, gap: [], box: src.box };
@@ -263,12 +260,12 @@ export function addSmartArtItem(data: Document, drawing: Document | null, afterI
     const prev = groups[k - 1];
     const prevSib = parOf(data, items[k - 1])?.getAttribute("sibTransId") ?? "";
     const sib = cxn.getAttribute("sibTransId") ?? "";
-    const presOf = (assoc: string) => pointsOf(data).filter((p) => p.getAttribute("type") === "pres" && kid(p, NS.dgm, "prSet")?.getAttribute("presAssocID") === assoc);
+    const presOf = (assoc: string) => pointsOf(data).filter((p) => p.getAttribute("type") === "pres" && kid(p, "prSet", NS.dgm)?.getAttribute("presAssocID") === assoc);
     map.clear();
     const own = presOf(sib);
     if (own.length) {
       // Its transition already has presentation points (PowerPoint keeps them): the shapes stand for those.
-      const name = (p: Element) => kid(p, NS.dgm, "prSet")?.getAttribute("presName");
+      const name = (p: Element) => kid(p, "prSet", NS.dgm)?.getAttribute("presName");
       for (const p of presOf(prevSib)) {
         const match = own.find((o) => name(o) === name(p));
         if (match) map.set(p.getAttribute("modelId") ?? "", match.getAttribute("modelId") ?? "");
@@ -305,7 +302,7 @@ export function removeSmartArtItem(data: Document, drawing: Document | null, id:
   collect(id);
   const ord = Number(parOf(data, id)?.getAttribute("srcOrd")) || 0;
   // Presentation points standing for them go too, and every connection touching any of these.
-  for (const p of pointsOf(data)) if (p.getAttribute("type") === "pres" && gone.has(kid(p, NS.dgm, "prSet")?.getAttribute("presAssocID") ?? "")) gone.add(p.getAttribute("modelId") ?? "");
+  for (const p of pointsOf(data)) if (p.getAttribute("type") === "pres" && gone.has(kid(p, "prSet", NS.dgm)?.getAttribute("presAssocID") ?? "")) gone.add(p.getAttribute("modelId") ?? "");
   if (drawing) {
     const g = groups[k];
     for (const sp of [...g.shapes, ...g.gap]) sp.remove();

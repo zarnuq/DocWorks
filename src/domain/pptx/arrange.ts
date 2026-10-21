@@ -3,14 +3,13 @@
  * grouping, align / distribute, snapping, and copy / paste between slides and
  * presentations.
  */
-import { NS, childNS } from "../../core/utils/xml";
+import { NS, kid } from "../../core/utils/xml";
 import type { ResourceBundle } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import type { Rect } from "./geometry";
 import { nextShapeId, setRect } from "./slide-edit";
 
 const SHAPE_TAGS = new Set(["sp", "cxnSp", "pic", "graphicFrame", "grpSp", "contentPart", "AlternateContent"]);
-const kid = (el: Element | null | undefined, ns: string, local: string) => (el ? childNS(el, ns, local) : null);
 const num = (el: Element | null, attr: string) => Number(el?.getAttribute(attr) ?? 0);
 
 /** The slide item (direct child of p:spTree) that `el` belongs to. */
@@ -21,16 +20,16 @@ export function topLevel(el: Element): Element {
 }
 
 export function xfrmOf(item: Element): Element | null {
-  if (item.localName === "grpSp") return kid(kid(item, NS.p, "grpSpPr"), NS.a, "xfrm");
-  if (item.localName === "graphicFrame") return kid(item, NS.p, "xfrm");
-  return kid(kid(item, NS.p, "spPr"), NS.a, "xfrm");
+  if (item.localName === "grpSp") return kid(kid(item, "grpSpPr", NS.p), "xfrm", NS.a);
+  if (item.localName === "graphicFrame") return kid(item, "xfrm", NS.p);
+  return kid(kid(item, "spPr", NS.p), "xfrm", NS.a);
 }
 
 /** Position and size from the item's own xfrm (zeros when it inherits them). */
 export function itemRect(item: Element): Rect {
   const xfrm = xfrmOf(item);
-  const off = kid(xfrm, NS.a, "off");
-  const ext = kid(xfrm, NS.a, "ext");
+  const off = kid(xfrm, "off", NS.a);
+  const ext = kid(xfrm, "ext", NS.a);
   return { x: num(off, "x"), y: num(off, "y"), w: num(ext, "cx"), h: num(ext, "cy") };
 }
 
@@ -39,8 +38,8 @@ export function setItemRect(item: Element, r: Rect): void {
   if (item.localName !== "grpSp") return setRect(item, r);
   const xfrm = xfrmOf(item)!;
   const round = (v: number) => String(Math.round(v));
-  const off = kid(xfrm, NS.a, "off")!;
-  const ext = kid(xfrm, NS.a, "ext")!;
+  const off = kid(xfrm, "off", NS.a)!;
+  const ext = kid(xfrm, "ext", NS.a)!;
   off.setAttribute("x", round(r.x));
   off.setAttribute("y", round(r.y));
   ext.setAttribute("cx", round(r.w));
@@ -77,10 +76,10 @@ export function groupItems(slide: Document, items: Element[], rects = items.map(
 /** Dissolve a group, keeping each child where it appears. Returns the children. */
 export function ungroupItem(group: Element): Element[] {
   const xfrm = xfrmOf(group);
-  const off = kid(xfrm, NS.a, "off");
-  const ext = kid(xfrm, NS.a, "ext");
-  const chOff = kid(xfrm, NS.a, "chOff");
-  const chExt = kid(xfrm, NS.a, "chExt");
+  const off = kid(xfrm, "off", NS.a);
+  const ext = kid(xfrm, "ext", NS.a);
+  const chOff = kid(xfrm, "chOff", NS.a);
+  const chExt = kid(xfrm, "chExt", NS.a);
   const sx = num(chExt, "cx") ? num(ext, "cx") / num(chExt, "cx") : 1;
   const sy = num(chExt, "cy") ? num(ext, "cy") / num(chExt, "cy") : 1;
   const children = Array.from(group.children).filter((c) => SHAPE_TAGS.has(c.localName));
@@ -263,7 +262,7 @@ export function pasteItems(doc: PptxDocument, slidePath: string, clip: Clip, off
     }
     const r = itemRect(item);
     setItemRect(item, { ...r, x: r.x + offset.dx, y: r.y + offset.dy });
-    tree.insertBefore(item, kid(tree, NS.p, "extLst"));
+    tree.insertBefore(item, kid(tree, "extLst", NS.p));
     pasted.push(item);
   }
   // Connectors pasted together with their shapes stay glued to the copies.

@@ -21,10 +21,10 @@ function table(cells: ShapeModel[]): string {
   return [line(grid[0]), line(Array(width).fill("---") as string[]), ...grid.slice(1).map(line)].join("\n");
 }
 
-export function deckToMarkdown(doc: PptxDocument): string {
-  return doc
-    .slides()
-    .map((ref, i) => {
+export function deckToMarkdown(doc: PptxDocument, indices = doc.slides().map((_, i) => i)): string {
+  return indices
+    .map((i) => {
+      const ref = doc.slides()[i];
       const shapes = parseSlide(doc, ref.path).shapes.filter((s) => !s.inherited);
       const texts = shapes.filter((s) => s.text && s.kind !== "cell");
       let titleParas = new Set<Para>(texts.filter(isTitle).flatMap((s) => s.text!.paras));

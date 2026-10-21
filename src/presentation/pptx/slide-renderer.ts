@@ -4,8 +4,9 @@ import type { ShapeModel, SlideModel } from "../../domain/pptx/slide-model";
 import { fillCss } from "../../domain/pptx/shape-style";
 import { shapeIds } from "../../domain/pptx/animation";
 import { renderParagraphs } from "./text-html";
+import { EMU_PER_PT } from "../../core/utils/xml";
 
-export interface RenderOptions {
+interface RenderOptions {
   /** Slide width in px; height follows the slide aspect ratio. */
   width: number;
   /** Make slide-owned text contentEditable. */
@@ -25,7 +26,6 @@ export interface RenderedShape {
   pxPerPt: number;
 }
 
-const EMU_PER_PT = 12700;
 /** Placeholders PowerPoint leaves blank when empty, even while editing. */
 const NO_PROMPT = new Set(["sldNum", "dt", "ftr", "hdr"]);
 const JUSTIFY = { t: "flex-start", ctr: "center", b: "flex-end" } as const;

@@ -1,7 +1,7 @@
 import { readMedia, SlideMedia } from "./media";
 import { chartData, ChartModel, CHART_NS } from "./chart";
 import { chartPalette, readChartFormat } from "./chart-format";
-import { NS, childNS } from "../../core/utils/xml";
+import { NS, kid, kids } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { ColorContext, resolveColor } from "./color";
 import { customGeometry, GeomPath, Geometry, Handle, presetGeometry, Rect, Site } from "./geometry";
@@ -164,9 +164,6 @@ const NS_SVG = "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
 /** Number of chain entries that outrank the shape's p:style fontRef color. */
 const OWN_STYLE_DEPTH = 3;
 
-const kids = (el: Element | null | undefined, ns: string, local: string): Element[] =>
-  el ? Array.from(el.children).filter((c) => c.localName === local && c.namespaceURI === ns) : [];
-const kid = (el: Element | null | undefined, ns: string, local: string): Element | null => (el ? childNS(el, ns, local) : null);
 const num = (el: Element | null | undefined, attr: string): number | null =>
   el?.hasAttribute(attr) ? Number(el.getAttribute(attr)) : null;
 const flag = (v: string | null) => v === "1" || v === "true";
@@ -197,19 +194,19 @@ function mergeRunProps(props: Partial<RunProps>, rPr: Element | null, style: Tex
     if (shift) props.baseline = shift;
   }
   if (props.highlight === undefined) {
-    const mark = resolveColor(kid(rPr, NS.a, "highlight"), style.colors);
+    const mark = resolveColor(kid(rPr, "highlight", NS.a), style.colors);
     if (mark) props.highlight = mark;
   }
   if (props.cap === undefined && rPr.hasAttribute("cap")) props.cap = (["all", "small"] as const).find((c) => c === rPr.getAttribute("cap")) ?? "none";
-  const h = kid(rPr, NS.a, "hlinkClick");
+  const h = kid(rPr, "hlinkClick", NS.a);
   const links = style.links;
   if (props.link === undefined && h && links) props.link = readLink(h, (id) => links.target(id));
   if (props.color === undefined) {
-    const c = resolveColor(kid(rPr, NS.a, "solidFill"), style.colors);
+    const c = resolveColor(kid(rPr, "solidFill", NS.a), style.colors);
     if (c) props.color = c;
   }
   if (props.font === undefined) {
-    const f = typeface(kid(rPr, NS.a, "latin")?.getAttribute("typeface"), style.fonts);
+    const f = typeface(kid(rPr, "latin", NS.a)?.getAttribute("typeface"), style.fonts);
     if (f) props.font = f;
   }
 }
@@ -229,7 +226,7 @@ interface ResolvedLevel {
 /** Resolve paragraph-level formatting for `lvl`, with an optional a:pPr on top. */
 export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null = null): ResolvedLevel {
   const tag = `lvl${lvl + 1}pPr`;
-  const levels = [pPr, ...style.chain.map((c) => kid(c, NS.a, tag))];
+  const levels = [pPr, ...style.chain.map((c) => kid(c, tag, NS.a))];
   let align: Align | undefined;
   let marL: number | null = null;
   let indent: number | null = null;
@@ -245,20 +242,20 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
     marL ??= num(l, "marL");
     indent ??= num(l, "indent");
     if (bullet === undefined) {
-      if (kid(l, NS.a, "buNone")) bullet = null;
-      else if (kid(l, NS.a, "buChar")) bullet = kid(l, NS.a, "buChar")!.getAttribute("char") ?? "•";
-      else if (kid(l, NS.a, "buAutoNum")) {
-        const auto = kid(l, NS.a, "buAutoNum")!;
+      if (kid(l, "buNone", NS.a)) bullet = null;
+      else if (kid(l, "buChar", NS.a)) bullet = kid(l, "buChar", NS.a)!.getAttribute("char") ?? "•";
+      else if (kid(l, "buAutoNum", NS.a)) {
+        const auto = kid(l, "buAutoNum", NS.a)!;
         const start = auto.getAttribute("startAt");
         bullet = `#${auto.getAttribute("type") ?? "arabicPeriod"}${start ? `@${start}` : ""}`;
       }
     }
     if (bulletColor === undefined) {
-      if (kid(l, NS.a, "buClrTx")) bulletColor = null;
-      else if (kid(l, NS.a, "buClr")) bulletColor = resolveColor(kid(l, NS.a, "buClr"), style.colors);
+      if (kid(l, "buClrTx", NS.a)) bulletColor = null;
+      else if (kid(l, "buClr", NS.a)) bulletColor = resolveColor(kid(l, "buClr", NS.a), style.colors);
     }
-    for (const key of ["lnSpc", "spcBef", "spcAft"] as const) spacing[key] ??= readSpacing(kid(l, NS.a, key));
-    mergeRunProps(props, kid(l, NS.a, "defRPr"), style);
+    for (const key of ["lnSpc", "spcBef", "spcAft"] as const) spacing[key] ??= readSpacing(kid(l, key, NS.a));
+    mergeRunProps(props, kid(l, "defRPr", NS.a), style);
   });
   if (props.color === undefined && style.fontRefColor) props.color = style.fontRefColor;
 
@@ -286,9 +283,9 @@ export function resolveLevel(style: TextStyle, lvl: number, pPr: Element | null 
 }
 
 function readSpacing(el: Element | null): Spacing | null {
-  const pct = num(kid(el, NS.a, "spcPct"), "val");
+  const pct = num(kid(el, "spcPct", NS.a), "val");
   if (pct !== null) return { pct: pct / 100000 };
-  const pts = num(kid(el, NS.a, "spcPts"), "val");
+  const pts = num(kid(el, "spcPts", NS.a), "val");
   return pts === null ? null : { pts: pts / 100 };
 }
 
@@ -299,21 +296,21 @@ export function runProps(rPr: Element | null, base: RunProps, style: TextStyle):
 }
 
 export function readParagraphs(txBody: Element, style: TextStyle): Para[] {
-  return kids(txBody, NS.a, "p").map((p) => {
-    const pPr = kid(p, NS.a, "pPr");
+  return kids(txBody, "p", NS.a).map((p) => {
+    const pPr = kid(p, "pPr", NS.a);
     const lvl = num(pPr, "lvl") ?? 0;
     const level = resolveLevel(style, lvl, pPr);
     const runs: Run[] = [];
     for (const child of Array.from(p.children)) {
       if (child.localName === "r" || child.localName === "fld") {
-        const run: Run = { ...runProps(kid(child, NS.a, "rPr"), level.defaults, style), text: kid(child, NS.a, "t")?.textContent ?? "" };
+        const run: Run = { ...runProps(kid(child, "rPr", NS.a), level.defaults, style), text: kid(child, "t", NS.a)?.textContent ?? "" };
         if (child.localName === "fld") run.field = child.getAttribute("type") ?? "";
         runs.push(run);
       } else if (child.localName === "br") {
-        runs.push({ ...runProps(kid(child, NS.a, "rPr"), level.defaults, style), text: "\n" });
+        runs.push({ ...runProps(kid(child, "rPr", NS.a), level.defaults, style), text: "\n" });
       }
     }
-    const endSz = runProps(kid(p, NS.a, "endParaRPr"), level.defaults, style).sz;
+    const endSz = runProps(kid(p, "endParaRPr", NS.a), level.defaults, style).sz;
     return { runs, lvl, ...level, endSz };
   });
 }
@@ -329,7 +326,7 @@ interface Ph {
 
 const phOf = (sp: Element): Ph | null => {
   const nv = Array.from(sp.children).find((c) => c.localName.startsWith("nv"));
-  const ph = kid(kid(nv, NS.p, "nvPr"), NS.p, "ph");
+  const ph = kid(kid(nv, "nvPr", NS.p), "ph", NS.p);
   return ph ? { type: ph.getAttribute("type") ?? "obj", idx: ph.getAttribute("idx") } : null;
 };
 
@@ -360,8 +357,8 @@ interface Transform {
 const IDENTITY: Transform = { sx: 1, sy: 1, dx: 0, dy: 0 };
 
 function readXfrm(xfrm: Element | null): { rect: Rect; rot: number; flipH: boolean; flipV: boolean } | null {
-  const off = kid(xfrm, NS.a, "off");
-  const ext = kid(xfrm, NS.a, "ext");
+  const off = kid(xfrm, "off", NS.a);
+  const ext = kid(xfrm, "ext", NS.a);
   if (!off || !ext) return null;
   return {
     rect: { x: num(off, "x")!, y: num(off, "y")!, w: num(ext, "cx")!, h: num(ext, "cy")! },
@@ -379,7 +376,7 @@ const applyTransform = (r: Rect, t: Transform): Rect => ({
 });
 
 export function plainText(txBody: Element | null): string {
-  return kids(txBody, NS.a, "p")
+  return kids(txBody, "p", NS.a)
     .map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join(""))
     .join("\n");
 }
@@ -417,7 +414,7 @@ class SlideParser {
       if (c) this.colors.scheme[slot.localName] = c;
     }
     const font = (tag: string) =>
-      kid(theme?.getElementsByTagNameNS(NS.a, tag)[0], NS.a, "latin")?.getAttribute("typeface") || "Calibri";
+      kid(theme?.getElementsByTagNameNS(NS.a, tag)[0], "latin", NS.a)?.getAttribute("typeface") || "Calibri";
     this.fonts = { major: font("majorFont"), minor: font("minorFont") };
     this.theme = themeStyles(theme);
   }
@@ -437,7 +434,7 @@ class SlideParser {
     if (this.layout && layoutPath && showMaster(slide)) this.walkPart(this.layout, layoutPath);
     this.walkPart(slide, this.slidePath);
 
-    const ownBgPr = kid(kid(slide.getElementsByTagNameNS(NS.p, "cSld")[0], NS.p, "bg"), NS.p, "bgPr");
+    const ownBgPr = kid(kid(slide.getElementsByTagNameNS(NS.p, "cSld")[0], "bg", NS.p), "bgPr", NS.p);
     const notesPath = this.doc.notesOf(this.slidePath);
     const notesSp = Array.from(this.doc.xml(notesPath ?? "")?.getElementsByTagNameNS(NS.p, "sp") ?? []).find(
       (sp) => phOf(sp)?.type === "body"
@@ -448,7 +445,7 @@ class SlideParser {
       background: this.bg,
       ownBackground: ownBgPr ? readFill(ownBgPr, null, this.colors, this.theme) : null,
       shapes: this.shapes,
-      notes: notesSp ? plainText(kid(notesSp, NS.p, "txBody")) : "",
+      notes: notesSp ? plainText(kid(notesSp, "txBody", NS.p)) : "",
     };
   }
 
@@ -461,15 +458,15 @@ class SlideParser {
 
   private background(parts: [Document | null, string | null][]): SlideModel["background"] {
     for (const [part, path] of parts) {
-      const bg = part && kid(part.getElementsByTagNameNS(NS.p, "cSld")[0], NS.p, "bg");
+      const bg = part && kid(part.getElementsByTagNameNS(NS.p, "cSld")[0], "bg", NS.p);
       if (!bg || !path) continue;
-      const bgPr = kid(bg, NS.p, "bgPr");
-      const blip = bgPr && kid(kid(bgPr, NS.a, "blipFill"), NS.a, "blip");
+      const bgPr = kid(bg, "bgPr", NS.p);
+      const blip = bgPr && kid(kid(bgPr, "blipFill", NS.a), "blip", NS.a);
       if (blip) {
         const target = this.blipImage(path, blip);
         if (target) return { color: null, image: target };
       }
-      const bgRef = kid(bg, NS.p, "bgRef");
+      const bgRef = kid(bg, "bgRef", NS.p);
       let fill = bgPr ? readFill(bgPr, null, this.colors, this.theme) : readFillRef(bgRef, this.colors, this.theme);
       const refColor = !bgPr && resolveColor(bgRef, this.colors);
       if (!fill && refColor) fill = { type: "solid", color: refColor };
@@ -503,11 +500,11 @@ class SlideParser {
       }
 
       if (el.localName === "grpSp") {
-        const xfrm = kid(kid(el, el.namespaceURI, "grpSpPr"), NS.a, "xfrm");
-        const off = kid(xfrm, NS.a, "off");
-        const ext = kid(xfrm, NS.a, "ext");
-        const chOff = kid(xfrm, NS.a, "chOff");
-        const chExt = kid(xfrm, NS.a, "chExt");
+        const xfrm = kid(kid(el, "grpSpPr", el.namespaceURI), "xfrm", NS.a);
+        const off = kid(xfrm, "off", NS.a);
+        const ext = kid(xfrm, "ext", NS.a);
+        const chOff = kid(xfrm, "chOff", NS.a);
+        const chExt = kid(xfrm, "chExt", NS.a);
         let local = IDENTITY;
         if (off && ext && chOff && chExt) {
           const sx = num(chExt, "cx") ? num(ext, "cx")! / num(chExt, "cx")! : 1;
@@ -515,7 +512,7 @@ class SlideParser {
           local = { sx, sy, dx: num(off, "x")! - num(chOff, "x")! * sx, dy: num(off, "y")! - num(chOff, "y")! * sy };
         }
         const outer = this.groupFill;
-        this.groupFill = readFill(kid(el, el.namespaceURI, "grpSpPr"), null, this.colors, this.theme, outer);
+        this.groupFill = readFill(kid(el, "grpSpPr", el.namespaceURI), null, this.colors, this.theme, outer);
         this.walk(el, part, { sx: t.sx * local.sx, sy: t.sy * local.sy, dx: t.sx * local.dx + t.dx, dy: t.sy * local.dy + t.dy }, true, inherited);
         this.groupFill = outer;
       } else if (el.localName === "sp" || el.localName === "cxnSp" || el.localName === "pic" || el.localName === "graphicFrame") {
@@ -540,7 +537,7 @@ class SlideParser {
     const relId = dataPath ? this.doc.xml(dataPath)?.getElementsByTagNameNS(NS.dsp, "dataModelExt")[0]?.getAttribute("relId") : null;
     const drawingPath = relId ? this.doc.relTarget(part, relId) : null;
     const tree = drawingPath ? this.doc.xml(drawingPath)?.getElementsByTagNameNS(NS.dsp, "spTree")[0] : null;
-    const at = readXfrm(kid(frame, NS.p, "xfrm"));
+    const at = readXfrm(kid(frame, "xfrm", NS.p));
     if (!tree || !drawingPath || !at) return false;
     this.walk(tree, drawingPath, { ...t, dx: t.dx + at.rect.x * t.sx, dy: t.dy + at.rect.y * t.sy }, false, true);
     return true;
@@ -553,13 +550,13 @@ class SlideParser {
     const t = table.table!;
     return t.cells.flat().map((cell) => {
       const r = cellRect(t, cell);
-      const tcPr = kid(cell.el, NS.a, "tcPr");
-      const txBody = kid(cell.el, NS.a, "txBody");
+      const tcPr = kid(cell.el, "tcPr", NS.a);
+      const txBody = kid(cell.el, "txBody", NS.a);
       const style: TextStyle = {
         chain: [
-          kid(txBody, NS.a, "lstStyle"),
+          kid(txBody, "lstStyle", NS.a),
           cellTextStyle(cell),
-          kid(txStyles, NS.p, "otherStyle"),
+          kid(txStyles, "otherStyle", NS.p),
           pres?.getElementsByTagNameNS(NS.p, "defaultTextStyle")[0] ?? null,
         ],
         fontRefColor: null,
@@ -609,22 +606,22 @@ class SlideParser {
     const ph = phOf(el);
     const layoutPh = ph && !inherited ? findPlaceholder(this.layout, ph, false) : null;
     const masterPh = ph && !inherited ? findPlaceholder(this.master, ph, true) : null;
-    const spPr = kid(el, ns, "spPr");
-    const styleEl = kid(el, ns, "style");
+    const spPr = kid(el, "spPr", ns);
+    const styleEl = kid(el, "style", ns);
     const nv = Array.from(el.children).find((c) => c.localName.startsWith("nv"));
-    const cNvPr = kid(nv, ns, "cNvPr");
+    const cNvPr = kid(nv, "cNvPr", ns);
 
-    const xfrmEl = el.localName === "graphicFrame" ? kid(el, NS.p, "xfrm") : kid(spPr, NS.a, "xfrm");
+    const xfrmEl = el.localName === "graphicFrame" ? kid(el, "xfrm", NS.p) : kid(spPr, "xfrm", NS.a);
     const geo =
       readXfrm(xfrmEl) ??
-      readXfrm(kid(kid(layoutPh, NS.p, "spPr"), NS.a, "xfrm")) ??
-      readXfrm(kid(kid(masterPh, NS.p, "spPr"), NS.a, "xfrm"));
+      readXfrm(kid(kid(layoutPh, "spPr", NS.p), "xfrm", NS.a)) ??
+      readXfrm(kid(kid(masterPh, "spPr", NS.p), "xfrm", NS.a));
     if (!geo) return null;
-    const prstGeom = kid(spPr, NS.a, "prstGeom");
-    const custGeom = kid(spPr, NS.a, "custGeom");
+    const prstGeom = kid(spPr, "prstGeom", NS.a);
+    const custGeom = kid(spPr, "custGeom", NS.a);
     const geom = prstGeom?.getAttribute("prst") ?? (custGeom ? "custom" : el.localName === "sp" || el.localName === "cxnSp" ? "rect" : "");
     const adj: Record<string, number> = {};
-    for (const gd of kids(kid(prstGeom, NS.a, "avLst"), NS.a, "gd")) {
+    for (const gd of kids(kid(prstGeom, "avLst", NS.a), "gd", NS.a)) {
       const v = /^val\s+(-?[\d.]+)/.exec(gd.getAttribute("fmla") ?? "");
       if (v) adj[gd.getAttribute("name") ?? ""] = Number(v[1]);
     }
@@ -656,12 +653,12 @@ class SlideParser {
       table: null,
       text: null,
       textRect: null,
-      link: readLink(kid(cNvPrOf(el), NS.a, "hlinkClick"), (id) => this.doc.relTarget(part, id)),
+      link: readLink(kid(cNvPrOf(el), "hlinkClick", NS.a), (id) => this.doc.relTarget(part, id)),
     };
 
     if (el.localName === "pic") {
       model.kind = "pic";
-      model.image = this.blipImage(part, kid(kid(el, ns, "blipFill"), NS.a, "blip"));
+      model.image = this.blipImage(part, kid(kid(el, "blipFill", ns), "blip", NS.a));
       model.crop = readCrop(el);
       model.adjust = readAdjust(el, this.colors);
       model.media = readMedia(this.doc, part, el) ?? undefined;
@@ -670,7 +667,7 @@ class SlideParser {
     }
 
     // A shape filled with a picture (SmartArt icons, pictures cropped to shapes).
-    const pictureFill = kid(kid(spPr, NS.a, "blipFill"), NS.a, "blip");
+    const pictureFill = kid(kid(spPr, "blipFill", NS.a), "blip", NS.a);
     if (pictureFill) {
       model.image = this.blipImage(part, pictureFill);
       if (model.image) model.fill = null;
@@ -690,31 +687,31 @@ class SlideParser {
       return model;
     }
 
-    const txBody = kid(el, ns, "txBody");
+    const txBody = kid(el, "txBody", ns);
     // Preset text area (inside an ellipse, triangle...), unless it is the whole shape.
     const tr = g?.textRect;
     if (tr && (tr.x || tr.y || Math.abs(tr.w - w) > 1 || Math.abs(tr.h - h) > 1)) model.textRect = tr;
-    const tx = readXfrm(kid(el, NS.dsp, "txXfrm"));
+    const tx = readXfrm(kid(el, "txXfrm", NS.dsp));
     if (tx) model.textRect = { x: tx.rect.x - geo.rect.x, y: tx.rect.y - geo.rect.y, w: tx.rect.w, h: tx.rect.h };
     if (txBody) {
       const txStyles = this.master?.getElementsByTagNameNS(NS.p, "txStyles")[0];
       const family = ph ? phFamily(ph.type) : null;
-      const txStyle = kid(txStyles, NS.p, family === "title" ? "titleStyle" : family === "body" ? "bodyStyle" : "otherStyle");
+      const txStyle = kid(txStyles, family === "title" ? "titleStyle" : family === "body" ? "bodyStyle" : "otherStyle", NS.p);
       const pres = this.doc.xml("ppt/presentation.xml");
       const style: TextStyle = {
         chain: [
-          kid(txBody, NS.a, "lstStyle"),
-          kid(kid(layoutPh, NS.p, "txBody"), NS.a, "lstStyle"),
-          kid(kid(masterPh, NS.p, "txBody"), NS.a, "lstStyle"),
+          kid(txBody, "lstStyle", NS.a),
+          kid(kid(layoutPh, "txBody", NS.p), "lstStyle", NS.a),
+          kid(kid(masterPh, "txBody", NS.p), "lstStyle", NS.a),
           txStyle,
           pres?.getElementsByTagNameNS(NS.p, "defaultTextStyle")[0] ?? null,
         ],
-        fontRefColor: resolveColor(kid(styleEl, NS.a, "fontRef"), this.colors),
+        fontRefColor: resolveColor(kid(styleEl, "fontRef", NS.a), this.colors),
         colors: this.colors,
         fonts: this.fonts,
         links: { target: (id) => this.doc.relTarget(part, id), add: (link) => linkAttrs(this.doc, part, link) },
       };
-      const bodyPrs = [txBody, kid(layoutPh, NS.p, "txBody"), kid(masterPh, NS.p, "txBody")].map((b) => kid(b, NS.a, "bodyPr"));
+      const bodyPrs = [txBody, kid(layoutPh, "txBody", NS.p), kid(masterPh, "txBody", NS.p)].map((b) => kid(b, "bodyPr", NS.a));
       const pick = (attr: string) => bodyPrs.find((b) => b?.hasAttribute(attr))?.getAttribute(attr) ?? null;
       const inset = (attr: string, d: number) => (pick(attr) === null ? d : Number(pick(attr)));
       const anchor = pick("anchor");
@@ -733,8 +730,8 @@ class SlideParser {
           r: inset("rIns", DEFAULT_INSETS.r),
           b: inset("bIns", DEFAULT_INSETS.b),
         },
-        fontScale: (num(kid(bodyPrs[0], NS.a, "normAutofit"), "fontScale") ?? 100000) / 100000,
-        lnSpcReduction: (num(kid(bodyPrs[0], NS.a, "normAutofit"), "lnSpcReduction") ?? 0) / 100000,
+        fontScale: (num(kid(bodyPrs[0], "normAutofit", NS.a), "fontScale") ?? 100000) / 100000,
+        lnSpcReduction: (num(kid(bodyPrs[0], "normAutofit", NS.a), "lnSpcReduction") ?? 0) / 100000,
         style,
       };
     }

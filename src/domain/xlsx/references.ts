@@ -65,7 +65,6 @@ export function rangeName(r: Rect): string {
 }
 
 export const contains = (r: Rect, row: number, col: number) => row >= r.r1 && row <= r.r2 && col >= r.c1 && col <= r.c2;
-export const intersects = (a: Rect, b: Rect) => a.r1 <= b.r2 && b.r1 <= a.r2 && a.c1 <= b.c2 && b.c1 <= a.c2;
 
 /** Sheet name as written in a reference: quoted when it isn't a plain identifier. */
 export function quoteSheet(name: string): string {

@@ -7,7 +7,7 @@ import { numberingLevel } from "./docx-styles";
 import { ommlToLatex } from "./math";
 import { attrsOf, CellAttrs, HEADING_LEVEL, ImageAttrs, LinkAttrs, ParagraphAttrs, XmlAttrs } from "./schema";
 
-export interface MarkdownExport {
+interface MarkdownExport {
   markdown: string;
   images: { name: string; bytes: Uint8Array }[];
   warnings: string[];

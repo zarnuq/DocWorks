@@ -12,7 +12,7 @@ export const WRAPS: [Wrap, string][] = [
   ["front", "In front of text"],
 ];
 
-export interface ImageActions {
+interface ImageActions {
   replace(pos: number): void;
   editAlt(pos: number, current: string): void;
   /** Ask for a new crop (shares cut off each side); null removes it. */

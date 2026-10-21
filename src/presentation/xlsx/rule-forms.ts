@@ -8,7 +8,7 @@ import { parseRange, Rect, rangeName } from "../../domain/xlsx/references";
 import type { PivotFn, PivotLayout } from "../../domain/xlsx/pivot";
 
 /** "A1:B2 D4" or "A1:B2, D4" as ranges; null when any part isn't a range. */
-export function parseRanges(text: string): Rect[] | null {
+function parseRanges(text: string): Rect[] | null {
   const parts = text.replace(/\$/g, "").split(/[\s,]+/).filter(Boolean);
   const out = parts.map((p) => parseRange(p.toUpperCase()));
   return out.length && out.every(Boolean) ? (out as Rect[]) : null;
@@ -40,7 +40,7 @@ const OPERATORS: Record<string, string> = {
 };
 
 /** A rule in words, as the sidebar lists it. */
-export function describeRule(r: CfRule): string {
+function describeRule(r: CfRule): string {
   const f = r.formulas.map((x) => x.replace(/^"(.*)"$/, "$1"));
   switch (r.type) {
     case "cellIs":
@@ -80,7 +80,7 @@ function row(host: HTMLElement, label: string): HTMLElement {
   return el;
 }
 
-export interface ConditionalFormOptions {
+interface ConditionalFormOptions {
   rules: CfRule[];
   range: string;
   /** Swatch colours of a rule's format. */
@@ -175,7 +175,7 @@ export function conditionalForm(host: HTMLElement, o: ConditionalFormOptions): v
   });
 }
 
-export interface ValidationFormOptions {
+interface ValidationFormOptions {
   current: Validation | null;
   range: string;
   add(ranges: Rect[], rule: NewValidation): void;
@@ -262,7 +262,7 @@ export function validationForm(host: HTMLElement, o: ValidationFormOptions): voi
   });
 }
 
-export interface PivotFormOptions {
+interface PivotFormOptions {
   fields: string[];
   layout: PivotLayout;
   apply(layout: PivotLayout): void;

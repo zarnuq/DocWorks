@@ -80,7 +80,7 @@ export async function officeText(ext: "docx" | "pptx" | "xlsx", bytes: ArrayBuff
   return out;
 }
 
-export interface TextHit {
+interface TextHit {
   label: string;
   before: string;
   match: string;

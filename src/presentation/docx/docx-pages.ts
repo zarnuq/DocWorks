@@ -11,7 +11,7 @@ import { Cell, layoutPages, Line, PageLayout, PageSetup, PageSize, Row, sectionS
 import { sectionBreaks } from "../../domain/docx/sections";
 import { docxSchema as schema } from "../../domain/docx/schema";
 
-export interface PagesOptions {
+interface PagesOptions {
   /** Current page geometry, or null for the continuous (pageless) view. */
   setup(): PageSetup | null;
   /** Header / footer content for a 1-based page number out of `total`; `pos` is where the page starts (its section). */

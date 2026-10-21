@@ -1,4 +1,5 @@
 import type { DOMOutputSpec } from "prosemirror-model";
+import { escapeXml } from "../../core/utils/xml";
 
 /**
  * Office Math (OMML) equations: drawn as MathML (which the browser lays out: stacked fractions, limits, roots,
@@ -249,11 +250,10 @@ function tex(el: Element | null): string {
 
 // ----------------------------------------------------------------------------------------------- LaTeX -> OMML
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const tag = (name: string, ...body: string[]) => `<m:${name}>${body.join("")}</m:${name}>`;
-const prop = (name: string, v: string) => `<m:${name} m:val="${esc(v)}"/>`;
+const prop = (name: string, v: string) => `<m:${name} m:val="${escapeXml(v)}"/>`;
 const FONT = `<w:rPr><w:rFonts w:ascii="Cambria Math" w:hAnsi="Cambria Math"/></w:rPr>`;
-const run = (text: string, upright = false) => (text ? `<m:r>${upright ? "<m:rPr><m:nor/></m:rPr>" : ""}${FONT}<m:t xml:space="preserve">${esc(text)}</m:t></m:r>` : "");
+const run = (text: string, upright = false) => (text ? `<m:r>${upright ? "<m:rPr><m:nor/></m:rPr>" : ""}${FONT}<m:t xml:space="preserve">${escapeXml(text)}</m:t></m:r>` : "");
 
 /** Parsed content: plain characters (merged into runs) or finished OMML. */
 type Item = { text: string } | { xml: string };

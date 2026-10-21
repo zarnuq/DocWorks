@@ -6,11 +6,14 @@ export const FONTS = ["Aptos", "Calibri", "Cambria", "Arial", "Times New Roman",
 
 export type PaperTheme = "light" | "dark";
 
+/** Zoom levels of the editors' Zoom menus ("fit": to the window). */
+export const ZOOMS = ["fit", "0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
+export const zoomLabel = (z: string) => (z === "fit" ? "Fit" : `${Math.round(Number(z) * 100)}%`);
+
 /** Open a toolbar menu under its button. */
-export function showBelow(menu: Menu, anchor: HTMLElement): void {
+function showBelow(menu: Menu, anchor: HTMLElement): void {
   const r = anchor.getBoundingClientRect();
-  lastAt = { x: r.left, y: r.bottom }; // FALLBACK(submenu)
-  menu.showAtPosition(lastAt);
+  menu.showAtPosition({ x: r.left, y: r.bottom });
 }
 
 /** Menu bar items' icons, by title, as Google's menus show them. */
@@ -35,6 +38,7 @@ const MENU_ICONS: Record<string, string> = {
   "Remove filter": "filter-x", "Data validation": "list-checks", "Remove duplicates…": "list-x", "Split text to columns…": "columns-2",
   "Named ranges…": "tag", "Import CSV as new sheet…": "file-input", Bold: "bold", Italic: "italic", Underline: "underline",
   "Keyboard shortcuts": "keyboard", "Copy as Markdown table": "table", "Copy as Markdown outline": "list-tree", "Copy link to slide": "link", "Copy link to cells": "link", "Copy link to heading": "link", Comments: "messages-square", Checkbox: "square-check", Bar: "chart-bar", Column: "chart-column", Line: "chart-line", Pie: "chart-pie", Strikethrough: "strikethrough", Subscript: "subscript", Superscript: "superscript", Code: "code", "Remove highlight": "highlighter",
+  "Create note from selection": "file-plus",
 };
 /** Set while a menu bar menu is being built: its items get MENU_ICONS. */
 let menuBarIcons = false;
@@ -44,6 +48,7 @@ const VIEW_MENUS = new Set(["File", "Edit", "View", "Tools", "Help"]);
 const VIEW_ITEMS = new Set(["Export…", "Copy", "Copy as Markdown table", "Copy as Markdown outline", "Copy link to slide", "Copy link to cells", "Copy link to heading", "Select all", "Find and replace", "Page view", "Outline", "Zoom", "Light", "Dark", "Present", "Present from start", "Grid view", "Word count", "Keyboard shortcuts", "Linked from"]);
 /** Set while a read-only file's menu is being built: other items are left out. */
 let viewOnly = false;
+VIEW_ITEMS.add("Create note from selection");
 const hidden = (title: string) => viewOnly && !VIEW_ITEMS.has(title);
 const menuIcon = (title: string) => (menuBarIcons ? MENU_ICONS[title] ?? (/^Ungroup /.test(title) ? "ungroup" : /^Group /.test(title) ? "group" : undefined) : undefined);
 
@@ -59,7 +64,7 @@ export function menuItem(m: Menu, title: string, run: () => void, opts: { checke
 }
 
 /** Obsidian's MenuItem.setSubmenu (in the app since 1.4, not in its typings): a hover submenu with a › arrow. */
-type SubmenuItem = MenuItem & { setSubmenu?: () => Menu };
+type SubmenuItem = MenuItem & { setSubmenu: () => Menu };
 
 /** An item that opens a submenu. */
 export function subMenu(m: Menu, title: string, build: (m: Menu) => void): void {
@@ -75,18 +80,11 @@ export function subMenu(m: Menu, title: string, build: (m: Menu) => void): void 
       viewOnly = was;
     }
   };
-  m.addItem((i: SubmenuItem) => {
+  m.addItem((i) => {
     i.setTitle(title);
     const icon = menuIcon(title);
     if (icon) i.setIcon(icon);
-    if (typeof i.setSubmenu === "function") return build(i.setSubmenu());
-    // FALLBACK(submenu): only for an Obsidian without setSubmenu. To drop it, delete from here to the end of this
-    // function, `lastAt` below, its assignment in showBelow and the fallback test in tests/toolbar.test.ts.
-    i.setTitle(`${title} ▸`).onClick((e) => {
-      const sub = new Menu();
-      build(sub);
-      sub.showAtPosition("clientX" in e && e.clientX ? { x: e.clientX, y: e.clientY } : lastAt);
-    });
+    build((i as SubmenuItem).setSubmenu());
   });
 }
 
@@ -102,9 +100,6 @@ function tidySeparators(menu: Menu): void {
     return addItem(cb);
   };
 }
-
-// FALLBACK(submenu): where the last toolbar menu opened, for fallback submenus opened from the keyboard.
-let lastAt = { x: 0, y: 0 };
 
 /**
  * The editor toolbars, as Google's: a menu row holding every command above one row of everyday controls, boxed in

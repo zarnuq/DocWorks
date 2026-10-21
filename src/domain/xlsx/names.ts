@@ -9,7 +9,7 @@ import { quoteSheet } from "./references";
 import { rewriteFormulas } from "./sheet-edit";
 import { Workbook } from "./workbook-model";
 
-export interface NamedRange {
+interface NamedRange {
   name: string;
   range: string;
 }

@@ -3,7 +3,7 @@
  * behaviours (show / hide, filter effects, property keyframes, scale, rotation, motion paths) rather than from preset
  * ids, so effects from PowerPoint, Google Slides and LibreOffice all play without a preset table.
  */
-import { NS } from "../../core/utils/xml";
+import { NS, kid, kids } from "../../core/utils/xml";
 
 const P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 
@@ -52,8 +52,6 @@ export interface Step {
   effects: Effect[];
 }
 
-const kids = (el: Element | null | undefined, local?: string) => (el ? Array.from(el.children).filter((c) => !local || c.localName === local) : []);
-const kid = (el: Element | null | undefined, local: string) => kids(el, local)[0] ?? null;
 const num = (v: string | null | undefined) => (v && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : 0);
 
 /** The first delay of a cTn's start conditions. */

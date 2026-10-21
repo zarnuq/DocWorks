@@ -23,9 +23,10 @@ import { versionHistoryDialog } from "../common/version-dialog";
 import { LinkedFrom } from "../common/backlinks";
 import { findHeading, headingLinkText, headings } from "../../domain/docx/headings";
 import { copyLink } from "../common/copy-link";
+import { createSelectionNote, noteText, openCompanionNote } from "../common/office-notes";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
-import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems } from "../common/toolbar";
+import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { pickImage } from "../common/images";
 import { electronSpeller, runEditCommand, Speller } from "../common/spelling";
@@ -86,8 +87,6 @@ const EQUATION_PALETTE: [string, string][][] = [
 
 const PAGE_VIEW_KEY = "doc-works-page-view";
 const ZOOM_KEY = "doc-works-docx-zoom";
-const ZOOMS = ["fit", "0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
-const zoomLabel = (z: string) => (z === "fit" ? "Fit" : `${Math.round(Number(z) * 100)}%`);
 const REVIEW_KEY = "doc-works-review-panel";
 type HF = "header" | "footer";
 /** A header or footer part: "header:default", "footer:first"... */
@@ -453,6 +452,14 @@ export class DocxView extends FileView {
     copyLink(this.app, this.file, `#${headingLinkText(heading.text)}`, "heading");
   }
 
+  private extractNote(): void {
+    const state = this.editor?.state;
+    if (!state) return;
+    const heading = [...headings(state.doc)].reverse().find(h => h.pos <= state.selection.from);
+    const text = state.selection.ranges.map(r => state.doc.textBetween(r.$from.pos, r.$to.pos, "\n")).join("\n");
+    void createSelectionNote(this.app, this.file, heading ? `#${headingLinkText(heading.text)}` : "", noteText(text));
+  }
+
   /** Put the cursor on the heading at `pos` and scroll it to the top. */
   private showHeading(pos: number): void {
     const editor = this.editor;
@@ -706,6 +713,7 @@ export class DocxView extends FileView {
       }
       menuItem(mn, "Select all", () => run(selectAll));
       menuItem(mn, "Copy link to heading", () => this.copyHeadingLink());
+      menuItem(mn, "Create note from selection", () => this.extractNote(), { disabled: this.editor?.state.selection.empty ?? true });
       menuItem(mn, "Delete", () => run(deleteSelection));
       mn.addSeparator();
       menuItem(mn, "Find and replace", () => this.openFind());
@@ -790,6 +798,7 @@ export class DocxView extends FileView {
     });
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...DOCS_SHORTCUTS])));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    tb.side("notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file));
     const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
     if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.toggleReview());
 
@@ -1169,7 +1178,7 @@ export class DocxView extends FileView {
     for (let d = $pos.depth; d > 0; d--) if ($pos.node(d).type === schema.nodes.table_cell) inTable = true;
     const link = [...$pos.marks(), ...($pos.nodeAfter?.marks ?? [])].find((m) => m.type === schema.marks.link)?.attrs.href as string | undefined;
     const commentId = target.closest<HTMLElement>("[data-comment]")?.dataset.comment ?? null;
-    if (imagePos === null && !inTable && !link && !commentId) return;
+    if (imagePos === null && !inTable && !link && !commentId && state.selection.empty) return;
     e.preventDefault();
 
     // The caret moves to the click unless it already selects there, as with the native menu.
@@ -1179,6 +1188,7 @@ export class DocxView extends FileView {
     }
     const menu = new Menu();
     const item = (title: string, run: () => void) => menu.addItem((i) => i.setTitle(title).onClick(run));
+    if (!editor.state.selection.empty) item("Create note from selection", () => this.extractNote());
     const run = (command: Command) => () => {
       command(editor.state, editor.dispatch);
       editor.focus();

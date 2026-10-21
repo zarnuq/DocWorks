@@ -13,16 +13,16 @@ import type { Align, Para, Run, RunProps, Spacing } from "../../domain/pptx/slid
 import { letterNumber, romanNumber } from "../../core/utils/numbering";
 import type { ParaInput } from "../../domain/pptx/slide-edit";
 import { fontStack, letterSpacing } from "./text-fit";
+import { EMU_PER_PT } from "../../core/utils/xml";
 
 const CSS_ALIGN: Record<Align, string> = { l: "left", ctr: "center", r: "right", just: "justify" };
 const FROM_CSS_ALIGN: Record<string, Align> = { left: "l", start: "l", center: "ctr", right: "r", end: "r", justify: "just" };
 const BLOCK = new Set(["P", "DIV", "LI", "H1", "H2", "H3", "H4", "H5", "H6"]);
-const EMU_PER_PT = 12700;
 const PROP_KEYS: (keyof RunProps)[] = ["b", "i", "u", "strike", "sz", "color", "font", "spc", "cap", "link", "baseline", "highlight"];
 /** A run property as compared: superscript and highlight are absent when off. */
 const propValue = (r: Partial<RunProps>, k: keyof RunProps) => (k === "baseline" ? (r.baseline ?? 0) : k === "highlight" ? (r.highlight ?? null) : r[k]);
 
-export type DefaultsFor = (lvl: number) => RunProps;
+type DefaultsFor = (lvl: number) => RunProps;
 
 const decoration = (u: boolean, strike: boolean) => [u && "underline", strike && "line-through"].filter(Boolean).join(" ") || "none";
 
@@ -69,7 +69,7 @@ function diff(run: RunProps, base: RunProps): Partial<RunProps> {
   return out;
 }
 
-export interface RenderTextOptions {
+interface RenderTextOptions {
   /** Shown by slide-number fields. */
   slideNumber?: number;
 }
@@ -146,7 +146,7 @@ export function renderParagraphs(
 }
 
 /** Label for number `n` in a DrawingML auto-number scheme ("arabicPeriod", "alphaUcParenR"...). */
-export function numberLabel(scheme: string, n: number): string {
+function numberLabel(scheme: string, n: number): string {
   const m = /^(arabic|alphaLc|alphaUc|romanLc|romanUc)(Period|ParenR|ParenBoth|Plain)$/.exec(scheme) ?? [scheme, "arabic", "Period"];
   const kind = m[1];
   let text = kind === "arabic" ? String(n) : kind.startsWith("alpha") ? letterNumber(n) : romanNumber(n);

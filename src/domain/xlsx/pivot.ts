@@ -10,9 +10,10 @@ import { compareValues } from "./formula-evaluator";
 import { Scalar } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
 import { Sheet } from "./workbook-model";
+import { escapeXml, kid, kids } from "../../core/utils/xml";
 
 export type PivotFn = "sum" | "count" | "average" | "max" | "min";
-export interface PivotValue {
+interface PivotValue {
   field: number;
   fn: PivotFn;
   name?: string;
@@ -38,10 +39,8 @@ export interface PivotLayout {
   values: PivotValue[];
 }
 
-const kids = (el: Element | null | undefined, name: string) => (el ? Array.from(el.children).filter((c) => c.localName === name) : []);
-const kid = (el: Element | null | undefined, name: string) => kids(el, name)[0] ?? null;
 const FN_LABEL: Record<PivotFn, string> = { sum: "Sum", count: "Count", average: "Average", max: "Max", min: "Min" };
-export const valueName = (fields: string[], v: PivotValue) => v.name ?? `${FN_LABEL[v.fn]} of ${fields[v.field]}`;
+const valueName = (fields: string[], v: PivotValue) => v.name ?? `${FN_LABEL[v.fn]} of ${fields[v.field]}`;
 
 /** The pivot tables on `sheet`. */
 export function readPivots(sheet: Sheet): Pivot[] {
@@ -114,7 +113,7 @@ function sourceOf(sheet: Sheet, p: Pivot): { header: string[]; records: Scalar[]
 }
 
 /** The pivot table's cells (row-major, null for empty). */
-export function pivotGrid(header: string[], records: Scalar[][], layout: PivotLayout): Scalar[][] {
+function pivotGrid(header: string[], records: Scalar[][], layout: PivotLayout): Scalar[][] {
   const { rows, cols, values } = layout;
   const names = values.map((v) => valueName(header, v));
   const colKeys = cols.length ? sorted(records.map((r) => r[cols[0]])) : [];
@@ -156,7 +155,6 @@ export function pivotGrid(header: string[], records: Scalar[][], layout: PivotLa
 
 const S_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const TABLE_ORDER = ["location", "pivotFields", "rowFields", "rowItems", "colFields", "colItems", "pageFields", "dataFields", "formats", "conditionalFormats", "chartFormats", "pivotHierarchies", "pivotTableStyleInfo", "filters", "rowHierarchiesUsage", "colHierarchiesUsage", "extLst"];
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
 function element(doc: Document, xml: string): Element {
   return doc.importNode(new DOMParser().parseFromString(xml.replace(/^<(\w+)/, `<$1 xmlns="${S_NS}"`), "application/xml").documentElement, true);
@@ -168,7 +166,7 @@ function place(parent: Element, el: Element): void {
   parent.insertBefore(el, Array.from(parent.children).find((c) => TABLE_ORDER.indexOf(c.localName) > rank) ?? null);
 }
 
-const itemXml = (v: Scalar) => (blank(v) ? "<m/>" : typeof v === "number" ? `<n v="${v}"/>` : typeof v === "boolean" ? `<b v="${v ? 1 : 0}"/>` : `<s v="${esc(String(label(v)))}"/>`);
+const itemXml = (v: Scalar) => (blank(v) ? "<m/>" : typeof v === "number" ? `<n v="${v}"/>` : typeof v === "boolean" ? `<b v="${v ? 1 : 0}"/>` : `<s v="${escapeXml(String(label(v)))}"/>`);
 
 /**
  * Work the pivot table out again (with a new layout, when given) and write it: cells, definition and cache, as one
@@ -205,12 +203,12 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
       const shared = header.map((_, i) => (axes.has(i) || records.some((r) => !blank(r[i]) && typeof r[i] !== "number") ? sorted(records.map((r) => r[i])) : null));
       const fieldsXml = header.map((name, i) => {
         const items = shared[i];
-        if (items) return `<cacheField name="${esc(name)}" numFmtId="0"><sharedItems count="${items.length}">${items.map(itemXml).join("")}</sharedItems></cacheField>`;
+        if (items) return `<cacheField name="${escapeXml(name)}" numFmtId="0"><sharedItems count="${items.length}">${items.map(itemXml).join("")}</sharedItems></cacheField>`;
         const nums = records.map((r) => r[i]).filter((v): v is number => typeof v === "number");
         const range = nums.length ? ` minValue="${Math.min(...nums)}" maxValue="${Math.max(...nums)}"` : "";
-        return `<cacheField name="${esc(name)}" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1"${nums.every(Number.isInteger) ? ' containsInteger="1"' : ""}${records.some((r) => blank(r[i])) ? ' containsBlank="1"' : ""}${range}/></cacheField>`;
+        return `<cacheField name="${escapeXml(name)}" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1"${nums.every(Number.isInteger) ? ' containsInteger="1"' : ""}${records.some((r) => blank(r[i])) ? ' containsBlank="1"' : ""}${range}/></cacheField>`;
       });
-      kid(cache, "cacheFields").replaceWith(element(cacheDoc, `<cacheFields count="${header.length}">${fieldsXml.join("")}</cacheFields>`));
+      kid(cache, "cacheFields")!.replaceWith(element(cacheDoc, `<cacheFields count="${header.length}">${fieldsXml.join("")}</cacheFields>`));
       cache.setAttribute("refreshOnLoad", "1");
       cache.setAttribute("recordCount", String(records.length));
       pkg.touch(p.cachePath);
@@ -240,9 +238,9 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
       // Excel lays out the items again when it refreshes on load.
       kid(def, "rowItems")?.remove();
       kid(def, "colItems")?.remove();
-      const dataXml = layout.values.map((v) => `<dataField name="${esc(valueName(header, { ...v, name: undefined }))}" fld="${v.field}"${v.fn === "sum" ? "" : ` subtotal="${v.fn}"`} baseField="0" baseItem="0"/>`);
+      const dataXml = layout.values.map((v) => `<dataField name="${escapeXml(valueName(header, { ...v, name: undefined }))}" fld="${v.field}"${v.fn === "sum" ? "" : ` subtotal="${v.fn}"`} baseField="0" baseItem="0"/>`);
       place(def, element(defDoc, `<dataFields count="${layout.values.length}">${dataXml.join("")}</dataFields>`));
-      const loc = kid(def, "location");
+      const loc = kid(def, "location")!;
       loc.setAttribute("ref", rangeName(location));
       loc.setAttribute("firstHeaderRow", "1");
       loc.setAttribute("firstDataRow", String(!layout.cols.length ? 1 : layout.values.length > 1 ? 3 : 2));

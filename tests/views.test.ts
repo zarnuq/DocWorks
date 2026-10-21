@@ -1338,7 +1338,7 @@ describe("PptxView menus", () => {
     const view = mount(PptxView, "sample.pptx");
     const file = await open(view, "menus.pptx");
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Slide", "Arrange", "Tools", "Help"]);
-    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Copy as Markdown outline", "Copy link to slide", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Copy as Markdown outline", "Copy link to slide", "Create note from selection", "Paste", "Paste without formatting", "Select all", "Delete", "Find and replace"]);
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
     expect(view.contentEl.querySelector('.dw-toolbar [aria-label^="Insert link"]')).not.toBeNull();
     expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "Grid view", "Format panel", "Comments", "Linked from", "Zoom", "Light", "Dark"]);
@@ -1674,7 +1674,7 @@ describe("DocxView menus", () => {
     const file = await open(view, "menus.docx");
     expect(menuNames(view)).toEqual(["File", "Edit", "View", "Insert", "Format", "Tools", "Help"]);
     expect(menuTitles(view, "File")).toEqual(["Export…"]);
-    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Copy link to heading", "Delete", "Find and replace"]);
+    expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Copy link to heading", "Create note from selection", "Delete", "Find and replace"]);
     expect(menuTitles(view, "View")).toEqual(["Editing", "Suggesting", "Page view", "Ruler", "Outline", "Review panel", "Linked from", "Zoom", "Light", "Dark"]);
     expect(menuTitles(view, "Insert")).toEqual(["Image", "Table", "Drawing", "Chart", "Equation", "Special characters", "Horizontal line", "Break", "Footnote", "Comment", "Link", "Table of contents", "Header & footer", "Watermark"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Paragraph style", "Align", "Line spacing", "Paragraph…", "Columns…", "Bulleted list", "Numbered list", "Clear formatting"]);

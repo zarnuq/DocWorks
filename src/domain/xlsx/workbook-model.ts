@@ -28,7 +28,7 @@ export interface Cell {
   dynamic?: boolean;
 }
 
-export interface CellInput {
+interface CellInput {
   value?: Scalar;
   /** Formula text without "="; null removes the formula. */
   formula?: string | null;
@@ -597,7 +597,7 @@ function isoToSerial(iso: string, date1904: boolean): number {
   return (ms - epoch) / 86400000;
 }
 
-export interface DefinedName {
+interface DefinedName {
   name: string;
   formula: string;
   /** Sheet index for sheet-scoped names. */

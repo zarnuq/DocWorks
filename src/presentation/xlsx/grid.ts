@@ -24,7 +24,7 @@ const GUTTER = 16;
 let accessibilityId = 0;
 const REF_COLORS = ["#1a73e8", "#e8710a", "#9334e6", "#188038", "#d93025", "#12b5cb"];
 
-export interface Pos {
+interface Pos {
   row: number;
   col: number;
 }

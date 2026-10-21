@@ -1,5 +1,5 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
-import { NS, childNS } from "../../core/utils/xml";
+import { NS, kid, EMU_PER_PX } from "../../core/utils/xml";
 import { regroup } from "./sections";
 import { placementOf } from "./drawing";
 import { docxSchema as schema, Align, TabStop } from "./schema";
@@ -17,7 +17,6 @@ export interface Origin {
 }
 export type Origins = Map<string, Origin>;
 
-export const EMU_PER_PX = 9525;
 
 /** Word's named highlight colors. */
 export const HIGHLIGHTS: Record<string, string> = {
@@ -46,7 +45,7 @@ const DROPPED = new Set(["proofErr", "lastRenderedPageBreak", "pPr", "rPr"]);
 const ORDERED_ALIGN: Record<string, Align> = { left: "left", start: "left", center: "center", right: "right", end: "right", both: "justify", distribute: "justify" };
 
 export const wVal = (el: Element | null | undefined, attr = "val") => el?.getAttributeNS(NS.w, attr) ?? null;
-export const w = (el: Element | null | undefined, local: string) => (el ? childNS(el, NS.w, local) : null);
+export const w = (el: Element | null | undefined, local: string) => (el ? kid(el, local, NS.w) : null);
 const isOn = (el: Element | null) => !!el && !["0", "false", "off"].includes(wVal(el) ?? "");
 const hex = (v: string | null) => (v && /^[0-9a-f]{6}$/i.test(v) ? `#${v.toUpperCase()}` : null);
 const xmlOf = (el: Element) => new XMLSerializer().serializeToString(el);
@@ -55,7 +54,7 @@ const xmlOf = (el: Element) => new XMLSerializer().serializeToString(el);
 // Properties shared with the writer (it compares against what we read here)
 // -----------------------------------------------------------------------------
 
-export interface ParagraphProps {
+interface ParagraphProps {
   style: string | null;
   align: Align | null;
   numId: string | null;
@@ -179,7 +178,7 @@ function marginsOf(tcPr: Element | null, tblPr: Element | null): string | null {
 }
 
 /** A cell's own border overrides (w:tcBorders), as "t:none b:line"; null when it has none. Display only. */
-export function edgesOf(tcPr: Element | null): string | null {
+function edgesOf(tcPr: Element | null): string | null {
   const b = w(tcPr, "tcBorders");
   if (!b) return null;
   const side: Record<string, string> = { top: "t", left: "l", start: "l", bottom: "b", right: "r", end: "r" };

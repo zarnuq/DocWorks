@@ -8,7 +8,7 @@ import { TABLE_STYLES } from "../../domain/pptx/table";
 import { dropLinks } from "../../domain/pptx/links";
 import { OoxmlPackage, PackageSnapshot, parseXml, relsPathOf, ResourceBundle } from "../ooxml/ooxml-package";
 
-export interface SlideRef {
+interface SlideRef {
   path: string;
   id: string;
   rId: string;
@@ -43,7 +43,7 @@ function relativeTarget(from: string, target: string): string {
   return [...base.slice(common).map(() => ".."), ...parts.slice(common)].join("/");
 }
 
-export interface LayoutRef {
+interface LayoutRef {
   path: string;
   name: string;
   /** ST_SlideLayoutType, e.g. "title", "obj", "blank"; "cust" when unset. */

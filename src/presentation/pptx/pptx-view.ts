@@ -7,7 +7,7 @@ import { App, Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, Setting, 
 import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, ShapeModel, SlideModel, parseSlide, plainText, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
 import { JUMPS, linkLabel, linkTarget, setShapeLink } from "../../domain/pptx/links";
-import { NS } from "../../core/utils/xml";
+import { NS, EMU_PER_PT, EMU_PER_PX } from "../../core/utils/xml";
 import { writeFill, writeLine } from "../../domain/pptx/shape-style";
 import { applyFormat, copyFormat, ShapeFormat } from "../../domain/pptx/paint-format";
 import { NO_ADJUST, replacePicture, setPictureAdjust } from "../../domain/pptx/picture-adjust";
@@ -45,11 +45,12 @@ import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from ".
 import { runEditCommand } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
-import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems } from "../common/toolbar";
+import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { Autosave, reloadOnOutsideChange } from "../common/autosave";
 import { keepVersion, versions } from "../common/version-history";
 import { versionHistoryDialog } from "../common/version-dialog";
+import { createSelectionNote, noteText, openCompanionNote } from "../common/office-notes";
 import { LinkedFrom } from "../common/backlinks";
 import { slideIndex } from "../common/embeds";
 import { copyLink } from "../common/copy-link";
@@ -83,8 +84,6 @@ const LINE_SPACINGS = ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"];
 const CHAR_SPACINGS: [string, string][] = [["Very tight", "-3"], ["Tight", "-1.5"], ["Normal", "0"], ["Loose", "3"], ["Very loose", "6"]];
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 72, 96];
 const MIN_SIZE_EMU = 91440;
-const EMU_PER_PT = 12700;
-const EMU_PER_PX = 9525;
 const EMU_PER_INCH = 914400;
 /** Snap distance for connector ends, in px. */
 const SNAP_PX = 10;
@@ -93,8 +92,6 @@ const PROPS_KEY = "doc-works-format-panel";
 const highlights = () => CSS.highlights as unknown as Map<string, Highlight>;
 /** Zoom steps; 1 = fit the slide to the stage. */
 /** Zoom steps as Docs: "fit" fits the slide to the pane, a number is that scale of the slide's real size (96 dpi). */
-const ZOOMS = ["fit", "0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
-const zoomLabel = (z: string) => (z === "fit" ? "Fit" : `${Math.round(Number(z) * 100)}%`);
 
 type Snapshot = { snap: PptxSnapshot; index: number; editPart?: string | null };
 
@@ -740,6 +737,7 @@ export class PptxView extends FileView {
     item("Copy slide", "clipboard-copy", () => void this.copySlide(false));
     item("Cut slide", "scissors", () => void this.copySlide(true));
     item("Copy link to slide", "link", () => copyLink(this.app, this.file, `#${i + 1}`, "slide"));
+    item("Create note from selection", "file-plus", () => this.extractNote(true));
     if (slideClipboard) item("Paste slide", "clipboard-paste", () => void this.pasteSlides());
     item("Delete slide", "trash", () => this.mutate((d) => d.deleteSlide(i)));
     item(this.doc?.isHidden(i) ? "Show slide" : "Hide slide", "eye-off", () => this.mutate((d) => d.setHidden(i, !d.isHidden(i))));
@@ -1435,6 +1433,7 @@ export class PptxView extends FileView {
     const has = this.items.length > 0;
     item("Cut", () => void this.cutSelection(), has);
     item("Copy", () => void this.copySelection(), has);
+    item("Create note from selection", () => this.extractNote());
     item("Paste", () => this.paste(), !!clipboard);
     item("Duplicate", () => void this.duplicateSelection(), has);
     item("Delete", () => this.deleteSelected(), has);
@@ -1535,6 +1534,28 @@ export class PptxView extends FileView {
     const xml = this.currentSlideXml();
     if (!xml || !this.doc) return false;
     return rerouteConnectors(xml, parseSlide(this.doc, this.doc.slides()[this.index].path).shapes);
+  }
+
+  private extractNote(wholeSlide = false): void {
+    if (!this.doc || !this.file) return;
+    let markdown: string;
+    const live = this.slideHostEl.ownerDocument.getSelection();
+    const range = live?.rangeCount && this.slideHostEl.contains(live.getRangeAt(0).commonAncestorContainer)
+      ? live.getRangeAt(0) : this.savedRange;
+    const textShape = this.activeText;
+    if (!wholeSlide && range && !range.collapsed && textShape?.textEl?.contains(range.commonAncestorContainer)
+      && this.items.includes(topLevel(textShape.shape.el))) {
+      markdown = noteText(range.toString());
+    } else {
+      this.flushCommit();
+      if (!wholeSlide && this.items.length) {
+        const shapes = parseSlide(this.doc, this.doc.slides()[this.index].path).shapes;
+        markdown = shapes.filter(s => !s.inherited && this.items.includes(topLevel(s.el)))
+          .map(s => noteText(s.text?.paras.map(p => p.runs.map(r => r.text).join("")).join("\n") ?? ""))
+          .filter(Boolean).join("\n\n");
+      } else markdown = deckToMarkdown(this.doc, [this.index]);
+    }
+    void createSelectionNote(this.app, this.file, `#${this.index + 1}`, markdown);
   }
 
   private activeTextFocused(): boolean {
@@ -2713,6 +2734,7 @@ export class PptxView extends FileView {
         void navigator.clipboard.writeText(deckToMarkdown(this.doc)).then(() => new Notice("Copied the slides as a Markdown outline."));
       });
       menuItem(mn, "Copy link to slide", () => copyLink(this.app, this.file, `#${this.index + 1}`, "slide"));
+      menuItem(mn, "Create note from selection", () => this.extractNote());
       menuItem(mn, "Paste", () => this.paste(), { disabled: !clipboard });
       // In a text box: the clipboard's plain text; otherwise as Paste.
       menuItem(mn, "Paste without formatting", () => (activeDocument.activeElement?.closest(".pptx-text") ? void runEditCommand("pasteAndMatchStyle") : this.paste()));
@@ -2804,6 +2826,7 @@ export class PptxView extends FileView {
     });
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS])));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    tb.side("notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file));
     const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
     if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.commentsDialog());
 

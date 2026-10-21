@@ -2,7 +2,7 @@
  * Narrow panes, as Google's editors on a small window: below NARROW px the view gets `is-narrow`, docked side panels
  * are hidden by CSS, and their toggles open them as drawers over the document instead.
  */
-export const NARROW = 700;
+const NARROW = 700;
 
 /** Toggle `is-narrow` on `root` as it resizes; `onChange` runs when it flips. Returns a stop function. */
 export function watchNarrow(root: HTMLElement, onChange: (narrow: boolean) => void, width = () => root.clientWidth): (() => void) & { check: () => void } {

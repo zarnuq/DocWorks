@@ -7,11 +7,11 @@ import type { Edits } from "./commands";
 import { parseXml } from "../../infrastructure/ooxml/ooxml-package";
 import { assertAction } from "./protection";
 import { child as sheetChild } from "./sheet-edit";
+import { EMU_PER_PX } from "../../core/utils/xml";
 
 const XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const EMU_PER_PX = 9525;
 
 export interface Picture {
   /** Identifies the picture for moving / deleting: its drawing part and its anchor's index (Google exports every cNvPr id as 0). */

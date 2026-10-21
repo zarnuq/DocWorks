@@ -1,7 +1,7 @@
 /** Plugin settings, shared by the views (no Obsidian imports). */
 import type { PageSize } from "../../domain/docx/pages";
 
-export type PaperSetting = "default" | "light" | "dark" | "obsidian";
+type PaperSetting = "default" | "light" | "dark" | "obsidian";
 
 export interface DocWorksSettings {
   /** "document": pages use the document's own size; "letter": always 8.5 x 11 in. */

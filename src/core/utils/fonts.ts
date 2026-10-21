@@ -12,7 +12,7 @@ const FALLBACK: Record<string, string> = {
 };
 
 /** Generic CSS family to fall back on when a document font isn't installed. */
-export function genericFamily(font: string): string {
+function genericFamily(font: string): string {
   if (/mono|courier|consolas|menlo/i.test(font)) return "monospace";
   return /garamond|times|cambria|georgia|palatino|book|baskerville|bodoni|didot|century|minion|serif|roman/i.test(font) && !/sans/i.test(font) ? "serif" : "sans-serif";
 }

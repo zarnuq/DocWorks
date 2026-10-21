@@ -8,7 +8,7 @@ import type { ShapeModel } from "../../domain/pptx/slide-model";
 import { Fill, Line, writeFill, writeLine, writeShadow } from "../../domain/pptx/shape-style";
 import { reorder, setCrop, setRect, setTransform, writeBodyPr, ZOrder } from "../../domain/pptx/slide-edit";
 import type { Alignment } from "../../domain/pptx/arrange";
-import { NS } from "../../core/utils/xml";
+import { NS, EMU_PER_PT } from "../../core/utils/xml";
 import {
   BorderMode, CellRange, deleteCol, deleteRow, insertCol, insertRow, mergeCells, setCellBorders, setCellFill, setColWidth, setRowHeight, setTableFlags, splitCell, TableFlags,
 } from "../../domain/pptx/table";
@@ -73,7 +73,6 @@ export function buildArrangePanel(host: HTMLElement, a: ArrangeControl): void {
 }
 
 const EMU_PER_INCH = 914400;
-export const EMU_PER_PT = 12700;
 const DEFAULT_COLOR = "#4472C4";
 export const DASHES: [string, string][] = [
   ["Solid", "solid"], ["Round dot", "sysDot"], ["Square dot", "sysDash"], ["Dash", "dash"], ["Dash dot", "dashDot"],

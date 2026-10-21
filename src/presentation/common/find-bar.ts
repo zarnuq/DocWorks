@@ -16,7 +16,7 @@ const COMMON: [string, string, keyof SearchOptions][] = [
 
 /** Last search per file: query, replacement and every checkbox. */
 const remembered = new Map<string, { query: string; replace: string; checks: boolean[] }>();
-export interface FindBarOptions {
+interface FindBarOptions {
   /** Remembers the search under this key (the file's path). */
   key?: string;
   /** The editor's own checkboxes, after Google's: [label, accessible name, initially checked]. */
@@ -32,7 +32,7 @@ export interface FindBarOptions {
   close(): void;
 }
 
-export interface FindBar {
+interface FindBar {
   el: HTMLElement;
   input: HTMLInputElement;
   replaceInput: HTMLInputElement;

@@ -41,7 +41,7 @@ export function findSheetMatches(sheets: Sheet[], query: string, o: FindOptions 
   return out;
 }
 
-export interface CellMatch {
+interface CellMatch {
   sheet: Sheet;
   row: number;
   col: number;

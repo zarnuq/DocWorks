@@ -26,7 +26,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 // Dates
 // ---------------------------------------------------------------------------
 
-export interface DateParts { y: number; m: number; d: number; h: number; mi: number; s: number; ms: number; dow: number }
+interface DateParts { y: number; m: number; d: number; h: number; mi: number; s: number; ms: number; dow: number }
 
 const DAY_MS = 86400000;
 const EPOCH_1900 = Date.UTC(1899, 11, 30);
@@ -243,7 +243,7 @@ export function formatValue(v: Scalar, code: string, date1904 = false): Formatte
 // Typed input
 // ---------------------------------------------------------------------------
 
-export interface ParsedInput {
+interface ParsedInput {
   value: Scalar;
   /** Number format the input implies ("12%" -> 0%), when the cell has none. */
   format?: string;

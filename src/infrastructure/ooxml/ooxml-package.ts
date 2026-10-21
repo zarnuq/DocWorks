@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import { NS, REL_TYPE } from "../../core/utils/xml";
 import { IMAGE_MIME } from "../../core/utils/images";
 
-export interface Rel {
+interface Rel {
   id: string;
   /** Last segment of the relationship type URL, e.g. "slideLayout", "image". */
   type: string;
@@ -12,16 +12,16 @@ export interface Rel {
   external: boolean;
 }
 
-export interface ResourcePart { xml?: string; bytes?: Uint8Array; contentType: string }
+interface ResourcePart { xml?: string; bytes?: Uint8Array; contentType: string }
 export type ResourceBundle = Map<string, ResourcePart>;
 
 export type PackageSnapshot = Map<string, string> & { binaries?: Map<string, Uint8Array> };
 
-export const CONTENT_TYPES = "[Content_Types].xml";
+const CONTENT_TYPES = "[Content_Types].xml";
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
 
 const isXmlPart = (path: string) => path.endsWith(".xml") || path.endsWith(".rels");
-export const dirOf = (path: string) => path.slice(0, path.lastIndexOf("/") + 1);
+const dirOf = (path: string) => path.slice(0, path.lastIndexOf("/") + 1);
 export const relsPathOf = (path: string) => `${dirOf(path)}_rels/${path.slice(path.lastIndexOf("/") + 1)}.rels`;
 
 /** Resolve "../media/x.png" against the directory of the source part. */
@@ -36,7 +36,7 @@ export function resolvePath(fromDir: string, target: string): string {
 }
 
 /** Inverse of resolvePath: target path written relative to fromDir. */
-export function relativePath(fromDir: string, to: string): string {
+function relativePath(fromDir: string, to: string): string {
   const from = fromDir.split("/").filter(Boolean);
   const dest = to.split("/");
   let i = 0;

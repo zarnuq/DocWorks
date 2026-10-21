@@ -3,10 +3,10 @@ import type { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import type { Edits } from "./commands";
 import { assertAction } from "./protection";
 import type { Sheet } from "./workbook-model";
+import { guid } from "../../core/utils/xml";
 
-export const THREAD_NS = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
-const guid = () => `{${crypto.randomUUID().toUpperCase()}}`;
-export interface CommentMessage { id: string; text: string; author: string; date: string; }
+const THREAD_NS = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
+interface CommentMessage { id: string; text: string; author: string; date: string; }
 export interface CommentThread { id: string; resolved: boolean; messages: CommentMessage[]; }
 const messages = (doc: Document | null) => Array.from(doc?.getElementsByTagNameNS(THREAD_NS, "threadedComment") ?? []);
 const threadPath = (pkg: XlsxWorkbook, sheetPath: string) => pkg.rels(sheetPath).find(r => r.type === "threadedComment" && !r.external)?.target;

@@ -3,7 +3,7 @@
  * ppt/authors.xml), which hold replies and a resolved status as Google Slides' threads do. Legacy comments
  * (p:cmLst, PowerPoint 2013 reply threading) are read and can be deleted.
  */
-import { NS } from "../../core/utils/xml";
+import { NS, kid, kids, guid } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 
 const P188 = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
@@ -12,13 +12,13 @@ const P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 const P15 = "http://schemas.microsoft.com/office/powerpoint/2012/main";
 const LEGACY_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
 
-export interface SlideMessage {
+interface SlideMessage {
   id: string;
   text: string;
   author: string;
   date: string;
 }
-export interface SlideThread {
+interface SlideThread {
   id: string;
   resolved: boolean;
   /** A legacy comment: shown and deletable, but replies and status need PowerPoint's modern comments. */
@@ -26,10 +26,7 @@ export interface SlideThread {
   messages: SlideMessage[];
 }
 
-const kids = (el: Element | null | undefined, ns: string, name: string) => Array.from(el?.children ?? []).filter((c) => c.namespaceURI === ns && c.localName === name);
-const kid = (el: Element | null | undefined, ns: string, name: string) => kids(el, ns, name)[0] ?? null;
-const textOf = (body: Element | null) => kids(body, NS.a, "p").map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join("")).join("\n");
-const guid = () => `{${crypto.randomUUID().toUpperCase()}}`;
+const textOf = (body: Element | null) => kids(body, "p", NS.a).map((p) => Array.from(p.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join("")).join("\n");
 /** Local time without a zone ("2026-10-12T10:56:59.123"), as PowerPoint stamps comments. */
 const now = () => {
   const d = new Date();
@@ -60,7 +57,7 @@ export function slideComments(doc: PptxDocument, slide: string): SlideThread[] {
     const names = new Map(Array.from(authorsDoc?.getElementsByTagNameNS(NS.p, "cmAuthor") ?? []).map((a) => [a.getAttribute("id") ?? "", a.getAttribute("name") ?? ""]));
     const byKey = new Map<string, SlideThread>();
     for (const cm of Array.from(legacyDoc.getElementsByTagNameNS(NS.p, "cm"))) {
-      const message = { id: legacyKey(cm), text: kid(cm, NS.p, "text")?.textContent ?? "", author: names.get(cm.getAttribute("authorId") ?? "") ?? "", date: cm.getAttribute("dt") ?? "" };
+      const message = { id: legacyKey(cm), text: kid(cm, "text", NS.p)?.textContent ?? "", author: names.get(cm.getAttribute("authorId") ?? "") ?? "", date: cm.getAttribute("dt") ?? "" };
       const parent = legacyParent(cm);
       const thread = parent ? byKey.get(parent) : undefined;
       if (thread) thread.messages.push(message);
@@ -75,10 +72,10 @@ export function slideComments(doc: PptxDocument, slide: string): SlideThread[] {
   const list = part ? doc.xml(part) : null;
   if (list) {
     const names = authorNames(doc);
-    const message = (el: Element): SlideMessage => ({ id: el.getAttribute("id") ?? "", text: textOf(kid(el, P188, "txBody")), author: names.get(el.getAttribute("authorId") ?? "") ?? "", date: el.getAttribute("created") ?? "" });
-    for (const cm of kids(list.documentElement, P188, "cm")) {
+    const message = (el: Element): SlideMessage => ({ id: el.getAttribute("id") ?? "", text: textOf(kid(el, "txBody", P188)), author: names.get(el.getAttribute("authorId") ?? "") ?? "", date: el.getAttribute("created") ?? "" });
+    for (const cm of kids(list.documentElement, "cm", P188)) {
       const status = cm.getAttribute("status");
-      out.push({ id: cm.getAttribute("id") ?? "", resolved: status === "resolved" || status === "closed", legacy: false, messages: [message(cm), ...kids(kid(cm, P188, "replyLst"), P188, "reply").map(message)] });
+      out.push({ id: cm.getAttribute("id") ?? "", resolved: status === "resolved" || status === "closed", legacy: false, messages: [message(cm), ...kids(kid(cm, "replyLst", P188), "reply", P188).map(message)] });
     }
   }
   return out;
@@ -123,8 +120,8 @@ export function addSlideComment(doc: PptxDocument, slide: string, text: string, 
   if (parentId) {
     const cm = findCm(list, parentId);
     if (!cm) throw new Error("Replies to this comment need PowerPoint.");
-    let replies = kid(cm, P188, "replyLst");
-    if (!replies) replies = cm.insertBefore(list.createElementNS(P188, "p188:replyLst"), kid(cm, P188, "txBody"));
+    let replies = kid(cm, "replyLst", P188);
+    if (!replies) replies = cm.insertBefore(list.createElementNS(P188, "p188:replyLst"), kid(cm, "txBody", P188));
     const reply = replies.appendChild(list.createElementNS(P188, "p188:reply"));
     for (const [k, v] of [["id", id], ["authorId", who], ["created", now()]]) reply.setAttribute(k, v);
     reply.appendChild(body(list, text));
@@ -135,7 +132,7 @@ export function addSlideComment(doc: PptxDocument, slide: string, text: string, 
     const ref = doc.slides().find((s) => s.path === slide);
     // The slide's own creation id lives in its root extension list (shapes carry other creation ids).
     const root = doc.xml(slide)?.documentElement;
-    const creation = kids(kid(root, NS.p, "extLst"), NS.p, "ext").flatMap((e) => kids(e, P14, "creationId"))[0]?.getAttribute("val");
+    const creation = kids(kid(root, "extLst", NS.p), "ext", NS.p).flatMap((e) => kids(e, "creationId", P14))[0]?.getAttribute("val");
     const marks = cm.appendChild(list.createElementNS(PC, "pc:sldMkLst"));
     marks.appendChild(list.createElementNS(PC, "pc:docMk"));
     const mark = marks.appendChild(list.createElementNS(PC, "pc:sldMk"));
@@ -153,7 +150,7 @@ export function editSlideComment(doc: PptxDocument, slide: string, id: string, t
   const list = part ? doc.xml(part) : null;
   const el = list && [...Array.from(list.getElementsByTagNameNS(P188, "cm")), ...Array.from(list.getElementsByTagNameNS(P188, "reply"))].find((c) => c.getAttribute("id") === id);
   if (!list || !el) return;
-  kid(el, P188, "txBody")?.replaceWith(body(list, text));
+  kid(el, "txBody", P188)?.replaceWith(body(list, text));
   doc.touch(part!);
 }
 

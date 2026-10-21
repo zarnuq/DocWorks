@@ -1,4 +1,4 @@
-import { Schema, Node as PMNode, DOMOutputSpec } from "prosemirror-model";
+import { Schema, DOMOutputSpec } from "prosemirror-model";
 import { fontStack } from "../../core/utils/fonts";
 import { Placement, placementCss, textBoxOf, Wrap } from "./drawing";
 import { mathSpec } from "./math";
@@ -390,8 +390,6 @@ export const docxSchema = new Schema({
     },
   },
 });
-
-export type DocxNode = PMNode;
 
 /** Size and offset of the whole image inside a cropped picture's `width` x `height` box (px). */
 export function cropBox(width: number, height: number, crop: NonNullable<ImageAttrs["crop"]>): { width: number; height: number; left: number; top: number } {

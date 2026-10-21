@@ -11,14 +11,14 @@ import { docxSchema as schema } from "./schema";
 import { latexToOmml } from "./math";
 import { escapeXml, NS } from "../../core/utils/xml";
 
-export interface HtmlImageAttrs {
+interface HtmlImageAttrs {
   rId: string;
   src: string;
   width: number;
   height: number;
   alt?: string;
 }
-export interface FromHtmlContext {
+interface FromHtmlContext {
   /** numId of a bullet or numbered list. */
   list(kind: "bullet" | "ordered" | "task"): string;
   /** Image node attributes for a picture in the note, or null to leave it out. */
@@ -204,7 +204,7 @@ export function htmlToDoc(root: HTMLElement, ctx: FromHtmlContext): PMNode {
 }
 
 /** Picture bytes and natural size for a note's image, or null to leave it out. */
-export type ImageSource = (img: HTMLImageElement) => { bytes: Uint8Array; ext: string; width: number; height: number } | null;
+type ImageSource = (img: HTMLImageElement) => { bytes: Uint8Array; ext: string; width: number; height: number } | null;
 
 export interface NoteExportOptions {
   pageSize: "letter" | "legal" | "a4" | "a5";

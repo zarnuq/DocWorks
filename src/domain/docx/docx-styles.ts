@@ -7,7 +7,7 @@ import { bordersOf, w, wVal } from "./docx-reader";
 import { attrsOf, ParagraphAttrs } from "./schema";
 
 /** Marker drawn before a list paragraph. */
-export interface ListMark {
+interface ListMark {
   text: string;
   indentPt: number;
   hangingPt: number;

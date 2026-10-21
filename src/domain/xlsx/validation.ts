@@ -11,6 +11,7 @@ import { translateFormula } from "./formula";
 import { Scalar } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
 import { Sheet } from "./workbook-model";
+import { escapeXml, kids } from "../../core/utils/xml";
 
 export interface Validation {
   el: Element;
@@ -37,7 +38,6 @@ export interface NewValidation {
 }
 
 const scalarText = (v: Scalar) => (typeof v === "object" && v !== null ? v.error : String(v));
-const kids = (el: Element | null | undefined, tag: string) => (el ? Array.from(el.children).filter((c) => c.localName === tag) : []);
 const on = (el: Element, attr: string) => ["1", "true"].includes(el.getAttribute(attr) ?? "");
 
 /** Split Excel's quoted item list: "a,b" with "" for a quote inside. */
@@ -162,7 +162,7 @@ export function checkValue(v: Validation, value: Scalar, sheet: Sheet, row: numb
 // -----------------------------------------------------------------------------
 
 /** `a` without the cells of `b`, as up to four rectangles. */
-export function subtract(a: Rect, b: Rect): Rect[] {
+function subtract(a: Rect, b: Rect): Rect[] {
   if (b.r1 > a.r2 || b.r2 < a.r1 || b.c1 > a.c2 || b.c2 < a.c1) return [a];
   const out: Rect[] = [];
   if (b.r1 > a.r1) out.push({ ...a, r2: b.r1 - 1 });
@@ -188,7 +188,6 @@ function clear(sheet: Sheet, ranges: Rect[]): void {
   else container.remove();
 }
 
-const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
 /** Set `rule` on `ranges` (replacing any rule there). */
 export function setValidation(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewValidation): void {
@@ -196,7 +195,7 @@ export function setValidation(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewV
   const formulas =
     rule.type === "list" ? [rule.items ? `"${rule.items.map((i) => i.replace(/"/g, '""')).join(",")}"` : rule.source ?? ""] : rule.formulas ?? [];
   const attrs = [`type="${rule.type}"`, `allowBlank="1"`, `showErrorMessage="1"`, rule.reject ? "" : `errorStyle="warning"`, rule.type === "decimal" ? `operator="${rule.operator ?? "between"}"` : "", `sqref="${ranges.map(rangeName).join(" ")}"`].filter(Boolean).join(" ");
-  const xml = `<dataValidation xmlns="${NS_S}" ${attrs}>${formulas.map((f, i) => `<formula${i + 1}>${escape(f)}</formula${i + 1}>`).join("")}</dataValidation>`;
+  const xml = `<dataValidation xmlns="${NS_S}" ${attrs}>${formulas.map((f, i) => `<formula${i + 1}>${escapeXml(f)}</formula${i + 1}>`).join("")}</dataValidation>`;
   e.structural(() => {
     clear(sheet, ranges);
     invalidateValidations(sheet);

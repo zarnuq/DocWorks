@@ -4,7 +4,7 @@
  * (ppaction://hlinkshowjump, no relationship). In the model a link is its address, "#slide:<slide part path>" or
  * "#jump:<nextslide|previousslide|firstslide|lastslide>", so moving slides around never breaks one.
  */
-import { NS, childNS } from "../../core/utils/xml";
+import { NS, kid } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 
 const SLIDE_JUMP = "ppaction://hlinksldjump";
@@ -43,14 +43,14 @@ export function setLinkAttrs(h: Element, attrs: { id: string; action?: string })
 /** The shape's p:cNvPr (sp, pic, graphicFrame, cxnSp, grpSp). */
 export function cNvPrOf(shape: Element): Element | null {
   const nv = Array.from(shape.children).find((c) => c.localName.startsWith("nv") && c.localName.endsWith("Pr"));
-  return nv ? childNS(nv, NS.p, "cNvPr") : null;
+  return nv ? kid(nv, "cNvPr", NS.p) : null;
 }
 
 /** Link a whole shape (null removes the link). */
 export function setShapeLink(doc: PptxDocument, part: string, shape: Element, link: string | null): void {
   const cNvPr = cNvPrOf(shape);
   if (!cNvPr) return;
-  childNS(cNvPr, NS.a, "hlinkClick")?.remove();
+  kid(cNvPr, "hlinkClick", NS.a)?.remove();
   if (link) {
     const h = cNvPr.ownerDocument.createElementNS(NS.a, "a:hlinkClick");
     setLinkAttrs(h, linkAttrs(doc, part, link));

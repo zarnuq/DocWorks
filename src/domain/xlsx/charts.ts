@@ -13,6 +13,7 @@ import { anchorBox, marker, placeAnchor } from "./drawing";
 import { cellName, colName, parseRange, quoteSheet, Rect } from "./references";
 import { child as sheetChild } from "./sheet-edit";
 import { Sheet, Workbook } from "./workbook-model";
+import { escapeXml } from "../../core/utils/xml";
 
 const XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -47,7 +48,7 @@ export function sheetCharts(wb: Workbook, sheet: Sheet): SheetChart[] {
 }
 
 /** Theme colours for charts (scheme slots plus the usual text / background mapping). */
-export function chartColors(wb: Workbook): ColorContext {
+function chartColors(wb: Workbook): ColorContext {
   return { scheme: wb.styles.theme, map: { tx1: "dk1", bg1: "lt1", tx2: "dk2", bg2: "lt2" } };
 }
 
@@ -105,7 +106,6 @@ export function chartSource(wb: Workbook, path: string): string {
   return `${quoteSheet(refs[0].sheet.name)}!${cellName(r1, c1)}:${cellName(r2, c2)}`;
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 const absolute = (sheet: Sheet, r1: number, c1: number, r2: number, c2: number) =>
   `${quoteSheet(sheet.name)}!$${colName(c1)}$${r1 + 1}${r1 === r2 && c1 === c2 ? "" : `:$${colName(c2)}$${r2 + 1}`}`;
 
@@ -141,8 +141,8 @@ function chartXml(sheet: Sheet, r: Rect): string {
     for (let row = x.r1; row <= x.r2; row++) for (let c = x.c1; c <= x.c2; c++) out.push([row, c]);
     return out;
   };
-  const f = (x: Ref) => `<c:f>${esc(absolute(sheet, x.r1, x.c1, x.r2, x.c2))}</c:f>`;
-  const strCache = (vals: string[]) => `<c:strCache><c:ptCount val="${vals.length}"/>${vals.map((v, i) => `<c:pt idx="${i}"><c:v>${esc(v)}</c:v></c:pt>`).join("")}</c:strCache>`;
+  const f = (x: Ref) => `<c:f>${escapeXml(absolute(sheet, x.r1, x.c1, x.r2, x.c2))}</c:f>`;
+  const strCache = (vals: string[]) => `<c:strCache><c:ptCount val="${vals.length}"/>${vals.map((v, i) => `<c:pt idx="${i}"><c:v>${escapeXml(v)}</c:v></c:pt>`).join("")}</c:strCache>`;
   const numCache = (vals: number[]) => `<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${vals.length}"/>${vals.map((v, i) => (Number.isFinite(v) ? `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>` : "")).join("")}</c:numCache>`;
   const text = (x: Ref) => cells(x).map(([row, c]) => sheet.display(row, c).text);
   const ser = series

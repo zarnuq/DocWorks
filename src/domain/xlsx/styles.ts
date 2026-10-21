@@ -10,7 +10,7 @@ import { builtinFormat } from "./number-format";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 /** Excel's cell feature mapping (checkboxes): an extension on a cellXfs record. */
 export const NS_FPB = "http://schemas.microsoft.com/office/spreadsheetml/2022/featurepropertybag";
-export const XF_COMPLEMENT = "{C7286773-470A-42A8-94C5-96B5CB345126}";
+const XF_COMPLEMENT = "{C7286773-470A-42A8-94C5-96B5CB345126}";
 
 // Legacy 64-color palette for indexed="n".
 const INDEXED = (
@@ -87,7 +87,7 @@ export interface DxfStyle {
 /** CT_Stylesheet child order. */
 const SHEET_ORDER = ["numFmts", "fonts", "fills", "borders", "cellStyleXfs", "cellXfs", "cellStyles", "dxfs", "tableStyles", "colors", "extLst"];
 
-export interface Xf {
+interface Xf {
   el: Element;
   numFmtId: number;
   fontId: number;

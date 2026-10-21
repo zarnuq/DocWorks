@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { NS, childNS } from "../../core/utils/xml";
+import { NS, kid } from "../../core/utils/xml";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { OoxmlPackage, parseXml, relsPathOf } from "../ooxml/ooxml-package";
 import { wVal } from "../../domain/docx/docx-reader";
@@ -90,7 +90,7 @@ function noteText(el: Element): string {
 function setNoteText(el: Element, text: string): void {
   const doc = el.ownerDocument;
   const first = el.getElementsByTagNameNS(NS.w, "p")[0];
-  const pPr = first && childNS(first, NS.w, "pPr");
+  const pPr = first && kid(first, "pPr", NS.w);
   const mark = first && Array.from(first.children).find((r) => r.localName === "r" && Array.from(r.children).some((c) => /^(annotationRef|footnoteRef|endnoteRef)$/.test(c.localName)));
   el.replaceChildren();
   text.split("\n").forEach((line, i) => {
@@ -576,7 +576,7 @@ export class DocxDocument extends OoxmlPackage {
   /** numFmt of a list level ("bullet", "decimal", ...), or null if undefined. */
   listFormat(numId: string, ilvl: number): string | null {
     const lvl = this.listLevel(numId, ilvl);
-    return lvl ? wVal(childNS(lvl, NS.w, "numFmt")) : null;
+    return lvl ? wVal(kid(lvl, "numFmt", NS.w)) : null;
   }
 
   listLevel(numId: string, ilvl: number): Element | null {
@@ -590,10 +590,10 @@ export class DocxDocument extends OoxmlPackage {
     const src = numbering && Array.from(numbering.getElementsByTagNameNS(NS.w, "num")).find((n) => wVal(n, "numId") === numId);
     if (!numbering || !src) return numId;
     const next = String(Array.from(numbering.getElementsByTagNameNS(NS.w, "num")).reduce((m, e) => Math.max(m, Number(wVal(e, "numId")) || 0), 0) + 1);
-    const abs = wVal(childNS(src, NS.w, "abstractNumId"), "val") ?? "0";
+    const abs = wVal(kid(src, "abstractNumId", NS.w), "val") ?? "0";
     const num = parseXml(`<w:num xmlns:w="${NS.w}" w:numId="${next}"><w:abstractNumId w:val="${abs}"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`)!.documentElement;
     const root = numbering.documentElement;
-    root.insertBefore(numbering.importNode(num, true), childNS(root, NS.w, "numIdMacAtCleanup"));
+    root.insertBefore(numbering.importNode(num, true), kid(root, "numIdMacAtCleanup", NS.w));
     return next;
   }
 
@@ -623,13 +623,13 @@ export class DocxDocument extends OoxmlPackage {
 
     // Schema order: all abstractNum elements precede all num elements.
     const abs = numbering.importNode(parseXml(abstractNumXml(absId, kind))!.documentElement, true);
-    root.insertBefore(abs, nums[0] ?? childNS(root, NS.w, "numIdMacAtCleanup"));
+    root.insertBefore(abs, nums[0] ?? kid(root, "numIdMacAtCleanup", NS.w));
     const num = numbering.createElementNS(NS.w, "w:num");
     num.setAttributeNS(NS.w, "w:numId", numId);
     const ref = numbering.createElementNS(NS.w, "w:abstractNumId");
     ref.setAttributeNS(NS.w, "w:val", String(absId));
     num.appendChild(ref);
-    root.insertBefore(num, childNS(root, NS.w, "numIdMacAtCleanup"));
+    root.insertBefore(num, kid(root, "numIdMacAtCleanup", NS.w));
     return numId;
   }
 }

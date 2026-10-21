@@ -4,7 +4,7 @@
  * the vault, and are pruned: 10 per file (1 for files over 25 MB), none older than the days set, 200 MB in all.
  */
 import type { App, TFile } from "obsidian";
-export interface VersionMeta {
+interface VersionMeta {
   id: number;
   path: string;
   time: number;
@@ -12,7 +12,7 @@ export interface VersionMeta {
 }
 
 /** Where versions are kept: metadata apart from bytes, so lists don't load files. */
-export interface VersionStore {
+interface VersionStore {
   all(): Promise<VersionMeta[]>;
   add(meta: Omit<VersionMeta, "id">, bytes: Uint8Array): Promise<void>;
   bytes(id: number): Promise<Uint8Array | null>;

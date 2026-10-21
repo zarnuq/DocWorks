@@ -4,7 +4,7 @@
  * The paragraph is written with the normal writer into a scratch body and its pPr / rPr merged into the w:style.
  */
 import { Node as PMNode } from "prosemirror-model";
-import { NS } from "../../core/utils/xml";
+import { NS, kids } from "../../core/utils/xml";
 import type { DocxDocument } from "../../infrastructure/docx/docx-document";
 import { ORDER, writeBody } from "./docx-writer";
 import { docxSchema as schema, ParagraphAttrs, attrsOf } from "./schema";
@@ -15,9 +15,8 @@ const STYLE_ORDER = ["name", "aliases", "basedOn", "next", "link", "autoRedefine
 const SKIP = new Set(["pStyle", "numPr", "rPr", "sectPr", "pPrChange"]);
 /** Elements whose attributes are merged rather than replaced (spacing before, keeping the style's line spacing). */
 const MERGE = new Set(["spacing", "ind", "rFonts"]);
-export const STYLE_MARKS = ["bold", "italic", "underline", "strike", "font", "size", "color"] as const;
+const STYLE_MARKS = ["bold", "italic", "underline", "strike", "font", "size", "color"] as const;
 
-const kids = (el: Element) => Array.from(el.children);
 
 function place(parent: Element, el: Element, order: string[]): void {
   const at = order.indexOf(el.localName);

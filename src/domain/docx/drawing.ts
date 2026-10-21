@@ -2,7 +2,7 @@
  * Where a picture or text box sits: in line with the text, or floating (wp:anchor) with text wrapping around it,
  * above and below it, or not at all (behind / in front of the text) - Word's and Google Docs' wrap options.
  */
-import { NS } from "../../core/utils/xml";
+import { NS, kid, EMU_PER_PX } from "../../core/utils/xml";
 import { wrapsBothSides } from "./wrap";
 
 export type Wrap = "inline" | "square" | "topBottom" | "behind" | "front";
@@ -22,9 +22,6 @@ export interface Placement {
 
 export const INLINE: Placement = { wrap: "inline", x: 0, y: 0, align: null };
 
-const EMU_PER_PX = 9525;
-const kid = (el: Element | null | undefined, ns: string, local: string) =>
-  (el ? Array.from(el.children).find((c) => c.namespaceURI === ns && c.localName === local) : undefined) ?? null;
 
 /** The wp:inline / wp:anchor of a w:drawing (or of the first one inside `el`). */
 function frameOf(el: Element): Element | null {
@@ -34,13 +31,13 @@ function frameOf(el: Element): Element | null {
 export function placementOf(drawing: Element | null): Placement {
   const frame = drawing && frameOf(drawing);
   if (!frame || frame.localName !== "anchor") return INLINE;
-  const has = (local: string) => !!kid(frame, NS.wp, local);
+  const has = (local: string) => !!kid(frame, local, NS.wp);
   const behind = frame.getAttribute("behindDoc") === "1";
   const wrap: Wrap = has("wrapSquare") || has("wrapTight") || has("wrapThrough") ? "square" : has("wrapTopAndBottom") ? "topBottom" : behind ? "behind" : "front";
-  const offset = (local: string) => Math.round(Number(kid(kid(frame, NS.wp, local), NS.wp, "posOffset")?.textContent ?? 0) / EMU_PER_PX);
-  const align = kid(kid(frame, NS.wp, "positionH"), NS.wp, "align")?.textContent?.trim();
-  const hRelative = kid(frame, NS.wp, "positionH")?.getAttribute("relativeFrom");
-  const vRelative = kid(frame, NS.wp, "positionV")?.getAttribute("relativeFrom");
+  const offset = (local: string) => Math.round(Number(kid(kid(frame, local, NS.wp), "posOffset", NS.wp)?.textContent ?? 0) / EMU_PER_PX);
+  const align = kid(kid(frame, "positionH", NS.wp), "align", NS.wp)?.textContent?.trim();
+  const hRelative = kid(frame, "positionH", NS.wp)?.getAttribute("relativeFrom");
+  const vRelative = kid(frame, "positionV", NS.wp)?.getAttribute("relativeFrom");
   const distances = Object.fromEntries(["top", "right", "bottom", "left"].map(side => [side, Number(frame.getAttribute(`dist${side[0].toUpperCase()}`) ?? 0) / EMU_PER_PX])) as NonNullable<Placement["distances"]>;
   return { wrap, x: offset("positionH"), y: offset("positionV"), align: align === "left" || align === "right" || align === "center" ? align : null,
     ...(hRelative && hRelative !== "column" ? { hRelative } : {}), ...(vRelative && vRelative !== "paragraph" ? { vRelative } : {}),
@@ -112,19 +109,19 @@ export function setPlacement(run: Element, p: Placement): void {
   const was = placementOf(run);
   if (frame.localName === "anchor" && p.wrap === was.wrap) {
     if (p.x !== was.x || p.align !== was.align || (p.hRelative ?? "column") !== (was.hRelative ?? "column")) {
-      const h = kid(frame, NS.wp, "positionH")!;
+      const h = kid(frame, "positionH", NS.wp)!;
       h.setAttribute("relativeFrom", p.hRelative ?? "column");
       h.replaceChildren(p.align ? el("align", {}, p.align) : el("posOffset", {}, String(Math.round(p.x * EMU_PER_PX))));
     }
     if (p.y !== was.y || (p.vRelative ?? "paragraph") !== (was.vRelative ?? "paragraph")) {
-      const v = kid(frame, NS.wp, "positionV")!;
+      const v = kid(frame, "positionV", NS.wp)!;
       v.setAttribute("relativeFrom", p.vRelative ?? "paragraph");
       v.replaceChildren(el("posOffset", {}, String(Math.round(p.y * EMU_PER_PX))));
     }
     if (p.distances) for (const [side, value] of Object.entries(p.distances)) frame.setAttribute(`dist${side[0].toUpperCase()}`, String(Math.round(value * EMU_PER_PX)));
     return;
   }
-  const keep = ["extent", "effectExtent", "docPr", "cNvGraphicFramePr"].map((l) => kid(frame, NS.wp, l)).filter(Boolean) as Element[];
+  const keep = ["extent", "effectExtent", "docPr", "cNvGraphicFramePr"].map((l) => kid(frame, l, NS.wp)).filter(Boolean) as Element[];
   const graphic = Array.from(frame.children).find((c) => c.localName === "graphic") ?? null;
   const [extent, ...rest] = keep;
   const effect = rest.find((e) => e.localName === "effectExtent") ?? null;
@@ -168,14 +165,14 @@ export function textBoxOf(xml: string): { paragraphs: string[]; width: number; h
   const content = root.getElementsByTagNameNS(NS.w, "txbxContent")[0];
   const frame = frameOf(root);
   if (!content || !frame) return null;
-  const extent = kid(frame, NS.wp, "extent");
+  const extent = kid(frame, "extent", NS.wp);
   const px = (attr: string) => Math.round(Number(extent?.getAttribute(attr) ?? 0) / EMU_PER_PX);
   const spPr = root.getElementsByTagNameNS("http://schemas.microsoft.com/office/word/2010/wordprocessingShape", "spPr")[0];
   const color = (el: Element | null | undefined) => {
     const v = el?.getElementsByTagNameNS(NS.a, "srgbClr")[0]?.getAttribute("val");
     return v && /^[0-9a-f]{6}$/i.test(v) ? `#${v}` : null;
   };
-  const ln = spPr && kid(spPr, NS.a, "ln");
+  const ln = spPr && kid(spPr, "ln", NS.a);
   return {
     paragraphs: Array.from(content.children)
       .filter((c) => c.localName === "p")
@@ -183,8 +180,8 @@ export function textBoxOf(xml: string): { paragraphs: string[]; width: number; h
     width: px("cx"),
     height: px("cy"),
     placement: placementOf(frame.parentElement ?? frame),
-    fill: color(spPr && kid(spPr, NS.a, "solidFill")),
-    line: ln && !kid(ln, NS.a, "noFill") ? color(kid(ln, NS.a, "solidFill")) : null,
+    fill: color(spPr && kid(spPr, "solidFill", NS.a)),
+    line: ln && !kid(ln, "noFill", NS.a) ? color(kid(ln, "solidFill", NS.a)) : null,
   };
 }
 

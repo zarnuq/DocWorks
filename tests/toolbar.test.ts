@@ -44,19 +44,6 @@ describe("menu row", () => {
     expect(titles(parent.items[0].submenu!)).toEqual(["Page break"]);
   });
 
-  it("falls back to a ▸ item that opens a second menu when Obsidian has no submenus", () => {
-    Menu.noSubmenus = true;
-    try {
-      const tb = new Toolbar(document.body.createDiv().createDiv());
-      tb.menu("Insert", (m) => subMenu(m, "Break", (s) => menuItem(s, "Page break", () => {}))).click();
-      const parent = Menu.last!;
-      expect(titles(parent)).toEqual(["Break ▸"]);
-      parent.items[0].run!(new MouseEvent("click"));
-      expect(titles(Menu.last)).toEqual(["Page break"]);
-    } finally {
-      Menu.noSubmenus = false;
-    }
-  });
 });
 
 function bar(groups = 4) {
