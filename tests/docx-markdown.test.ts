@@ -100,6 +100,13 @@ describe("DOCX to Markdown", () => {
     expect((await docxToMarkdown(docx, "images")).markdown).toBe("````\nconst a = `x`;\n```\n````\n");
   });
 
+  it("turns a highlighted code box back into a plain fenced block with its language", async () => {
+    const root = createDiv();
+    root.innerHTML = '<pre class="language-js"><code class="language-js"><span class="token keyword">const</span> a <span class="token operator">=</span> <span class="token string">"*x*"</span>;\n</code></pre>';
+    const docx = await DocxDocument.load(await noteToDocx(await blankDocx(), root, () => null));
+    expect((await docxToMarkdown(docx, "images")).markdown).toBe('```js\nconst a = "*x*";\n```\n');
+  });
+
   it("extracts referenced images once, with safe relative links and alt text", async () => {
     const docx = await DocxDocument.load(await blankDocx());
     const bytes = new Uint8Array([1, 2, 3]);

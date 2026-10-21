@@ -29,6 +29,27 @@ interface FromHtmlContext {
 const BOX_FONT = "Segoe UI Symbol";
 const CODE_FILL = "#F1F3F4";
 const CODE_FONT = "Consolas", INLINE_CODE_FONT = "Courier New", CODE_PT = 10;
+/** Prism token classes (as Obsidian highlights code) in a fixed light palette: readable on the code box and in print, whatever the app's theme. */
+const TOKEN_COLORS: Record<string, string> = {};
+for (const [color, names] of [
+  ["#6E7781", "comment prolog doctype cdata"],
+  ["#57606A", "punctuation"],
+  ["#CF222E", "keyword atrule operator important deleted"],
+  ["#0A3069", "string char attr-value regex url inserted"],
+  ["#0550AE", "number boolean constant property attr-name symbol variable"],
+  ["#8250DF", "function class-name"],
+  ["#116329", "tag selector"],
+  ["#953800", "builtin namespace"],
+]) for (const name of names.split(" ")) TOKEN_COLORS[name] = color;
+
+/** The colour of the innermost known token around `node` inside `code`. */
+function tokenColor(node: Node, code: Element): string | null {
+  for (let el = node.parentElement; el && el !== code; el = el.parentElement) {
+    if (!el.classList.contains("token")) continue;
+    for (const name of Array.from(el.classList)) if (TOKEN_COLORS[name]) return TOKEN_COLORS[name];
+  }
+  return null;
+}
 const BLOCKS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "BLOCKQUOTE", "PRE", "TABLE", "HR", "DIV", "SECTION", "LI", "FIGURE", "DETAILS"]);
 
 function equation(el: HTMLElement): PMNode | null {
@@ -162,8 +183,20 @@ export function htmlToDoc(root: HTMLElement, ctx: FromHtmlContext): PMNode {
       }
     } else if (tag === "PRE") {
       const marks = [schema.marks.font.create({ font: CODE_FONT }), schema.marks.size.create({ pt: CODE_PT }), schema.marks.noProof.create()];
-      const lines = (el.querySelector("code") ?? el).textContent.replace(/\n$/, "").split("\n");
-      const paras = lines.map((line) => schema.nodes.paragraph.create({ spaceBefore: 0, spaceAfter: 0 }, line ? schema.text(line, marks) : []));
+      const code = el.querySelector("code") ?? el;
+      // One paragraph per line; highlighted tokens keep their colour across line breaks.
+      const lines: PMNode[][] = [[]];
+      const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        const color = tokenColor(text, code);
+        const runMarks = color ? schema.marks.color.create({ color }).addToSet(marks) : marks;
+        (text.textContent ?? "").split("\n").forEach((part, i) => {
+          if (i) lines.push([]);
+          if (part) lines[lines.length - 1].push(schema.text(part, runMarks));
+        });
+      }
+      if (lines.length > 1 && !lines[lines.length - 1].length) lines.pop();
+      const paras = lines.map((line) => schema.nodes.paragraph.create({ spaceBefore: 0, spaceAfter: 0 }, line));
       const table = schema.nodes.table.create({ borders: "outer" }, schema.nodes.table_row.create(null, schema.nodes.table_cell.create({ background: CODE_FILL }, paras)));
       const language = /(?:^|\s)language-([^\s]+)/.exec(`${el.querySelector("code")?.className ?? ""} ${el.className}`)?.[1];
       into.push(language ? control(`doc-works:code:${language}`, [table]) : table);

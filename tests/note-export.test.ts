@@ -92,6 +92,24 @@ describe("note export to .docx", () => {
     expect([done.textContent, todo.textContent]).toEqual(["☑ done", "☐ todo"]);
   });
 
+  it("colours highlighted code tokens with a fixed light palette, the innermost token winning", async () => {
+    const root = html(`<pre class="language-html"><code class="language-html"><span class="token keyword">let</span> a <span class="token operator">=</span> <span class="token number">1</span>;\n<span class="token comment">// two\nlines</span>\n<span class="token tag"><span class="token attr-value"><span class="token punctuation">"</span>v<span class="token unknown">w</span></span></span>\n</code></pre>`);
+    const cell = htmlToDoc(root, ctx).child(0).child(0).firstChild!.firstChild!;
+    const runs = (i: number) => {
+      const out: [string, string | null][] = [];
+      cell.child(i).forEach((n) => out.push([n.text!, (n.marks.find((m) => m.type === schema.marks.color)?.attrs.color as string) ?? null]));
+      return out;
+    };
+    expect(cell.childCount).toBe(4);
+    expect(runs(0)).toEqual([["let", "#CF222E"], [" a ", null], ["=", "#CF222E"], [" ", null], ["1", "#0550AE"], [";", null]]);
+    expect(runs(1)).toEqual([["// two", "#6E7781"]]);
+    expect(runs(2)).toEqual([["lines", "#6E7781"]]);
+    expect(runs(3)).toEqual([['"', "#57606A"], ["vw", "#0A3069"]]);
+    expect(cell.child(0).firstChild!.marks.some((m) => m.type === schema.marks.font)).toBe(true);
+    const docx = await DocxDocument.load(await noteToDocx(await blankDocx(), root, () => null));
+    expect(new XMLSerializer().serializeToString(docx.body)).toContain('w:color w:val="CF222E"');
+  });
+
   it("puts code blocks in a shaded one-cell box, one paragraph per line, and tables in bordered tables", () => {
     const doc = htmlToDoc(html(`<pre><code>let a = 1;\nlet b = 2;\n</code></pre><table><thead><tr><th>H</th><th>I</th></tr></thead><tbody><tr><td>1</td><td><strong>2</strong></td></tr></tbody></table>`), ctx);
     const [code, table] = [doc.child(0), doc.child(1)];
