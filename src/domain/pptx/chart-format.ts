@@ -3,7 +3,7 @@
  * titles, gridlines, ranges and series colours. Read from a c:chartSpace, and written back changing only what
  * differs, so formatting the editor doesn't model is kept.
  */
-import { NS } from "../../core/utils/xml";
+import { NS, insertInOrder, parseElement } from "../../core/utils/xml";
 import { ColorContext, hex, resolveColor } from "./color";
 
 const C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
@@ -68,7 +68,7 @@ function make(doc: Document, name: string, attrs: Record<string, string | number
   return e;
 }
 function parse(doc: Document, xml: string): Element {
-  const root = new DOMParser().parseFromString(`<r xmlns:c="${C}" xmlns:a="${NS.a}">${xml}</r>`, "application/xml").documentElement;
+  const root = parseElement(`<r xmlns:c="${C}" xmlns:a="${NS.a}">${xml}</r>`);
   return doc.importNode<Element>(root.firstElementChild!, true);
 }
 
@@ -79,16 +79,10 @@ const AX_ORDER = ["axId", "scaling", "delete", "axPos", "majorGridlines", "minor
 const SCALING_ORDER = ["logBase", "orientation", "max", "min", "extLst"];
 const LEGEND_ORDER = ["legendPos", "legendEntry", "layout", "overlay", "spPr", "txPr", "extLst"];
 
-/** Insert `child` in `parent` in schema `order`, after any elements of its own name. */
-function insert(parent: Element, child: Element, order: string[]): Element {
-  const at = order.indexOf(child.localName);
-  const before = Array.from(parent.children).find((c) => order.indexOf(c.localName) > at) ?? null;
-  return parent.insertBefore(child, before);
-}
 /** Put `child` in `parent` in schema `order`, replacing an element of the same name. */
 function place(parent: Element, child: Element, order: string[]): Element {
   const old = kid(parent, child.localName, child.namespaceURI ?? C);
-  if (!old) return insert(parent, child, order);
+  if (!old) return insertInOrder(parent, child, order);
   old.replaceWith(child);
   return child;
 }
@@ -466,7 +460,7 @@ export function setChartFormat(xml: Document, next: ChartFormat, ctx: ColorConte
         point = parse(doc, `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr/></c:dPt>`);
         const after = kids(ser, "dPt").find((d) => Number(val(kid(d, "idx"))) > i);
         if (after) ser.insertBefore(point, after);
-        else insert(ser, point, SER_ORDER);
+        else insertInOrder(ser, point, SER_ORDER);
       }
       const spPr = kid(point, "spPr") ?? point.appendChild(make(doc, "spPr"));
       setFill(spPr, color, false);
@@ -484,7 +478,7 @@ function moveSeries(ser: Element, into: Element): void {
   const order = num(kid(ser, "order")) ?? 0;
   const after = kids(into, "ser").find((s) => s !== ser && (num(kid(s, "order")) ?? 0) > order);
   if (after) into.insertBefore(ser, after);
-  else insert(into, ser, TYPE_ORDER);
+  else insertInOrder(into, ser, TYPE_ORDER);
 }
 
 /** Make the plot a combo: a column part and a line part on the same axes, each series where `kinds` says. */

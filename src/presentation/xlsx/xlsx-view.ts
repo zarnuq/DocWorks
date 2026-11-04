@@ -187,9 +187,7 @@ export class XlsxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    addFileItems(this, menu, source);
-    if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(this.app, this, this.settings.readOnly)));
-    menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
+    addFileItems(this, menu, source, this.settings.readOnly, () => void this.exportAs());
     if (!this.settings.readOnly) menu.addItem((i) => i.setTitle(IMPORT).setIcon("file-input").setSection("action").onClick(() => this.pickCsv()));
   }
 

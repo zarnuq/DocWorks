@@ -1,5 +1,5 @@
 import type { DOMOutputSpec } from "prosemirror-model";
-import { escapeXml } from "../../core/utils/xml";
+import { escapeXml, parseElement } from "../../core/utils/xml";
 
 /**
  * Office Math (OMML) equations: drawn as MathML (which the browser lays out: stacked fractions, limits, roots,
@@ -56,7 +56,6 @@ const val = (el: Element | null | undefined, pr: string, local: string): string 
   return v ? (v.getAttributeNS(M, "val") ?? v.getAttribute("m:val") ?? "") : null;
 };
 const on = (v: string | null) => v !== null && v !== "0" && v !== "off" && v !== "false";
-const parse = (xml: string) => new DOMParser().parseFromString(xml, "application/xml").documentElement;
 /** Plain text runs: m:nor, or m:sty plain. */
 const isText = (r: Element) => !!kid(kid(r, "rPr"), "nor") || val(r, "rPr", "sty") === "p";
 
@@ -65,7 +64,7 @@ const isText = (r: Element) => !!kid(kid(r, "rPr"), "nor") || val(r, "rPr", "sty
 type Spec = DOMOutputSpec;
 
 export function mathSpec(xml: string): DOMOutputSpec {
-  const root = parse(xml);
+  const root = parseElement(xml);
   const display = root.localName === "oMathPara";
   const maths = display ? kids(root, "oMath") : [root];
   return ["span", { class: display ? "docx-math is-display" : "docx-math" }, ...maths.map((m): Spec => [`${MML} math`, display ? { display: "block" } : {}, ...mml(m)])];
@@ -163,7 +162,7 @@ function mml(el: Element | null, upright = false): Spec[] {
 
 /** An equation as LaTeX; a display equation's lines are joined with \\. */
 export function ommlToLatex(xml: string): string {
-  const root = parse(xml);
+  const root = parseElement(xml);
   return root.localName === "oMathPara" ? kids(root, "oMath").map((m) => tex(m)).join("\\\\") : tex(root);
 }
 

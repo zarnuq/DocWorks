@@ -1,5 +1,7 @@
 import { SaveStatus } from "./save-status";
 import { rovingToolbar } from "./keyboard";
+import { versions } from "./version-history";
+import { versionHistoryDialog, type VersionedView } from "./version-dialog";
 import { App, FileView, Menu, MenuItem, Modal, setIcon, Setting, Modifier, Scope } from "obsidian";
 
 export const FONTS = ["Aptos", "Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Verdana", "Segoe UI", "Trebuchet MS", "Courier New"];
@@ -462,7 +464,9 @@ export function shieldEditingKeys(scope: Scope, keys: [Modifier[], string][] = E
  * The file items Obsidian puts in its own editors' ⋮ menu (rename, delete, and what core and other plugins add on
  * "file-menu": move, bookmark, copy path, open in default app…), which a plain FileView doesn't get.
  */
-export function addFileItems(view: FileView, menu: Menu, source: string): void {
+export function addFileItems(view: FileView & VersionedView, menu: Menu, source: string, readOnly: boolean, exportAs: (() => void) | null): void {
+  if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(view.app, view, readOnly)));
+  if (exportAs) menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(exportAs));
   const file = view.file;
   if (!file) return;
   const files = view.app.fileManager as { promptForFileRename?: (f: typeof file) => Promise<void> } & typeof view.app.fileManager;

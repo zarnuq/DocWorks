@@ -3,7 +3,7 @@
  * does: a VML shape (PowerPlusWaterMarkObject text path / WordPictureWatermark picture), centred on the margins,
  * in a run of the first paragraph of every header, so Word, LibreOffice and Google Docs show it too.
  */
-import { NS } from "../../core/utils/xml";
+import { NS, parseElement } from "../../core/utils/xml";
 import type { DocxDocument } from "../../infrastructure/docx/docx-document";
 
 export const VML = "urn:schemas-microsoft-com:vml";
@@ -137,7 +137,7 @@ export function setWatermark(docx: DocxDocument, wm: Watermark | null): void {
     let p = Array.from(hdr.children).find((c) => c.localName === "p" && c.namespaceURI === NS.w);
     if (!p) p = hdr.insertBefore(hdr.ownerDocument.createElementNS(NS.w, "w:p"), hdr.firstChild);
     const rId = image ? docx.imageRel(path, image) : "";
-    const run = hdr.ownerDocument.importNode(new DOMParser().parseFromString(runXml(wm, k + 1, rId), "application/xml").documentElement, true);
+    const run = hdr.ownerDocument.importNode(parseElement(runXml(wm, k + 1, rId)), true);
     const pPr = Array.from(p.children).find((c) => c.localName === "pPr");
     p.insertBefore(run, pPr ? pPr.nextSibling : p.firstChild);
     docx.touch(path);

@@ -303,9 +303,7 @@ export class PptxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    addFileItems(this, menu, source);
-    if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(this.app, this, this.settings.readOnly)));
-    if (canExportPdf()) menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
+    addFileItems(this, menu, source, this.settings.readOnly, canExportPdf() ? () => void this.exportAs() : null);
   }
 
   getViewType(): string {

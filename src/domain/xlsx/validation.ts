@@ -11,7 +11,7 @@ import { translateFormula } from "./formula";
 import { Scalar } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
 import { Sheet } from "./workbook-model";
-import { escapeXml, kids } from "../../core/utils/xml";
+import { escapeXml, kids, parseElement } from "../../core/utils/xml";
 
 export interface Validation {
   el: Element;
@@ -206,7 +206,7 @@ export function setValidation(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewV
       const AFTER = ["hyperlinks", "printOptions", "pageMargins", "pageSetup", "headerFooter", "rowBreaks", "colBreaks", "customProperties", "cellWatches", "ignoredErrors", "smartTags", "drawing", "legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst"];
       root.insertBefore(container, Array.from(root.children).find((c) => AFTER.includes(c.localName)) ?? null);
     }
-    container.appendChild(sheet.doc.importNode(new DOMParser().parseFromString(xml, "application/xml").documentElement, true));
+    container.appendChild(sheet.doc.importNode(parseElement(xml), true));
     container.setAttribute("count", String(kids(container, "dataValidation").length));
     sheet.wb.pkg.touch(sheet.ref.path);
   });

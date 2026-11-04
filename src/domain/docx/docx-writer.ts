@@ -1,5 +1,5 @@
 import { Mark, Node as PMNode } from "prosemirror-model";
-import { NS, escapeXml, EMU_PER_PX } from "../../core/utils/xml";
+import { NS, escapeXml, EMU_PER_PX, insertInOrder, parseElement } from "../../core/utils/xml";
 import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, TableAttrs, TableBorders, XmlAttrs } from "./schema";
 import { placementAttrs, placementOf, setPlacement } from "./drawing";
 import { bordersOf, cropOf, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
@@ -31,7 +31,6 @@ export const ORDER: Record<string, string[]> = {
 const HIGHLIGHT_NAMES = Object.fromEntries(Object.entries(HIGHLIGHTS).map(([name, hex]) => [hex, name]));
 const MODELED_MARKS = ["bold", "italic", "noProof", "underline", "strike", "subscript", "superscript", "font", "size", "color", "highlight"] as const;
 
-const parse = (xml: string) => new DOMParser().parseFromString(xml, "application/xml").documentElement;
 
 class Writer {
   private used = new Set<string>();
@@ -57,19 +56,14 @@ class Writer {
   }
 
   private import(xml: string): Element {
-    return this.owner.importNode(parse(xml), true);
+    return this.owner.importNode(parseElement(xml), true);
   }
 
   /** The child `local` of `parent`, created at its schema position if missing. */
   private upsert(parent: Element, local: string): Element {
     const existing = w(parent, local);
     if (existing) return existing;
-    const order = ORDER[parent.localName] ?? [];
-    const rank = order.indexOf(local);
-    const child = this.el(local);
-    const before = Array.from(parent.children).find((c) => order.indexOf(c.localName) > rank) ?? null;
-    parent.insertBefore(child, before);
-    return child;
+    return insertInOrder(parent, this.el(local), ORDER[parent.localName] ?? []);
   }
 
   private drop(parent: Element, ...locals: string[]): void {
@@ -451,7 +445,7 @@ class Writer {
     const source = marks.find((m) => m.type === schema.marks.rpr);
     const sourceXml = source ? attrsOf<{ xml: string }>(source).xml : null;
     const rPr = sourceXml ? this.import(sourceXml) : this.el("rPr");
-    const was = runMarks(sourceXml ? parse(sourceXml) : null);
+    const was = runMarks(sourceXml ? parseElement(sourceXml) : null);
 
     for (const name of MODELED_MARKS) {
       const type = schema.marks[name];
@@ -597,7 +591,7 @@ export function writeBody(body: Element, doc: PMNode, origins: Origins, ctx: Wri
   let finalSectPr = body.lastElementChild?.localName === "sectPr" ? body.lastElementChild : null;
   const sectPr = doc.attrs.sectPr as string | null;
   if (sectPr && (!finalSectPr || new XMLSerializer().serializeToString(finalSectPr) !== sectPr)) {
-    finalSectPr = body.ownerDocument.importNode(new DOMParser().parseFromString(sectPr, "application/xml").documentElement, true);
+    finalSectPr = body.ownerDocument.importNode(parseElement(sectPr), true);
   }
   const writer = new Writer(body.ownerDocument, origins, ctx, doc);
   const blocks = writer.blocks(doc);

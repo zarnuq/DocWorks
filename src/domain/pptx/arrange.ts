@@ -3,7 +3,7 @@
  * grouping, align / distribute, snapping, and copy / paste between slides and
  * presentations.
  */
-import { NS, kid } from "../../core/utils/xml";
+import { NS, kid, parseElement } from "../../core/utils/xml";
 import type { ResourceBundle } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import type { Rect } from "./geometry";
@@ -63,7 +63,7 @@ export function groupItems(slide: Document, items: Element[], rects = items.map(
     `<p:grpSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGrpSpPr><p:cNvPr id="${id}" name="Group ${id}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
     `<p:grpSpPr><a:xfrm><a:off x="${b.x}" y="${b.y}"/><a:ext cx="${b.w}" cy="${b.h}"/>` +
     `<a:chOff x="${b.x}" y="${b.y}"/><a:chExt cx="${b.w}" cy="${b.h}"/></a:xfrm></p:grpSpPr></p:grpSp>`;
-  const group = slide.importNode(new DOMParser().parseFromString(xml, "application/xml").documentElement, true);
+  const group = slide.importNode(parseElement(xml), true);
   tree.insertBefore(group, sorted[sorted.length - 1].el.nextSibling);
   for (const { el, r } of sorted) {
     group.appendChild(el);
@@ -245,7 +245,7 @@ export function pasteItems(doc: PptxDocument, slidePath: string, clip: Clip, off
   };
 
   for (const xml of clip.items) {
-    const item = slide.importNode(new DOMParser().parseFromString(xml, "application/xml").documentElement, true);
+    const item = slide.importNode(parseElement(xml), true);
     const frames = item.localName === "graphicFrame" ? [item] : Array.from(item.getElementsByTagNameNS(NS.p, "graphicFrame"));
     const unsupported = frames.some((f) => !f.getElementsByTagNameNS(NS.a, "tbl").length && !relAttrs(f).length);
     const refs = relAttrs(item);

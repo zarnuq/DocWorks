@@ -1,5 +1,6 @@
 /** Page geometry and the editor's page layout (an estimate of Word's: breaks fall between lines and inside table rows). */
 import type { Node as PMNode } from "prosemirror-model";
+import { parseElement } from "../../core/utils/xml";
 
 const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
@@ -47,7 +48,7 @@ export function sectionSetups(doc: PMNode, final: PageSetup, size: PageSize = "d
   const setupOf = (sectPr: string) => {
     let st = cache.get(sectPr);
     if (!st) {
-      const body = new DOMParser().parseFromString(`<body>${sectPr}</body>`, "application/xml").documentElement;
+      const body = parseElement(`<body>${sectPr}</body>`);
       cache.set(sectPr, (st = pageSetup(body)));
     }
     return st;

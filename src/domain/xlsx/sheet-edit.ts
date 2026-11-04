@@ -4,6 +4,7 @@ import { assertAction } from "./protection";
  * and columns rewrites every reference that can point at them (formulas on all sheets, names, merges, conditional
  * formats, validations, hyperlinks, filters, tables, drawing anchors and chart ranges) in one undo step.
  */
+import { insertInOrder } from "../../core/utils/xml";
 import { NS_S } from "../../infrastructure/xlsx/xlsx-workbook";
 import { parseXml } from "../../infrastructure/ooxml/ooxml-package";
 import { Change } from "./calculation";
@@ -30,11 +31,7 @@ export function child(sheet: Sheet, tag: string, create = false): Element | null
   const root = sheet.doc.documentElement;
   let el = sheet.first(root, tag);
   if (el || !create) return el;
-  el = sheet.doc.createElementNS(NS_S, tag);
-  const rank = WORKSHEET_ORDER.indexOf(tag);
-  const next = Array.from(root.children).find((c) => WORKSHEET_ORDER.indexOf(c.localName) > rank) ?? null;
-  root.insertBefore(el, next);
-  return el;
+  return insertInOrder(root, sheet.doc.createElementNS(NS_S, tag), WORKSHEET_ORDER);
 }
 
 const XM = "http://schemas.microsoft.com/office/excel/2006/main";

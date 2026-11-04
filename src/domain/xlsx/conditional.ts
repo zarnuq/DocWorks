@@ -12,7 +12,7 @@ import { dateToSerial, Scalar, serialToDate } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
 import { DxfStyle } from "./styles";
 import { Sheet } from "./workbook-model";
-import { escapeXml, kids } from "../../core/utils/xml";
+import { escapeXml, kids, parseElement } from "../../core/utils/xml";
 
 export interface CfStyle extends DxfStyle {
   /** A data bar: the part of the cell's width it fills. */
@@ -451,7 +451,7 @@ export function addRule(e: Edits, sheet: Sheet, ranges: Rect[], rule: NewRule): 
   }
   const xml = `<conditionalFormatting xmlns="${NS_S}" sqref="${ranges.map(rangeName).join(" ")}">${body}</conditionalFormatting>`;
   e.structural(() => {
-    const el = sheet.doc.importNode(new DOMParser().parseFromString(xml, "application/xml").documentElement, true);
+    const el = sheet.doc.importNode(parseElement(xml), true);
     const root = sheet.doc.documentElement;
     // After the last existing block, or where CT_Worksheet puts it (before data validations and what follows).
     const last = kids(root, "conditionalFormatting").pop();

@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { OoxmlPackage, parseXml } from "../ooxml/ooxml-package";
-import { escapeXml } from "../../core/utils/xml";
+import { escapeXml, insertInOrder } from "../../core/utils/xml";
 
 export const NS_S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -164,11 +164,7 @@ export class XlsxWorkbook extends OoxmlPackage {
     const root = doc.documentElement;
     const order = ["metadataTypes", "metadataStrings", "mdxMetadata", "futureMetadata", "cellMetadata", "valueMetadata", "extLst"];
     const child = (parent: Element, tag: string) => Array.from(parent.children).find(c => c.localName === tag);
-    const add = (tag: string) => {
-      const el = doc.createElementNS(NS_S,tag);
-      root.insertBefore(el,Array.from(root.children).find(c => order.indexOf(c.localName) > order.indexOf(tag)) ?? null);
-      return el;
-    };
+    const add = (tag: string) => insertInOrder(root, doc.createElementNS(NS_S, tag), order);
     const types = child(root,"metadataTypes") ?? add("metadataTypes");
     let type = Array.from(types.children).findIndex(t => t.getAttribute("name") === "XLDAPR");
     if (type < 0) {

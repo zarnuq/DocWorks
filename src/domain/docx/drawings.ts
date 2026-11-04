@@ -1,9 +1,8 @@
 /** Native Word shapes and groups. Edited properties are patched into each shape's original XML. */
-import { NS } from '../../core/utils/xml';
+import { NS, EMU_PER_PX, insertInOrder, kid } from '../../core/utils/xml';
 import { parseXml } from '../../infrastructure/ooxml/ooxml-package';
 import { Placement, placementOf, setPlacement } from './drawing';
 import { presetGeometry, customGeometry, Geometry } from '../pptx/geometry';
-import { EMU_PER_PX } from "../../core/utils/xml";
 
 const WPS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const WPG = 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup';
@@ -17,7 +16,7 @@ export interface WordDrawing {
   width: number; height: number; placement: Placement; shapes: DrawingShape[];
   xml: string; editable: boolean;
 }
-const first = (el: Element | undefined | null, ns: string, tag: string) => Array.from(el?.children ?? []).find(c => c.namespaceURI === ns && c.localName === tag);
+const first = (el: Element | undefined | null, ns: string, tag: string) => kid(el, tag, ns) ?? undefined;
 const serialize = (el: Element) => new XMLSerializer().serializeToString(el);
 const px = (el: Element | undefined, attr: string, fallback = 0) => el?.hasAttribute(attr) ? Number(el.getAttribute(attr)) / EMU_PER_PX : fallback;
 const color = (el: Element | undefined) => {
@@ -73,7 +72,7 @@ function shapeXml(shape: DrawingShape, index: number): string {
   };
   const props = first(root, WPS, 'spPr')!;
   const order = ['xfrm','prstGeom','custGeom','noFill','solidFill','gradFill','blipFill','pattFill','grpFill','ln','effectLst','effectDag','scene3d','sp3d','extLst'];
-  const put = (el: Element) => props.insertBefore(el, Array.from(props.children).find(c => order.indexOf(c.localName) > order.indexOf(el.localName)) ?? null);
+  const put = (el: Element) => insertInOrder(props, el, order);
   let transform = first(props, NS.a, 'xfrm');
   if (!transform) transform = put(make(NS.a, 'xfrm'));
   for (const [tag,attrs] of [['off',{x:shape.x,y:shape.y}],['ext',{cx:shape.w,cy:shape.h}]] as const) {
@@ -129,7 +128,7 @@ export function writeDrawing(drawing: WordDrawing, docPrId: number): string {
   const parent=group ?? graphic;
   for (const el of Array.from(parent.children)) if (el.namespaceURI === WPS && el.localName === 'wsp') el.remove();
   let nextId = Math.max(0, ...drawing.shapes.filter(s=>s.xml).map(s=>Number(s.id)||0)) + 1;
-  drawing.shapes.forEach(shape => parent.insertBefore(doc.importNode(parseXml(shapeXml(shape,shape.xml ? Number(shape.id) : nextId++))!.documentElement,true),Array.from(parent.children).find(c=>c.localName==='extLst') ?? null));
+  drawing.shapes.forEach(shape => parent.insertBefore(doc.importNode(parseXml(shapeXml(shape,shape.xml ? Number(shape.id) : nextId++))!.documentElement,true),kid(parent, "extLst")));
   const extent=doc.getElementsByTagNameNS(NS.wp,'extent')[0];extent.setAttribute('cx',String(cx));extent.setAttribute('cy',String(cy));
   if(group) for(const tag of ['ext','chExt']) {const ext=first(first(first(group,WPG,'grpSpPr'),NS.a,'xfrm'),NS.a,tag);ext?.setAttribute('cx',String(cx));ext?.setAttribute('cy',String(cy));}
   setPlacement(doc.documentElement,drawing.placement);

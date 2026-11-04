@@ -1,5 +1,5 @@
 /** Minimal XML edits for the main slide animation sequence. Imported complex steps retain their behaviors. */
-import { NS } from "../../core/utils/xml";
+import { NS, kid } from "../../core/utils/xml";
 import { Effect, readAnimations } from "./animation";
 
 export const ANIMATION_TYPES = [
@@ -29,7 +29,7 @@ export interface AnimationEntry extends AnimationSettings {
   targetName: string;
 }
 
-const child = (el: Element | null, name: string) => Array.from(el?.children ?? []).find((e) => e.namespaceURI === NS.p && e.localName === name) ?? null;
+const child = (el: Element | null, name: string) => kid(el, name, NS.p);
 const mainOf = (doc: Document) => Array.from(doc.getElementsByTagNameNS(NS.p, "cTn")).find((e) => e.getAttribute("nodeType") === "mainSeq") ?? null;
 const defaults: AnimationSettings = { type: "fade-in", trigger: "click", dur: 500, delay: 0 };
 const validate = (s: AnimationSettings) => {

@@ -57,6 +57,7 @@ import { retainOrigins, suggestTransaction } from "../../domain/docx/suggestions
 import { DocxRuler, outlineEntries } from "./docx-ruler";
 
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+import { parseElement } from "../../core/utils/xml";
 export { DEFAULT_SETTINGS };
 export type { DocWorksSettings };
 
@@ -203,9 +204,7 @@ export class DocxView extends FileView {
 
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    addFileItems(this, menu, source);
-    if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(this.app, this, this.settings.readOnly)));
-    menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(() => void this.exportAs()));
+    addFileItems(this, menu, source, this.settings.readOnly, () => void this.exportAs());
   }
 
   /** File › Download, as Google Docs: PDF or Markdown, through the shared export dialog. */
@@ -511,7 +510,7 @@ export class DocxView extends FileView {
   applyPageSize(): void {
     if (!this.docx || !this.hostEl) return;
     const finalSectPr = this.editor?.state.doc.attrs.sectPr as string | null | undefined;
-    const body = finalSectPr ? new DOMParser().parseFromString(`<body>${finalSectPr}</body>`, "application/xml").documentElement : this.docx.body;
+    const body = finalSectPr ? parseElement(`<body>${finalSectPr}</body>`) : this.docx.body;
     const st = (this.finalSetup = pageSetup(body, this.settings.pageSize));
     // A section with its own page size (landscape pages): the editor is as wide as the widest page.
     const widest = this.editor ? Math.max(...sectionSetups(this.editor.state.doc, st, this.settings.pageSize).map((x) => x.width), st.width) : st.width;

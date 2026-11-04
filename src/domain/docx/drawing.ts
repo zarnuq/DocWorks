@@ -2,7 +2,7 @@
  * Where a picture or text box sits: in line with the text, or floating (wp:anchor) with text wrapping around it,
  * above and below it, or not at all (behind / in front of the text) - Word's and Google Docs' wrap options.
  */
-import { NS, kid, EMU_PER_PX } from "../../core/utils/xml";
+import { NS, kid, EMU_PER_PX, parseElement } from "../../core/utils/xml";
 import { wrapsBothSides } from "./wrap";
 
 export type Wrap = "inline" | "square" | "topBottom" | "behind" | "front";
@@ -161,7 +161,7 @@ export function setPlacement(run: Element, p: Placement): void {
 /** A text box (wps:txbx) in a w:drawing: its paragraphs' text, size, placement and fill / border colours. */
 export function textBoxOf(xml: string): { paragraphs: string[]; width: number; height: number; placement: Placement; fill: string | null; line: string | null } | null {
   if (!xml.includes("txbxContent")) return null;
-  const root = new DOMParser().parseFromString(xml, "application/xml").documentElement;
+  const root = parseElement(xml);
   const content = root.getElementsByTagNameNS(NS.w, "txbxContent")[0];
   const frame = frameOf(root);
   if (!content || !frame) return null;

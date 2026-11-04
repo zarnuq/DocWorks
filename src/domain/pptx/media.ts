@@ -1,4 +1,4 @@
-import { NS } from "../../core/utils/xml";
+import { NS, kid } from "../../core/utils/xml";
 import { parseXml } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { addPicture, shapeId } from "./slide-edit";
@@ -57,7 +57,7 @@ export function setMediaPlayback(slide: Document, shape: Element, patch: Partial
     let timing = slide.getElementsByTagNameNS(NS.p, "timing")[0];
     if (!timing) {
       timing = make("timing");
-      slide.documentElement.insertBefore(timing, Array.from(slide.documentElement.children).find(e => e.localName === "extLst") ?? null);
+      slide.documentElement.insertBefore(timing, kid(slide.documentElement, "extLst"));
     }
     let list = Array.from(timing.children).find(e => e.localName === "tnLst");
     if (!list) {

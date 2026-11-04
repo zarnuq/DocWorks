@@ -1,6 +1,6 @@
 /** Chart caches and their embedded workbook are edited together; unrelated chart formatting is retained. */
 import JSZip from "jszip";
-import { NS, escapeXml } from "../../core/utils/xml";
+import { NS, escapeXml, kid } from "../../core/utils/xml";
 import { parseXml, resolvePath } from "../../infrastructure/ooxml/ooxml-package";
 import type { OoxmlPackage } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
@@ -25,7 +25,7 @@ export interface ChartModel {
 }
 const elements = (e: Element | Document, name: string) => Array.from(e.getElementsByTagNameNS(CHART_NS, name));
 const first = (e: Element | Document, name: string) => elements(e, name)[0];
-const child = (e: Element, name: string) => Array.from(e.children).find(c => c.namespaceURI === CHART_NS && c.localName === name);
+const child = (e: Element, name: string) => kid(e, name, CHART_NS) ?? undefined;
 const points = (e?: Element) => e ? elements(e, "pt").sort((a, b) => Number(a.getAttribute("idx")) - Number(b.getAttribute("idx"))).map(p => first(p, "v")?.textContent ?? "") : [];
 /** Every series of the chart, in series order (a combo's sit in two chart-type elements). */
 const seriesOf = (xml: Document) => orderedSeries(Array.from(first(xml, "plotArea")?.children ?? []).filter((c) => c.namespaceURI === CHART_NS && c.localName.endsWith("Chart")));
@@ -87,7 +87,7 @@ export function addChart(doc: PptxDocument, slide: string, data: ChartData, type
   const { cx, cy } = doc.slideSize;
   const frame = xml.importNode(parseXml(`<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:c="${CHART_NS}" xmlns:r="${NS.r}"><p:nvGraphicFramePr><p:cNvPr id="${id}" name="Chart ${id}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="${Math.round(cx * .15)}" y="${Math.round(cy * .15)}"/><a:ext cx="${Math.round(cx * .7)}" cy="${Math.round(cy * .7)}"/></p:xfrm><a:graphic><a:graphicData uri="${CHART_NS}"><c:chart r:id="${chartRel}"/></a:graphicData></a:graphic></p:graphicFrame>`)!.documentElement, true);
   const tree = xml.getElementsByTagNameNS(NS.p, "spTree")[0];
-  tree.insertBefore(frame, Array.from(tree.children).find(e => e.localName === "extLst") ?? null);
+  tree.insertBefore(frame, kid(tree, "extLst"));
   return frame;
 }
 /** Apply values to the original referenced cells, retaining other sheets, styles and workbook parts. */

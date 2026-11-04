@@ -1,5 +1,5 @@
 import { setLinkAttrs } from "./links";
-import { NS, kid, escapeXml, kids } from "../../core/utils/xml";
+import { NS, kid, escapeXml, kids, parseElement } from "../../core/utils/xml";
 import { Para, Rect, Run, Spacing, TextBody, TextStyle, resolveLevel, runProps } from "./slide-model";
 import { fitTable } from "./table";
 
@@ -266,10 +266,7 @@ const xfrmXml = (r: Rect) =>
   `<a:xfrm><a:off x="${Math.round(r.x)}" y="${Math.round(r.y)}"/><a:ext cx="${Math.round(r.w)}" cy="${Math.round(r.h)}"/></a:xfrm>`;
 
 export function appendShape(doc: Document, xml: string): Element {
-  const frag = new DOMParser().parseFromString(
-    `<root xmlns:a="${NS.a}" xmlns:p="${NS.p}" xmlns:r="${NS.r}">${xml}</root>`,
-    "application/xml"
-  ).documentElement.firstElementChild!;
+  const frag = parseElement(`<root xmlns:a="${NS.a}" xmlns:p="${NS.p}" xmlns:r="${NS.r}">${xml}</root>`).firstElementChild!;
   const node = doc.importNode(frag, true);
   const tree = doc.getElementsByTagNameNS(NS.p, "spTree")[0];
   tree.insertBefore(node, kid(tree, "extLst", NS.p));

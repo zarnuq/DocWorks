@@ -4,7 +4,7 @@
  * The paragraph is written with the normal writer into a scratch body and its pPr / rPr merged into the w:style.
  */
 import { Node as PMNode } from "prosemirror-model";
-import { NS, kids } from "../../core/utils/xml";
+import { NS, insertInOrder, kids } from "../../core/utils/xml";
 import type { DocxDocument } from "../../infrastructure/docx/docx-document";
 import { ORDER, writeBody } from "./docx-writer";
 import { docxSchema as schema, ParagraphAttrs, attrsOf } from "./schema";
@@ -18,17 +18,11 @@ const MERGE = new Set(["spacing", "ind", "rFonts"]);
 const STYLE_MARKS = ["bold", "italic", "underline", "strike", "font", "size", "color"] as const;
 
 
-function place(parent: Element, el: Element, order: string[]): void {
-  const at = order.indexOf(el.localName);
-  const next = kids(parent).find((c) => order.indexOf(c.localName) > at) ?? null;
-  parent.insertBefore(el, next);
-}
-
 function own(parent: Element, local: string, order: string[]): Element {
   const found = kids(parent).find((c) => c.localName === local && c.namespaceURI === NS.w);
   if (found) return found;
   const el = parent.ownerDocument.createElementNS(NS.w, `w:${local}`);
-  place(parent, el, order);
+  insertInOrder(parent, el, order);
   return el;
 }
 
@@ -42,7 +36,7 @@ function merge(target: Element, from: Element, order: string[]): void {
       continue;
     }
     old?.remove();
-    place(target, el, order);
+    insertInOrder(target, el, order);
   }
 }
 

@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { NS, kid } from "../../core/utils/xml";
+import { NS, insertInOrder, kid } from "../../core/utils/xml";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { OoxmlPackage, parseXml, relsPathOf } from "../ooxml/ooxml-package";
 import { wVal } from "../../domain/docx/docx-reader";
@@ -315,9 +315,7 @@ export class DocxDocument extends OoxmlPackage {
     const sectPr = this.sectionAt(section, true)!;
     Array.from(sectPr.children).filter((c) => c.localName === "titlePg").forEach((c) => c.remove());
     if (!on) return;
-    const at = SECT_ORDER.indexOf("titlePg");
-    const before = Array.from(sectPr.children).find((c) => SECT_ORDER.indexOf(c.localName) > at) ?? null;
-    sectPr.insertBefore(this.document.createElementNS(NS.w, "w:titlePg"), before);
+    insertInOrder(sectPr, this.document.createElementNS(NS.w, "w:titlePg"), SECT_ORDER);
   }
 
   /** "Different odd & even" pages (w:evenAndOddHeaders in settings.xml). */
@@ -517,10 +515,7 @@ export class DocxDocument extends OoxmlPackage {
   ensureSetting(local: string, xml: string): void {
     const settings = this.partOf("settings");
     if (!settings || settings.getElementsByTagNameNS(NS.w, local).length) return;
-    const root = settings.documentElement;
-    const at = SETTINGS_ORDER.indexOf(local);
-    const before = Array.from(root.children).find((c) => SETTINGS_ORDER.indexOf(c.localName) > at) ?? null;
-    root.insertBefore(settings.importNode(parseXml(`<r xmlns:w="${NS.w}">${xml}</r>`)!.documentElement.firstElementChild!, true), before);
+    insertInOrder(settings.documentElement, settings.importNode(parseXml(`<r xmlns:w="${NS.w}">${xml}</r>`)!.documentElement.firstElementChild!, true), SETTINGS_ORDER);
   }
 
   hyperlinkRel(href: string): string {

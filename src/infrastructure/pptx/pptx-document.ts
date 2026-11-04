@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { NS, escapeXml } from "../../core/utils/xml";
+import { NS, escapeXml, kid } from "../../core/utils/xml";
 import { addTextBox, nextShapeId, setRect, writePlainParagraphs } from "../../domain/pptx/slide-edit";
 import { itemRect, setItemRect, xfrmOf } from "../../domain/pptx/arrange";
 import { parseSlide, plainText } from "../../domain/pptx/slide-model";
@@ -151,7 +151,7 @@ export class PptxDocument extends OoxmlPackage {
     const rId = this.addRel(slidePath, REL_COMMENTS, path);
     const slide = this.parts.get(slidePath)!;
     const root = slide.documentElement;
-    let extLst = Array.from(root.children).find((c) => c.localName === "extLst") ?? null;
+    let extLst = kid(root, "extLst");
     if (!extLst) extLst = root.appendChild(slide.createElementNS(NS.p, "p:extLst"));
     const ext = extLst.appendChild(slide.createElementNS(NS.p, "p:ext"));
     ext.setAttribute("uri", "{6950BFC3-D8DA-4A85-94F7-54DA5524770B}");

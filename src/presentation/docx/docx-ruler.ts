@@ -1,7 +1,7 @@
 import { Node as PMNode } from "prosemirror-model";
 import { EditorState, Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { NS } from "../../core/utils/xml";
+import { NS, parseElement } from "../../core/utils/xml";
 import { attrsOf, docxSchema as schema, HEADING_LEVEL, ParagraphAttrs } from "../../domain/docx/schema";
 import { DEFAULT_SECTPR } from "../../domain/docx/sections";
 import { pageSetup, PageSetup } from "../../domain/docx/pages";
@@ -31,13 +31,13 @@ export function rulerSection(state: EditorState): { pos: number | null; xml: str
     }
     return node.type !== schema.nodes.paragraph;
   });
-  const body = new DOMParser().parseFromString(`<w:body xmlns:w="${NS.w}">${section.xml}</w:body>`, "application/xml").documentElement;
+  const body = parseElement(`<w:body xmlns:w="${NS.w}">${section.xml}</w:body>`);
   return { ...section, setup: pageSetup(body) };
 }
 
 export function setRulerMargins(state: EditorState, dispatch: (tr: Transaction) => void, patch: Partial<Pick<PageSetup, "left" | "right">>): void {
   const section = rulerSection(state);
-  const root = new DOMParser().parseFromString(section.xml, "application/xml").documentElement;
+  const root = parseElement(section.xml);
   let margins = Array.from(root.children).find(el => el.localName === "pgMar");
   if (!margins) {
     margins = root.ownerDocument.createElementNS(NS.w, "w:pgMar");

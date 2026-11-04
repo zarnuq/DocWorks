@@ -3,7 +3,7 @@ import type { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import type { Edits } from "./commands";
 import { assertAction } from "./protection";
 import type { Sheet } from "./workbook-model";
-import { guid } from "../../core/utils/xml";
+import { guid, kid } from "../../core/utils/xml";
 
 const THREAD_NS = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
 interface CommentMessage { id: string; text: string; author: string; date: string; }
@@ -48,14 +48,14 @@ export function addComment(e: Edits, sheet: Sheet, ref: string, text: string, au
       person = people.createElementNS(THREAD_NS, "person");
       person.setAttribute("id", guid()); person.setAttribute("displayName", author);
       person.setAttribute("userId", person.getAttribute("id")!); person.setAttribute("providerId", "None");
-      people.documentElement.insertBefore(person, Array.from(people.documentElement.children).find(c => c.localName === "extLst") ?? null);
+      people.documentElement.insertBefore(person, kid(people.documentElement, "extLst"));
       pkg.touch(persons);
     }
     const message = doc.createElementNS(THREAD_NS, "threadedComment");
     for (const [k, v] of Object.entries({ id, ref, personId: person.getAttribute("id")!, dT: new Date().toISOString() })) message.setAttribute(k, v);
     if (parent) { message.setAttribute("parentId", parentId!); parent.removeAttribute("done"); }
     message.appendChild(doc.createElementNS(THREAD_NS, "text")).textContent = text;
-    doc.documentElement.insertBefore(message, Array.from(doc.documentElement.children).find(c => c.localName === "extLst") ?? null);
+    doc.documentElement.insertBefore(message, kid(doc.documentElement, "extLst"));
     pkg.touch(path);
   });
   return id;

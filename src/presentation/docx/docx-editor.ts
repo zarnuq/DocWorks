@@ -19,6 +19,7 @@ import { latexToOmml, ommlToLatex } from "../../domain/docx/math";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
 import { CellSelection, cellBefore, cellSelectionPlugin } from "./cell-selection";
+import { parseElement } from "../../core/utils/xml";
 
 export interface EditorContext {
   /** numId of the list definition used for new bullet / numbered lists. */
@@ -522,7 +523,7 @@ export const cmd = {
         return !!old;
       }
       const xml = latexToOmml(latex, /^<m:oMathPara/.test((old?.attrs.xml as string | undefined) ?? ""));
-      const text = new DOMParser().parseFromString(xml, "application/xml").documentElement.textContent ?? "";
+      const text = parseElement(xml).textContent ?? "";
       const node = schema.nodes.opaque.create({ xml, text }, null, old?.marks);
       if (dispatch) dispatch((old && pos !== null ? state.tr.replaceWith(pos, pos + old.nodeSize, node) : state.tr.replaceSelectionWith(node)).scrollIntoView());
       return true;

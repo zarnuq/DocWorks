@@ -7,7 +7,7 @@ import type { Edits } from "./commands";
 import { parseXml } from "../../infrastructure/ooxml/ooxml-package";
 import { assertAction } from "./protection";
 import { child as sheetChild } from "./sheet-edit";
-import { EMU_PER_PX } from "../../core/utils/xml";
+import { EMU_PER_PX, kid } from "../../core/utils/xml";
 
 const XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -26,7 +26,7 @@ export interface Picture {
   h: number;
 }
 
-const child = (el: Element, tag: string) => Array.from(el.children).find((c) => c.namespaceURI === XDR && c.localName === tag) ?? null;
+const child = (el: Element, tag: string) => kid(el, tag, XDR);
 const num = (el: Element | null, tag: string) => Number(el ? child(el, tag)?.textContent ?? 0 : 0);
 
 /** Sheet pixel position of a from / to marker. */

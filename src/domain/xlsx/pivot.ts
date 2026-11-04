@@ -10,7 +10,7 @@ import { compareValues } from "./formula-evaluator";
 import { Scalar } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
 import { Sheet } from "./workbook-model";
-import { escapeXml, kid, kids } from "../../core/utils/xml";
+import { escapeXml, insertInOrder, kid, kids, parseElement } from "../../core/utils/xml";
 
 export type PivotFn = "sum" | "count" | "average" | "max" | "min";
 interface PivotValue {
@@ -157,13 +157,12 @@ const S_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const TABLE_ORDER = ["location", "pivotFields", "rowFields", "rowItems", "colFields", "colItems", "pageFields", "dataFields", "formats", "conditionalFormats", "chartFormats", "pivotHierarchies", "pivotTableStyleInfo", "filters", "rowHierarchiesUsage", "colHierarchiesUsage", "extLst"];
 
 function element(doc: Document, xml: string): Element {
-  return doc.importNode(new DOMParser().parseFromString(xml.replace(/^<(\w+)/, `<$1 xmlns="${S_NS}"`), "application/xml").documentElement, true);
+  return doc.importNode(parseElement(xml.replace(/^<(\w+)/, `<$1 xmlns="${S_NS}"`)), true);
 }
 function place(parent: Element, el: Element): void {
   const old = kid(parent, el.localName);
   if (old) return void old.replaceWith(el);
-  const rank = TABLE_ORDER.indexOf(el.localName);
-  parent.insertBefore(el, Array.from(parent.children).find((c) => TABLE_ORDER.indexOf(c.localName) > rank) ?? null);
+  insertInOrder(parent, el, TABLE_ORDER);
 }
 
 const itemXml = (v: Scalar) => (blank(v) ? "<m/>" : typeof v === "number" ? `<n v="${v}"/>` : typeof v === "boolean" ? `<b v="${v ? 1 : 0}"/>` : `<s v="${escapeXml(String(label(v)))}"/>`);

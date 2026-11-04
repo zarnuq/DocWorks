@@ -2,7 +2,7 @@
  * Shape fill, outline and shadow: read from a:spPr with the p:style theme
  * references as fallback, convert to CSS, and write back in schema order.
  */
-import { NS, kid, kids } from "../../core/utils/xml";
+import { NS, insertInOrder, kid, kids } from "../../core/utils/xml";
 import { ColorContext, resolveColor } from "./color";
 
 interface GradientStop {
@@ -201,12 +201,7 @@ const EFFECT_ORDER = ["blur", "fillOverlay", "glow", "innerShdw", "outerShdw", "
 
 const slot = (el: Element) => (FILL_TAGS.has(el.localName) ? "fill" : el.localName);
 
-/** Insert `child` into `parent` before the first sibling that comes later in `order`. */
-function place(parent: Element, child: Element, order: string[]): Element {
-  const at = order.indexOf(slot(child));
-  const next = kids(parent).find((c) => order.indexOf(slot(c)) > at) ?? null;
-  return parent.insertBefore(child, next);
-}
+const place = (parent: Element, child: Element, order: string[]) => insertInOrder(parent, child, order, slot);
 
 const a = (doc: Document, local: string, attrs: Record<string, string | number> = {}) => {
   const el = doc.createElementNS(NS.a, `a:${local}`);

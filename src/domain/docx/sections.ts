@@ -4,7 +4,7 @@
  * block around its blocks; `regroup` rebuilds those blocks from the section properties.
  */
 import { Node as PMNode } from "prosemirror-model";
-import { NS } from "../../core/utils/xml";
+import { NS, insertInOrder, kid, parseElement } from "../../core/utils/xml";
 import { docxSchema as schema } from "./schema";
 
 export interface Columns {
@@ -20,12 +20,11 @@ export const ONE_COLUMN: Columns = { count: 1, space: 720, sep: false };
 /** CT_SectPr child order. */
 const SECT_ORDER = ["headerReference", "footerReference", "footnotePr", "endnotePr", "type", "pgSz", "pgMar", "paperSrc", "pgBorders", "lnNumType", "pgNumType", "cols", "formProt", "vAlign", "noEndnote", "titlePg", "textDirection", "bidi", "rtlGutter", "docGrid", "printerSettings", "sectPrChange"];
 
-const parse = (xml: string) => new DOMParser().parseFromString(xml, "application/xml").documentElement;
-const child = (el: Element, local: string) => Array.from(el.children).find((c) => c.namespaceURI === NS.w && c.localName === local) ?? null;
+const child = (el: Element, local: string) => kid(el, local, NS.w);
 const on = (v: string | null) => v === "1" || v === "true" || v === "on";
 
 function columnsOf(sectPr: string | null): Columns {
-  const cols = sectPr ? child(parse(sectPr), "cols") : null;
+  const cols = sectPr ? child(parseElement(sectPr), "cols") : null;
   if (!cols) return ONE_COLUMN;
   return {
     count: Math.max(1, Number(cols.getAttributeNS(NS.w, "num") ?? 1) || 1),
@@ -36,24 +35,20 @@ function columnsOf(sectPr: string | null): Columns {
 
 /** How a section starts: "nextPage" (the default), "continuous", "evenPage", "oddPage" or "nextColumn". */
 export function sectionType(sectPr: string | null): string {
-  const type = sectPr ? child(parse(sectPr), "type") : null;
+  const type = sectPr ? child(parseElement(sectPr), "type") : null;
   return type?.getAttributeNS(NS.w, "val") ?? "nextPage";
 }
 
 /** Replace (or add, in schema order) one child of a w:sectPr; `null` removes it. */
 function withChild(sectPr: string, local: string, make: ((doc: Document) => Element) | null): string {
-  const el = parse(sectPr);
+  const el = parseElement(sectPr);
   child(el, local)?.remove();
-  if (make) {
-    const at = SECT_ORDER.indexOf(local);
-    const before = Array.from(el.children).find((c) => SECT_ORDER.indexOf(c.localName) > at) ?? null;
-    el.insertBefore(make(el.ownerDocument), before);
-  }
+  if (make) insertInOrder(el, make(el.ownerDocument), SECT_ORDER);
   return new XMLSerializer().serializeToString(el);
 }
 
 export function withColumns(sectPr: string, cols: Columns): string {
-  if (cols.count <= 1) return child(parse(sectPr), "cols") ? withChild(sectPr, "cols", null) : sectPr;
+  if (cols.count <= 1) return child(parseElement(sectPr), "cols") ? withChild(sectPr, "cols", null) : sectPr;
   return withChild(sectPr, "cols", (doc) => {
     const el = doc.createElementNS(NS.w, "w:cols");
     el.setAttributeNS(NS.w, "w:num", String(cols.count));

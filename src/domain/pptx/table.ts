@@ -3,7 +3,7 @@
  * style resolved per cell, and grid edits that keep merges and the frame size valid.
  * Every row holds one a:tc per grid column; merged-away cells carry hMerge / vMerge.
  */
-import { NS, escapeXml, kid, kids } from "../../core/utils/xml";
+import { NS, escapeXml, kid, kids, parseElement } from "../../core/utils/xml";
 import type { ColorContext } from "./color";
 import { resolveColor } from "./color";
 import type { Rect } from "./geometry";
@@ -189,7 +189,7 @@ export function cellRect(t: TableModel, cell: TableCell): Rect {
 const EMPTY_BODY = `<a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></a:txBody>`;
 
 function parseA(doc: Document, xml: string): Element {
-  const el = new DOMParser().parseFromString(`<r xmlns:a="${A}">${xml}</r>`, "application/xml").documentElement.firstElementChild!;
+  const el = parseElement(`<r xmlns:a="${A}">${xml}</r>`).firstElementChild!;
   return doc.importNode(el, true);
 }
 

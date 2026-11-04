@@ -3,6 +3,7 @@
  * Records are shared by many cells, so an edit never changes one in place: it appends (or reuses) a record.
  */
 import { fontStack } from "../../core/utils/fonts";
+import { insertInOrder } from "../../core/utils/xml";
 import { hex, hslToRgb, rgbToHsl } from "../pptx/color";
 import { NS_S } from "../../infrastructure/xlsx/xlsx-workbook";
 import { builtinFormat } from "./number-format";
@@ -249,9 +250,7 @@ export class Styles {
     if (!el) {
       // numFmts comes first; dxfs (often missing) after cellStyles.
       el = this.doc.createElementNS(NS_S, tag);
-      const root = this.doc.documentElement;
-      const rank = SHEET_ORDER.indexOf(tag);
-      root.insertBefore(el, Array.from(root.children).find((c) => SHEET_ORDER.indexOf(c.localName) > rank) ?? null);
+      insertInOrder(this.doc.documentElement, el, SHEET_ORDER);
     }
     return el;
   }
@@ -316,10 +315,7 @@ export class Styles {
 
   private setFontChild(font: Element, tag: string, el: Element | null): void {
     this.child(font, tag)?.remove();
-    if (!el) return;
-    const rank = FONT_ORDER.indexOf(tag);
-    const next = Array.from(font.children).find((c) => FONT_ORDER.indexOf(c.localName) > rank) ?? null;
-    font.insertBefore(el, next);
+    if (el) insertInOrder(font, el, FONT_ORDER);
   }
 
   private numFmtId(code: string): number {

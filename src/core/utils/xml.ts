@@ -48,3 +48,12 @@ export const EMU_PER_PT = 12700;
 
 /** A new GUID in braces, as Office writes ids. */
 export const guid = () => `{${crypto.randomUUID().toUpperCase()}}`;
+
+/** Parse an XML string and return its root element. */
+export const parseElement = (xml: string): Element => new DOMParser().parseFromString(xml, "application/xml").documentElement;
+
+/** Insert `el` into `parent` before the first child that comes later in schema `order` (ranked by `key`, default the local name). */
+export function insertInOrder(parent: Element, el: Element, order: readonly string[], key: (e: Element) => string = (e) => e.localName): Element {
+  const at = order.indexOf(key(el));
+  return parent.insertBefore(el, Array.from(parent.children).find((c) => order.indexOf(key(c)) > at) ?? null);
+}

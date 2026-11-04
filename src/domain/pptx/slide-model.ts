@@ -1,7 +1,7 @@
 import { readMedia, SlideMedia } from "./media";
 import { chartData, ChartModel, CHART_NS } from "./chart";
 import { chartPalette, readChartFormat } from "./chart-format";
-import { NS, kid, kids } from "../../core/utils/xml";
+import { NS, kid, kids, parseElement } from "../../core/utils/xml";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { ColorContext, resolveColor } from "./color";
 import { customGeometry, GeomPath, Geometry, Handle, presetGeometry, Rect, Site } from "./geometry";
@@ -745,7 +745,7 @@ function cellTextStyle(cell: TableCell): Element | null {
   if (b === null && !color) return null;
   const rPr = `<a:defRPr${b === null ? "" : ` b="${b ? 1 : 0}"`}>${color ? `<a:solidFill><a:srgbClr val="${color.slice(1, 7)}"/></a:solidFill>` : ""}</a:defRPr>`;
   const lvls = Array.from({ length: 9 }, (_, i) => `<a:lvl${i + 1}pPr>${rPr}</a:lvl${i + 1}pPr>`).join("");
-  return new DOMParser().parseFromString(`<a:lstStyle xmlns:a="${NS.a}">${lvls}</a:lstStyle>`, "application/xml").documentElement;
+  return parseElement(`<a:lstStyle xmlns:a="${NS.a}">${lvls}</a:lstStyle>`);
 }
 
 export function parseSlide(doc: PptxDocument, slidePath: string): SlideModel {
