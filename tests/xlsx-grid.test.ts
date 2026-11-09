@@ -47,7 +47,7 @@ describe("grid rendering", () => {
     expect(texts(grid, "top")).toEqual(["Name", "Notes", "Double"]);
     expect(texts(grid, "main")).toContain("2024-01-01");
     expect(texts(grid, "main")).toContain("#DIV/0!");
-    expect((grid.ops.get("top") ?? []).filter((o) => o.kind === "rect")).toHaveLength(2);
+    expect((grid.ops.get("top") ?? []).filter((o) => o.kind === "rect" && o.color !== "#ffffff")).toHaveLength(2);
     expect(textOps(grid, "top")[0]).toMatchObject({ font: expect.stringMatching(/^bold 14.6+7?px "Calibri"/), color: "#FF0000", align: "center" });
   });
 
@@ -202,6 +202,26 @@ describe("grid dark theme", () => {
     grid.dark = false;
     grid.invalidate();
     expect(cell("plain").color).toBe("#000000");
+  });
+});
+
+describe("grid dark theme spills", () => {
+  it("draws the part of a filled cell's text that runs onto the dark paper in the light ink", async () => {
+    const { grid, edits } = await mount();
+    const s = edits.wb.sheets[0];
+    edits.input(s, 8, 0, "a long label that runs on over the next cells");
+    edits.format(s, { r1: 8, c1: 0, r2: 8, c2: 0 }, { fill: "#F8CBAD" });
+    grid.dark = true;
+    grid.invalidate();
+    const op = allTexts(grid).find((o) => o.text.startsWith("a long label"))!;
+    expect(op.color).toBe("#000000");
+    expect(op.spill).toEqual({ from: op.x + s.colWidth(0), color: "#e3e3e3" });
+    // The gridlines it runs over are covered with the paper.
+    const cover = (grid.ops.get("main") ?? []).find((o) => o.kind === "rect" && o.x === op.x + s.colWidth(0) - 1 && o.y === op.y);
+    expect(cover).toMatchObject({ w: op.w - s.colWidth(0), h: op.h - 1, color: "#1e1f20" });
+    grid.dark = false;
+    grid.invalidate();
+    expect(allTexts(grid).find((o) => o.text.startsWith("a long label"))!.spill).toBeUndefined();
   });
 });
 

@@ -27,6 +27,8 @@ export type Op =
       strike: boolean;
       /** Padding from the left / right edge (indent). */
       pad: number;
+      /** Text past `from` (on the empty cells it runs onto) in another colour: dark text on a fill turns light there in the dark theme. */
+      spill?: { from: number; color: string };
     }
   | { kind: "corner"; x: number; y: number; color: string }
   /** A cell checkbox centred in the cell box; `color` fills it when checked. */
@@ -131,13 +133,20 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, width: number): 
 }
 
 function drawText(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "text" }>): void {
+  if (!op.spill) return drawTextIn(ctx, op, op.x, op.w, op.color);
+  drawTextIn(ctx, op, op.x, op.spill.from - op.x, op.color);
+  drawTextIn(ctx, op, op.spill.from, op.x + op.w - op.spill.from, op.spill.color);
+}
+
+/** The op's text laid out in its box, drawn only between `cx` and `cx + cw`, in `color`. */
+function drawTextIn(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "text" }>, cx: number, cw: number, color: string): void {
   ctx.save();
   ctx.beginPath();
-  ctx.rect(op.x, op.y, op.w, op.h);
+  ctx.rect(cx, op.y, cw, op.h);
   ctx.clip();
   ctx.font = op.font;
-  ctx.fillStyle = op.color;
-  ctx.strokeStyle = op.color;
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
   ctx.textAlign = op.align;
   ctx.textBaseline = "alphabetic";
   const inner = op.w - 2 * PAD - op.pad;

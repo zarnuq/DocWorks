@@ -639,8 +639,8 @@ export class Grid {
   /** Colors the canvas can't take from CSS variables. */
   private palette() {
     return this.dark
-      ? { ink: "#e3e3e3", line: "#3c4043", head: "#282a2c", headInk: "#9aa0a6", headOn: "#394457", headOnInk: "#a8c7fa", border: "#5f6368" }
-      : { ink: "#000000", line: "#e1e3e1", head: "#f8f9fa", headInk: "#444746", headOn: "#d3e3fd", headOnInk: "#0b57d0", border: "#c4c7c5" };
+      ? { paper: "#1e1f20", ink: "#e3e3e3", line: "#3c4043", head: "#282a2c", headInk: "#9aa0a6", headOn: "#394457", headOnInk: "#a8c7fa", border: "#5f6368" }
+      : { paper: "#ffffff", ink: "#000000", line: "#e1e3e1", head: "#f8f9fa", headInk: "#444746", headOn: "#d3e3fd", headOnInk: "#0b57d0", border: "#c4c7c5" };
   }
 
   /** Paint operations of the last frame per pane ("corner", "top", "left", "main", "colheads", "rowheads"). */
@@ -714,10 +714,14 @@ export class Grid {
       if (!fmt.wrap && align === "left" && !isNum && r.c1 === r.c2) {
         for (let c = col + 1; c <= view.c2 && blank(row, c); c++) tw += s.colWidth(c);
       }
+      // No gridlines under text running over empty cells, as Sheets and Excel draw it (their own fills come later and stay).
+      if (tw > w) fills.push({ kind: "rect", x: x + w - 1, y, w: tw - w, h: h - 1, color: pal.paper });
       // Automatic text on a filled cell stays dark in the dark theme, as on paper; dark text on no fill turns light.
       let color = fmt.color ?? (fill ? "#000000" : pal.ink);
       if (this.dark && !fill && luminance(color) < 0.25) color = pal.ink;
       if (shown.color) color = shown.color;
+      // Dark text spilling off a fill onto the dark paper turns light past the cell.
+      const spill = this.dark && fill && tw > w && luminance(color) < 0.25 ? { from: x + w, color: pal.ink } : undefined;
       const indent = parseFloat(this.css(cell.style, false)["padding-left"] ?? this.css(cell.style, false)["padding-right"] ?? "0") || 0;
       texts.push({
         kind: "text",
@@ -735,6 +739,7 @@ export class Grid {
         underline: fmt.underline,
         strike: fmt.strike,
         pad: (indent ? indent - 3 : 0) + (cf?.icon && align === "left" ? px + 2 : 0),
+        ...(spill ? { spill } : {}),
       });
     };
     for (const m of merges) drawCell(m.r1, m.c1, m);
