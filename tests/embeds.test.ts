@@ -55,6 +55,39 @@ describe("embeds in notes", () => {
     done();
   });
 
+  it("draws a table named by #Table, wherever it is, and follows the Obsidian dark theme", async () => {
+    const S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    const bytes = await xlsx({
+      sheets: [sheetXml(`<row r="1"><c r="A1"><v>1</v></c></row>`), sheetXml(`<row r="2"><c r="B2" t="inlineStr"><is><t>Name</t></is></c></row>`)],
+      names: ["One", "Two"],
+      parts: {
+        "xl/worksheets/_rels/sheet2.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
+        "xl/tables/table1.xml": `<table xmlns="${S}" id="1" name="Tabella1" displayName="Tabella1" ref="B2:C5"><tableColumns count="2"><tableColumn id="1" name="Name"/><tableColumn id="2" name="Amount"/></tableColumns></table>`,
+      },
+    });
+    document.body.addClass("theme-dark");
+    const el = document.body.createDiv();
+    const done = await renderXlsxEmbed(el, bytes, "#Tabella1");
+    document.body.removeClass("theme-dark");
+    expect(el.querySelector(".dw-embed-range")!.textContent).toBe("Two!B2:C5");
+    expect(el.querySelector(".dw-embed-sheet")!.classList.contains("xlsx-theme-dark")).toBe(true);
+    done();
+  });
+
+  it("widens a whole-sheet embed so text running past the last used column isn't cut off", async () => {
+    const { Workbook } = await import("../src/domain/xlsx/workbook-model");
+    const { XlsxWorkbook } = await import("../src/infrastructure/xlsx/xlsx-workbook");
+    const { embedRange } = await import("../src/presentation/common/embeds");
+    const long = "a long line of text that runs well past its own column";
+    const bytes = await xlsx({ sheets: [sheetXml(`<row r="1"><c r="A1"><v>1</v></c><c r="B1" t="inlineStr"><is><t>${long}</t></is></c></row><row r="2"><c r="B2"><v>2</v></c></row>`)] });
+    const sheet = Workbook.open(await XlsxWorkbook.load(bytes)).sheets[0];
+    const r = embedRange(sheet, null)!;
+    expect(r.c2).toBeGreaterThan(1);
+    expect(sheet.colX(r.c2 + 1)).toBeGreaterThanOrEqual(sheet.colX(1) + 200);
+    // An explicit range is shown as asked.
+    expect(embedRange(sheet, { r1: 0, c1: 0, r2: 1, c2: 1 })).toEqual({ r1: 0, c1: 0, r2: 1, c2: 1 });
+  });
+
   it("shows just a heading's section for #Heading, or the whole document when there's no such heading", async () => {
     const { noteToDocx } = await import("../src/domain/docx/from-html");
     const { blankDocx } = await import("../src/infrastructure/blank");

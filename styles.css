@@ -2673,11 +2673,12 @@ textarea.pptx-notes {
 .dw-embed-sheet {
   max-height: 360px;
   overflow: auto;
-  background: #ffffff;
 }
 
+/* Paper only under the cells: a frame wider than the sheet (long title) shows the note around them. */
 .dw-embed-grid {
   position: relative;
+  background: var(--xlsx-paper, #ffffff);
   width: var(--dw-grid-w);
   height: var(--dw-grid-h);
 }

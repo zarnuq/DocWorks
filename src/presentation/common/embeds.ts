@@ -16,6 +16,7 @@ import { parseSlide } from "../../domain/pptx/slide-model";
 import { Edits } from "../../domain/xlsx/commands";
 import { ConditionalFormats } from "../../domain/xlsx/conditional";
 import { sheetPictures } from "../../domain/xlsx/drawing";
+import { tableReference } from "../../domain/xlsx/tables";
 import { formulaSparklines, readSparklines } from "../../domain/xlsx/sparklines";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { parseRange, rangeName, Rect } from "../../domain/xlsx/references";
@@ -26,6 +27,7 @@ import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { docxPlugins } from "../docx/docx-editor";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { renderSlide } from "../pptx/slide-renderer";
+import { textWidthEm } from "../pptx/text-fit";
 import { Grid } from "../xlsx/grid";
 
 /** Rows and columns an embedded sheet shows at most (the file opens for the rest). */
@@ -37,19 +39,36 @@ const MAX_RANGE_ROWS = 500, MAX_RANGE_COLS = 50;
 export function embedRange(sheet: Sheet, range: Rect | null): Rect | null {
   const used = range ?? sheet.used();
   if (!used) return null;
-  return range
-    ? { ...used, r2: Math.min(used.r2, used.r1 + MAX_RANGE_ROWS - 1), c2: Math.min(used.c2, used.c1 + MAX_RANGE_COLS - 1) }
-    : { r1: 0, c1: 0, r2: Math.min(used.r2, MAX_ROWS - 1), c2: Math.min(used.c2, MAX_COLS - 1) };
+  if (range) return { ...used, r2: Math.min(used.r2, used.r1 + MAX_RANGE_ROWS - 1), c2: Math.min(used.c2, used.c1 + MAX_RANGE_COLS - 1) };
+  const r: Rect = { r1: 0, c1: 0, r2: Math.min(used.r2, MAX_ROWS - 1), c2: Math.min(used.c2, MAX_COLS - 1) };
+  // Left-aligned text in a row's last cell runs on over the empty columns after it, as the grid draws it.
+  let end = sheet.colX(r.c2 + 1);
+  for (let row = r.r1; row <= r.r2; row++)
+    for (let col = r.c2; col >= r.c1; col--) {
+      const cell = sheet.at(row, col);
+      if (!cell || cell.value === null || cell.value === "") continue;
+      const fmt = sheet.wb.styles.format(cell.style);
+      const text = sheet.display(row, col).text;
+      if (typeof cell.value === "string" && !fmt.wrap && (fmt.hAlign === "general" || fmt.hAlign === "left") && text) {
+        const px = (fmt.fontSize * 4) / 3;
+        end = Math.max(end, sheet.colX(col) + 6 + px * (textWidthEm(text, fmt.fontName, fmt.bold, fmt.italic) ?? text.length * 0.55));
+      }
+      break;
+    }
+  while (r.c2 < MAX_COLS - 1 && sheet.colX(r.c2 + 1) < end) r.c2++;
+  return r;
 }
 
-/** "#Sheet!A1:D10", "#'My sheet'!B2", "#A1:D10" (first sheet) or "#Sheet": the sheet and range to show. */
-export function sheetTarget(subpath: string, names: string[]): { sheet: string | null; range: Rect | null } {
+/** "#Sheet!A1:D10", "#'My sheet'!B2", "#A1:D10" (first sheet), "#Sheet" or, given the workbook, "#Table" (its current extent): the sheet and range to show. */
+export function sheetTarget(subpath: string, names: string[], wb?: Workbook): { sheet: string | null; range: Rect | null } {
   const text = decodeURIComponent(subpath.replace(/^#/, "")).trim();
   if (!text || names.includes(text)) return { sheet: text || null, range: null };
   const bang = text.lastIndexOf("!");
   const name = bang < 0 ? null : text.slice(0, bang).replace(/^'(.*)'$/, "$1").replace(/''/g, "'");
   const range = parseRange(text.slice(bang + 1));
-  return range ? { sheet: name, range } : { sheet: null, range: null };
+  if (range) return { sheet: name, range };
+  const table = wb?.sheets.length && !/[[\]]/.test(text) ? tableReference(wb, wb.sheets[0], 0, 0, `${text}[#All]`) : null;
+  return table?.type === "ref" ? { sheet: table.sheet ?? null, range: table.range } : { sheet: null, range: null };
 }
 
 /** "#3" as slide index 2; anything else (or nothing) is the first slide. */
@@ -106,12 +125,14 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
   const edits = new Edits(Workbook.open(await XlsxWorkbook.load(bytes)));
   const wb = edits.wb;
   const visible = wb.sheets.filter((s) => s.ref.state === "visible");
-  const target = sheetTarget(subpath, wb.sheets.map((s) => s.name));
+  const target = sheetTarget(subpath, wb.sheets.map((s) => s.name), wb);
   let sheet = wb.sheets.find((s) => s.name === target.sheet) ?? visible[0] ?? wb.sheets[0];
   const urls = new Map<string, string>();
   // A range shows just those cells, named above them; a sheet gets tabs for the others.
   const caption = target.range ? el.createDiv({ cls: "dw-embed-range" }) : null;
-  const area = el.createDiv({ cls: "dw-embed-sheet" });
+  // Follows Obsidian's theme, like the editor's dark paper (white fills and black text turn dark / light).
+  const dark = document.body.hasClass("theme-dark");
+  const area = el.createDiv({ cls: ["dw-embed-sheet", ...(dark ? ["xlsx-theme-dark"] : [])] });
   const tabs = !target.range && visible.length > 1 ? el.createDiv({ cls: "dw-embed-tabs" }) : null;
   const draw = async () => {
     area.empty();
@@ -139,6 +160,7 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
       contextMenu: () => undefined,
       filterMenu: () => undefined,
     });
+    painter.dark = dark;
     caption?.setText(`${sheet.name}!${rangeName(r)}`);
     // The painted cells are positioned absolutely; the box takes their size so the frame scrolls over them.
     const grid = area.createDiv({ cls: "dw-embed-grid" });

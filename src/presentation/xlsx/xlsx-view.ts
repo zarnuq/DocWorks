@@ -318,7 +318,7 @@ export class XlsxView extends FileView {
     const place = this.place;
     this.place = null;
     if (!this.edits || !this.grid) return;
-    const target = sheetTarget(place, this.wb.sheets.map((s) => s.name));
+    const target = sheetTarget(place, this.wb.sheets.map((s) => s.name), this.wb);
     const index = this.wb.sheets.findIndex((s) => s.name === target.sheet);
     if (index >= 0 && index !== this.sheetIndex) this.showSheet(index);
     if (target.range) {
@@ -355,7 +355,7 @@ export class XlsxView extends FileView {
     const names = this.wb.sheets.map((s) => s.name);
     const first = this.wb.sheets.find((s) => s.ref.state === "visible")?.name;
     return this.linked.groups.flatMap((g) => {
-      const t = g.subpath ? sheetTarget(g.subpath, names) : null;
+      const t = g.subpath ? sheetTarget(g.subpath, names, this.wb) : null;
       return t?.range && (t.sheet ?? first) === this.sheet.name ? [t.range] : [];
     });
   }
