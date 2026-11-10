@@ -14,6 +14,9 @@ export class Scope {
     this.keys.push(k);
     return k;
   }
+  unregister(handler: { mods: string[]; key: string; fn: Fn }) {
+    this.keys = this.keys.filter((k) => k !== handler);
+  }
 }
 
 export class TFile {

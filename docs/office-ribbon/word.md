@@ -1,0 +1,6172 @@
+# word ribbon controls (Microsoft 365 Current Channel)
+
+Outline of Microsoft's Office Fluent UI command identifiers (word), from github.com/OfficeDev/office-fluent-ui-command-identifiers (MIT License, Copyright (c) Microsoft Corporation). Rows: tab (tab set), group, controls in ribbon order; indented controls are inside the one after '<'. Dev reference for the Office-style interface; not shipped.
+
+## Quick Access Toolbar  (None (Quick Access Toolbar))
+### 
+- AutoSaveSwitch [toggleButton]
+- FileNewDefault [button]
+- FileOpenUsingBackstage [button]
+- FileSave [button]
+- FileSendAsAttachment [button]
+- FilePrintQuick [button]
+- PrintPreviewAndPrint [button]
+- SpellingAndGrammar [button]
+- WritingAssistanceCheckDocument [button]
+- ReadAloud [button]
+- Undo [gallery]
+- RedoOrRepeat [button]
+- TableDrawTable [toggleButton]
+- PointerModeOptions [gallery]
+
+##   (None (Core Tab))
+### 
+- TabHome [tab]
+- TabInsert [tab]
+- TabDrawInk [tab]
+- TabWordDesign [tab]
+- TabPageLayoutWord [tab]
+- TabReferences [tab]
+- TabMailings [tab]
+- TabReviewWord [tab]
+- TabView [tab]
+- TabDeveloper [tab]
+- TabAddIns [tab]
+- TabSyntex [tab]
+- HelpTab [tab]
+- TabBlogPost [tab]
+- TabBlogInsert [tab]
+- TabPrintPreview [tab]
+- TabOutlining [tab]
+- TabConflicts [tab]
+- TabBackgroundRemoval [tab]
+- TabBroadcastPresentation [tab]
+
+## TabHome  (None (Core Tab))
+### 
+- GroupClipboard [group]
+- GroupFont [group]
+- GroupParagraph [group]
+- GroupStyles [group]
+- GroupEditing [group]
+- GroupAIDemo [group]
+- GroupVoiceTools [group]
+- GroupActivation [group]
+- GroupClassifyLabelProtect [group]
+- GroupEditor [group]
+- GroupResearch [group]
+- GroupOfficeExtensionsAddinFlyout [group]
+- GroupAIAssistance [group]
+### GroupClipboard
+- PasteMenu [splitButton]
+-   Paste [button] < PasteMenu
+-   Cut [button] < PasteMenu
+-   Copy [button] < PasteMenu
+-   PasteGallery [gallery] < PasteMenu
+-     PasteSpecialDialog [button] < PasteMenu
+-     PasteSetDefault [button] < PasteMenu
+-     ShowClipboard [button] < PasteMenu
+- Cut [button]
+- Copy [button]
+- FormatPainter [control]
+- ShowClipboard [button (dialogBoxLauncher)]
+### GroupFont
+- Font [comboBox]
+- FontSize [comboBox]
+- FontSizeIncreaseWord [button]
+- FontSizeDecreaseWord [button]
+- ChangeCaseGallery [gallery]
+- ClearFormatting [button]
+- AsianLayoutPhoneticGuide [button]
+- CharacterBorder [toggleButton]
+- Bold [toggleButton]
+- Italic [toggleButton]
+- UnderlineGallery [gallery]
+-   UnderlineMoreUnderlinesDialog [button] < UnderlineGallery
+-   UnderlineColorPicker [gallery] < UnderlineGallery
+-     UnderlineColorMoreColorsDialog [button] < UnderlineGallery
+- Strikethrough [toggleButton]
+- Subscript [toggleButton]
+- Superscript [toggleButton]
+- TextEffectsGallery [gallery]
+-   TextOutlineColorPickerAlternate [gallery] < TextEffectsGallery
+-     TextOutlineColorMoreColorsDialog [button] < TextEffectsGallery
+-     TextOutlineWeightGallery [gallery] < TextEffectsGallery
+-     TextOutlineMoreLinesDialog [button] < TextEffectsGallery
+-     TextOutlineDashesGallery [gallery] < TextEffectsGallery
+-   TextEffectShadowGallery [gallery] < TextEffectsGallery
+-     TextEffectsMoreShadowsDialog [button] < TextEffectsGallery
+-   TextReflectionGallery [gallery] < TextEffectsGallery
+-     TextEffectsReflectionsMoreOptions [button] < TextEffectsGallery
+-   TextEffectGlowGallery [gallery] < TextEffectsGallery
+-     TextGlowColorPicker [gallery] < TextEffectsGallery
+-     TextGlowColorMoreColorsDialog [button] < TextEffectsGallery
+-     TextEffectsGlowsMoreOptions [button] < TextEffectsGallery
+-   NumberStyleGalleryWord [gallery] < TextEffectsGallery
+-   LigatureGalleryWord [gallery] < TextEffectsGallery
+-   StylisticSetsMenuWord [gallery] < TextEffectsGallery
+- TextHighlightColorPicker [gallery]
+-   HighlightingStop [button] < TextHighlightColorPicker
+- FontColorPicker [gallery]
+-   FontColorMoreColorsDialog [button] < FontColorPicker
+-   TextFillGradientGallery [gallery] < FontColorPicker
+-     TextFillMoreGradientsDialog [button] < FontColorPicker
+- CharacterShading [toggleButton]
+- AsianLayoutCharactersEnclose [button]
+- FontDialog [button (dialogBoxLauncher)]
+### GroupParagraph
+- BulletsGalleryWord [gallery]
+-   ListLevelGallery [gallery] < BulletsGalleryWord
+-   BulletDefineNew [button] < BulletsGalleryWord
+- NumberingGalleryWord [gallery]
+-   ListLevelGallery [gallery] < NumberingGalleryWord
+-   DefineNewNumberFormat [button] < NumberingGalleryWord
+-   ListSetNumberingValue [button] < NumberingGalleryWord
+- MultilevelListGallery [gallery]
+-   ListLevelGallery [gallery] < MultilevelListGallery
+-   ListDefineNew [button] < MultilevelListGallery
+-   ListDefineNewStyle [button] < MultilevelListGallery
+- IndentDecreaseWord [button]
+- IndentIncreaseWord [button]
+- TextDirectionLeftToRight [toggleButton]
+- TextDirectionRightToLeft [toggleButton]
+- AsianLayoutMenu [menu]
+-   AsianLayoutHorizontalInVertical [button] < AsianLayoutMenu
+-   AsianLayoutCombineCharacters [button] < AsianLayoutMenu
+-   AsianLayoutTwoLinesInOne [button] < AsianLayoutMenu
+-   AsianLayoutFitText [button] < AsianLayoutMenu
+-   AsianLayoutCharacterScaling [menu] < AsianLayoutMenu
+- SortDialogClassic [button]
+- ParagraphMarks [toggleButton]
+- EastAsianEditingMarks [toggleButton]
+- AlignLeft [toggleButton]
+- AlignCenter [toggleButton]
+- AlignRight [toggleButton]
+- AlignJustify [toggleButton]
+- AlignJustifyMenu [menu]
+-   AlignJustifyWithMixedLanguages [toggleButton] < AlignJustifyMenu
+-   AlignJustifyLow [toggleButton] < AlignJustifyMenu
+-   AlignJustifyMedium [toggleButton] < AlignJustifyMenu
+-   AlignJustifyHigh [toggleButton] < AlignJustifyMenu
+- ParagraphDistributed [toggleButton]
+- AlignJustifyThai [toggleButton]
+- AlignTextMenu [menu]
+-   AlignLeft [toggleButton] < AlignTextMenu
+-   AlignCenter [toggleButton] < AlignTextMenu
+-   AlignRight [toggleButton] < AlignTextMenu
+-   AlignJustify [toggleButton] < AlignTextMenu
+-   AlignJustifyMenu [menu] < AlignTextMenu
+-     AlignJustifyWithMixedLanguages [toggleButton] < AlignTextMenu
+-     AlignJustifyLow [toggleButton] < AlignTextMenu
+-     AlignJustifyMedium [toggleButton] < AlignTextMenu
+-     AlignJustifyHigh [toggleButton] < AlignTextMenu
+-   ParagraphDistributed [toggleButton] < AlignTextMenu
+-   AlignJustifyThai [toggleButton] < AlignTextMenu
+- LineSpacingGallery [gallery]
+- ShadingColorPicker [gallery]
+-   ShadingColorsMoreColorsDialog [button] < ShadingColorPicker
+- BordersSelectionGallery [gallery]
+-   HorizontalLineInsert [button] < BordersSelectionGallery
+-   TableDrawTable [toggleButton] < BordersSelectionGallery
+-   TableShowGridlines [toggleButton] < BordersSelectionGallery
+-   BordersShadingDialogWord [button] < BordersSelectionGallery
+- ParagraphDialog [button (dialogBoxLauncher)]
+### GroupStyles
+- QuickStylesGallery [gallery]
+-   QuickStylesSaveSelectionAsNew [button] < QuickStylesGallery
+-   ClearFormatting [button] < QuickStylesGallery
+-   ApplyStylesPane [toggleButton] < QuickStylesGallery
+- StylesPane [button (dialogBoxLauncher)]
+### GroupEditing
+- SelectMenuExcel [splitButton]
+-   NavigationPaneFind [button] < SelectMenuExcel
+-   InsightsInDocSearch [button] < SelectMenuExcel
+-   FindDialog [button] < SelectMenuExcel
+-   GoTo [button] < SelectMenuExcel
+- ReplaceDialog [button]
+- SelectMenu [menu]
+-   SelectAll [button] < SelectMenu
+-   ObjectsSelect [toggleButton] < SelectMenu
+-   SelectTextWithSimilarFormatting [button] < SelectMenu
+-   SelectionPane [toggleButton] < SelectMenu
+- FindPopup [menu]
+-   SelectMenuExcel [splitButton] < FindPopup
+-     NavigationPaneFind [button] < FindPopup
+-     InsightsInDocSearch [button] < FindPopup
+-     FindDialog [button] < FindPopup
+-     GoTo [button] < FindPopup
+-   ReplaceDialog [button] < FindPopup
+-   SelectMenu [menu] < FindPopup
+-     SelectAll [button] < FindPopup
+-     ObjectsSelect [toggleButton] < FindPopup
+-     SelectTextWithSimilarFormatting [button] < FindPopup
+-     SelectionPane [toggleButton] < FindPopup
+### GroupAIDemo
+- SDXQuickstart [button]
+### GroupVoiceTools
+- DictationMenu [splitButton]
+-   Dictate [toggleButton] < DictationMenu
+-   DictateInMenu [button] < DictationMenu
+-   TranscribeWord [button] < DictationMenu
+### GroupActivation
+- ActivateOffice [button]
+### GroupClassifyLabelProtect
+- ClassifyLabelProtect [menu]
+-   None [gallery] < ClassifyLabelProtect
+-   None [toggleButton] < ClassifyLabelProtect
+-   None [gallery] < ClassifyLabelProtect
+-   None [gallery] < ClassifyLabelProtect
+-   None [button] < ClassifyLabelProtect
+-   None [button] < ClassifyLabelProtect
+### GroupEditor
+- WritingAssistanceCheckDocument [button]
+### GroupResearch
+- Insights [button]
+### GroupOfficeExtensionsAddinFlyout
+- OfficeExtensionsShowAddinFlyout [button]
+- OfficeExtensionsShowAddinFlyout [toggleButton]
+### GroupAIAssistance
+- WritingAssistanceCheckDocument [button]
+- Copilot [button]
+
+## TabInsert  (None (Core Tab))
+### 
+- GroupInsertPages [group]
+- GroupInsertTables [group]
+- GroupInsertIllustrations [group]
+- GroupCollaborate [group]
+- GroupOfficeExtension [group]
+- GroupMedia [group]
+- GroupInsertLinks [group]
+- GroupInsertComments [group]
+- GroupHeaderFooter [group]
+- GroupInsertText [group]
+- GroupInsertSymbols [group]
+- GroupInsertBarcode [group]
+### GroupInsertPages
+- CoverPageInsertGallery [gallery]
+-   None [gallery] < CoverPageInsertGallery
+-   None [button] < CoverPageInsertGallery
+-   None [button] < CoverPageInsertGallery
+-   ThemeSearchOfficeOnline [button] < CoverPageInsertGallery
+-   CoverPageRemove [button] < CoverPageInsertGallery
+-   SaveSelectionToCoverPageGallery [button] < CoverPageInsertGallery
+- BlankPageInsert [button]
+- PageBreakInsertWord [button]
+- PagesMenuAnchor [menu]
+-   CoverPageInsertGallery [gallery] < PagesMenuAnchor
+-     None [gallery] < PagesMenuAnchor
+-     None [button] < PagesMenuAnchor
+-     None [button] < PagesMenuAnchor
+-     ThemeSearchOfficeOnline [button] < PagesMenuAnchor
+-     CoverPageRemove [button] < PagesMenuAnchor
+-     SaveSelectionToCoverPageGallery [button] < PagesMenuAnchor
+-   BlankPageInsert [button] < PagesMenuAnchor
+-   PageBreakInsertWord [button] < PagesMenuAnchor
+### GroupInsertTables
+- TableInsertGallery [gallery]
+-   TableInsertDialogWord [button] < TableInsertGallery
+-   TableDrawTable [toggleButton] < TableInsertGallery
+-   ConvertTextToTable [button] < TableInsertGallery
+-   TableExcelSpreadsheetInsert [button] < TableInsertGallery
+-   QuickTablesInsertGallery [gallery] < TableInsertGallery
+-     SaveSelectionToQuickTablesGallery [button] < TableInsertGallery
+### GroupInsertIllustrations
+- FlyoutAnchorInsertPictures [gallery]
+-   PictureInsertFromFile [button] < FlyoutAnchorInsertPictures
+-   InsertMobilePicture [button] < FlyoutAnchorInsertPictures
+-   InsertM365Picture [button] < FlyoutAnchorInsertPictures
+-   ClipArtInsertDialog [button] < FlyoutAnchorInsertPictures
+- InsertPictureFlyoutAnchor [menu]
+-   PictureInsertFromFile [button] < InsertPictureFlyoutAnchor
+-   ClipArtInsertDialog [button] < InsertPictureFlyoutAnchor
+- MovieFromClipOrganizerInsert [button]
+- GalleryAllShapesAndCanvas [gallery]
+-   DrawingCanvasInsert [button] < GalleryAllShapesAndCanvas
+- IconInsertFromFile [button]
+- Insert3DModelFallback [button]
+- Insert3DModelDropdown [splitButton]
+-   Insert3DModelDefault [button] < Insert3DModelDropdown
+-   Insert3DModelFromFile [button] < Insert3DModelDropdown
+-   Insert3DModelFromFileConsumer [button] < Insert3DModelDropdown
+-   Insert3DModelFromOnline [button] < Insert3DModelDropdown
+-   Insert3DModelFromOnlineConsumer [button] < Insert3DModelDropdown
+- SmartArtInsert [button]
+- ChartInsert [button]
+- ScreenshotInsertGallery [gallery]
+-   ScreenClipping [button] < ScreenshotInsertGallery
+### GroupCollaborate
+- LoopComponents [menu]
+-   LoopBulletedList [button] < LoopComponents
+-   LoopChecklist [button] < LoopComponents
+-   LoopNumberedList [button] < LoopComponents
+-   LoopParagraph [button] < LoopComponents
+-   LoopTable [button] < LoopComponents
+-   LoopTaskList [button] < LoopComponents
+-   LoopQA [button] < LoopComponents
+### GroupOfficeExtension
+- OfficeExtensionsAppStore [button]
+- OfficeExtensionsGallery2 [gallery]
+-   OfficeExtensionsDialog [button] < OfficeExtensionsGallery2
+-   OfficeExtensionsManageOtherAddins [button] < OfficeExtensionsGallery2
+-   ExtensibilityExperimentation [button] < OfficeExtensionsGallery2
+- OfficeExtensionsFeaturedApp1 [button]
+- OfficeExtensionsFeaturedApp2 [button]
+- OfficeExtensionsFeaturedApp3 [button]
+- OfficeExtensionsFeaturedApp4 [button]
+- OfficeExtensionsFeaturedApp5 [button]
+- OfficeExtensionsFeaturedApp6 [button]
+- AddInsMenuAnchor [menu]
+-   OfficeExtensionsAppStore [button] < AddInsMenuAnchor
+-   OfficeExtensionsGallery2 [gallery] < AddInsMenuAnchor
+-     OfficeExtensionsDialog [button] < AddInsMenuAnchor
+-     OfficeExtensionsManageOtherAddins [button] < AddInsMenuAnchor
+-     ExtensibilityExperimentation [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp1 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp2 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp3 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp4 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp5 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp6 [button] < AddInsMenuAnchor
+### GroupMedia
+- MovieFromClipOrganizerInsert [button]
+### GroupInsertLinks
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkInsert [button]
+- BookmarkInsert [button]
+- CrossReferenceInsert [button]
+### GroupInsertComments
+- InsertNewComment [button]
+### GroupHeaderFooter
+- HeaderInsertGallery [gallery]
+-   None [gallery] < HeaderInsertGallery
+-   None [button] < HeaderInsertGallery
+-   None [button] < HeaderInsertGallery
+-   ThemeSearchOfficeOnline [button] < HeaderInsertGallery
+-   HeaderFooterEditHeader [button] < HeaderInsertGallery
+-   HeaderFooterRemoveHeaderWord [button] < HeaderInsertGallery
+-   SaveSelectionToHeaderGallery [button] < HeaderInsertGallery
+- FooterInsertGallery [gallery]
+-   None [gallery] < FooterInsertGallery
+-   None [button] < FooterInsertGallery
+-   None [button] < FooterInsertGallery
+-   ThemeSearchOfficeOnline [button] < FooterInsertGallery
+-   HeaderFooterEditFooter [button] < FooterInsertGallery
+-   HeaderFooterRemoveFooterWord [button] < FooterInsertGallery
+-   SaveSelectionToFooterGallery [button] < FooterInsertGallery
+- HeaderAndFooterMenuAnchor [menu]
+-   HeaderInsertGallery [gallery] < HeaderAndFooterMenuAnchor
+-     None [gallery] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     ThemeSearchOfficeOnline [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterEditHeader [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterRemoveHeaderWord [button] < HeaderAndFooterMenuAnchor
+-     SaveSelectionToHeaderGallery [button] < HeaderAndFooterMenuAnchor
+-   FooterInsertGallery [gallery] < HeaderAndFooterMenuAnchor
+-     None [gallery] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     ThemeSearchOfficeOnline [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterEditFooter [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterRemoveFooterWord [button] < HeaderAndFooterMenuAnchor
+-     SaveSelectionToFooterGallery [button] < HeaderAndFooterMenuAnchor
+- HeaderFooterPageNumberInsert [menu]
+-   PageNumbersInHeaderInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberTop [button] < HeaderFooterPageNumberInsert
+-   PageNambersInFooterInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberBottom [button] < HeaderFooterPageNumberInsert
+-   PageNambersInMarginsInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberMargin [button] < HeaderFooterPageNumberInsert
+-   PageNumberFieldInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberGallery [button] < HeaderFooterPageNumberInsert
+-   PageNumberFormat [button] < HeaderFooterPageNumberInsert
+-   PageNumbersRemove [button] < HeaderFooterPageNumberInsert
+### GroupInsertText
+- JapaneseGreetingsInsertMenu [menu]
+-   MailMergeJapaneseGreetingInsert [button] < JapaneseGreetingsInsertMenu
+-   MailMergeJapaneseGreetingJapaneseOpeningSentenceInsert [button] < JapaneseGreetingsInsertMenu
+-   MailMergeJapaneseGreetingClosingSentenceInsert [button] < JapaneseGreetingsInsertMenu
+- TextBoxInsertGallery [gallery]
+-   None [gallery] < TextBoxInsertGallery
+-   None [button] < TextBoxInsertGallery
+-   None [button] < TextBoxInsertGallery
+-   TextBoxInsert [button] < TextBoxInsertGallery
+-   TextBoxInsertVerticalWord [button] < TextBoxInsertGallery
+-   SaveSelectionToTextBoxGallery [button] < TextBoxInsertGallery
+- QuickPartsInsertGallery [gallery]
+-   AutoTextGallery [gallery] < QuickPartsInsertGallery
+-     SaveSelectionToAutoTextGallery [button] < QuickPartsInsertGallery
+-   PropertyInsert [gallery] < QuickPartsInsertGallery
+-   FieldInsert [button] < QuickPartsInsertGallery
+-   BuildingBlocksOrganizer [button] < QuickPartsInsertGallery
+-   SaveSelectionToQuickPartGallery [button] < QuickPartsInsertGallery
+- WordArtInsertGallery [gallery]
+- WordArtInsertGalleryClassic [gallery]
+- DropCapInsertGallery [gallery]
+-   DropCapOptionsDialog [button] < DropCapInsertGallery
+- SignatureLineInsertMenu [splitButton]
+-   SignatureLineInsert [button] < SignatureLineInsertMenu
+-   SignatureServicesAdd [button] < SignatureLineInsertMenu
+- DateAndTimeInsert [button]
+- OleObjectInsertMenu [splitButton]
+-   OleObjectctInsert [button] < OleObjectInsertMenu
+-   TextFromFileInsert [button] < OleObjectInsertMenu
+### GroupInsertSymbols
+- InsertBuildingBlocksEquationsGallery [gallery]
+-   None [gallery] < InsertBuildingBlocksEquationsGallery
+-   None [button] < InsertBuildingBlocksEquationsGallery
+-   None [button] < InsertBuildingBlocksEquationsGallery
+-   EquationInsertNew [button] < InsertBuildingBlocksEquationsGallery
+-   InkEquation [button] < InsertBuildingBlocksEquationsGallery
+-   SaveSelectionToEquationGallery [button] < InsertBuildingBlocksEquationsGallery
+- SymbolInsertGallery [gallery]
+-   SymbolsDialog [button] < SymbolInsertGallery
+- InsertNumberAlternate [button]
+### GroupInsertBarcode
+- BarcodeInsert [button]
+- LabelInsert [button]
+
+## TabDrawInk  (None (Core Tab))
+### 
+- GroupInputMode [group]
+- GroupWrite [group]
+- GroupDrawingTools [group]
+- GroupPensOneNote [group]
+- GroupPens2 [group]
+- GroupDrawWithTouch [group]
+- GroupStencils [group]
+- GroupEditingExcel [group]
+- GroupInkConvertOneNote [group]
+- GroupInsertDrawingCanvas [group]
+- InkReplay [group]
+- GroupInkClose [group]
+- GroupPenAndInkHelp [group]
+### GroupInputMode
+- InkSelect [toggleButton]
+- FingerPaintingMode [toggleButton]
+- DrawInkMode [toggleButton]
+### GroupWrite
+- InkSelect [toggleButton]
+- FingerPaintingMode [toggleButton]
+- DrawInkMode [toggleButton]
+- InkEraser [toggleButton]
+- InkEraserMenu [splitButton]
+-   CurrentEraser [toggleButton] < InkEraserMenu
+-   InkEraser [toggleButton] < InkEraserMenu
+-   PointEraserSmall [toggleButton] < InkEraserMenu
+-   PointEraserMedium [toggleButton] < InkEraserMenu
+- LassoSelect [toggleButton]
+### GroupDrawingTools
+- InkToolboxWithEraserAndLasso [control]
+### GroupPensOneNote
+- InkToolbox [control]
+### GroupPens2
+- PensGallery2 [gallery]
+-   PenAddFavorite [button] < PensGallery2
+- InkColorPicker2 [gallery]
+-   InkColorMoreColorsDialog [button] < InkColorPicker2
+- LineThickness2 [gallery]
+-   LineStylesDialog [button] < LineThickness2
+### GroupDrawWithTouch
+- FingerPaintingMode [toggleButton]
+### GroupStencils
+- ShowRulerStencil [toggleButton]
+### GroupEditingExcel
+- FormatBackgroundDropdown [menu]
+-   RuleLinesMenu [gallery] < FormatBackgroundDropdown
+-   RuleLineFullPage [toggleButton] < FormatBackgroundDropdown
+-   PageColorPicker [gallery] < FormatBackgroundDropdown
+-     PageColorMoreColorsDialog [button] < FormatBackgroundDropdown
+-     PageColorFillEffects [button] < FormatBackgroundDropdown
+### GroupInkConvertOneNote
+- InkEditorSplitButton [splitButton]
+-   InkEditor [toggleButton] < InkEditorSplitButton
+-   InkEditorEnable [toggleButton] < InkEditorSplitButton
+-   InkEditorInkGestureHelp [button] < InkEditorSplitButton
+- DiagrammingOnline [toggleButton]
+- SelectionToMathConvert [button]
+### GroupInsertDrawingCanvas
+- InsertInkDrawingCanvas [button]
+### InkReplay
+- Replay [toggleButton]
+### GroupInkClose
+- InkStopInkingReadingView [button]
+### GroupPenAndInkHelp
+- PenAndInkHelp [button]
+
+## TabWordDesign  (None (Core Tab))
+### 
+- GroupStyleSet [group]
+- GroupPageBackground [group]
+### GroupStyleSet
+- ThemesGallery [gallery]
+-   ThemeResetFromTemplate [button] < ThemesGallery
+-   ThemeSearchOfficeOnline [button] < ThemesGallery
+-   ThemeBrowseForThemes [button] < ThemesGallery
+-   ThemeSaveCurrent [button] < ThemesGallery
+- QuickStylesSets [gallery]
+-   QuickStylesResetFromTemplate [button] < QuickStylesSets
+-   QuickStylesSaveQuickStyleSet [button] < QuickStylesSets
+- ThemeColorsGallery [gallery]
+-   ThemeColorsCreateNew [button] < ThemeColorsGallery
+- ThemeFontsGallery [gallery]
+-   ThemeFontsCreateNew [button] < ThemeFontsGallery
+- ParagraphSpacing [gallery]
+-   ParagraphSpacingCustom [button] < ParagraphSpacing
+- ThemeEffectsGallery [gallery]
+- QuickStylesSetAsDefault [button]
+### GroupPageBackground
+- WatermarkGallery [gallery]
+-   None [gallery] < WatermarkGallery
+-   None [button] < WatermarkGallery
+-   None [button] < WatermarkGallery
+-   ThemeSearchOfficeOnline [button] < WatermarkGallery
+-   WatermarkCustomDialog [button] < WatermarkGallery
+-   WatermarkRemove [button] < WatermarkGallery
+-   SaveSelectionToWaterMarkGallery [button] < WatermarkGallery
+- PageColorPicker [gallery]
+-   PageColorMoreColorsDialog [button] < PageColorPicker
+-   PageColorFillEffects [button] < PageColorPicker
+- PageBorderAndShadingDialog [button]
+
+## TabPageLayoutWord  (None (Core Tab))
+### 
+- GroupPageLayoutSetup [group]
+- GroupParagraphLayout [group]
+- GroupArrange [group]
+### GroupPageLayoutSetup
+- TextDirectionGalleryWord [gallery]
+-   TextDirectionOptionsDialog [button] < TextDirectionGalleryWord
+- PageMarginsGallery [gallery]
+-   MarginsCustomMargins [button] < PageMarginsGallery
+- PageOrientationGallery [gallery]
+- PageSizeGallery [gallery]
+-   PageSizeMorePaperSizesDialog [button] < PageSizeGallery
+- TableColumnsGallery [gallery]
+-   ColumnsDialog [button] < TableColumnsGallery
+- BreaksGallery [gallery]
+- LineNumbersMenu [menu]
+-   LineNumbersOff [toggleButton] < LineNumbersMenu
+-   LineNumbersContinuous [toggleButton] < LineNumbersMenu
+-   LineNumbersResetPage [toggleButton] < LineNumbersMenu
+-   LineNumbersResetSection [toggleButton] < LineNumbersMenu
+-   LineNumbersSuppress [toggleButton] < LineNumbersMenu
+-   LineNumbersOptionsDialog [button] < LineNumbersMenu
+- HyphenationMenu [menu]
+-   HyphenationNone [toggleButton] < HyphenationMenu
+-   HyphenationAutomatic [toggleButton] < HyphenationMenu
+-   HyphenationManual [button] < HyphenationMenu
+-   HyphenationOptions [button] < HyphenationMenu
+- PageSetupDialog [button (dialogBoxLauncher)]
+### GroupParagraphLayout
+- IndentLabel [labelControl]
+- ParagraphIndentLeft [control]
+- ParagraphIndentRight [control]
+- SpacingLabel [labelControl]
+- ParagraphSpacingBefore [control]
+- ParagraphSpacingAfter [control]
+- ParagraphDialog [button (dialogBoxLauncher)]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+
+## TabReferences  (None (Core Tab))
+### 
+- GroupTableOfContents [group]
+- GroupFootnotes [group]
+- GroupResearch [group]
+- GroupCitationsAndBibliography [group]
+- GroupCaptions [group]
+- GroupIndex [group]
+- GroupTableOfAuthorities [group]
+- GroupAcronyms [group]
+### GroupTableOfContents
+- TableOfContentsGallery [gallery]
+-   None [gallery] < TableOfContentsGallery
+-   None [button] < TableOfContentsGallery
+-   None [button] < TableOfContentsGallery
+-   TableOfContentsDialog [button] < TableOfContentsGallery
+-   TableOfContentsRemove [button] < TableOfContentsGallery
+-   SaveSelectionToTableOfContentsGallery [button] < TableOfContentsGallery
+- TableOfContentsAddTextGallery [gallery]
+- TableOfContentsUpdate [button]
+### GroupFootnotes
+- FootnoteInsert [button]
+- EndnoteInsertWord [button]
+- FootnoteNext [splitButton]
+-   FootnoteNextWord [button] < FootnoteNext
+-   FootnotePreviousWord [button] < FootnoteNext
+-   EndnoteNextWord [button] < FootnoteNext
+-   EndnotePreviousWord [button] < FootnoteNext
+- FootnotesEndnotesShow [button]
+- FootnoteEndnoteDialog [button (dialogBoxLauncher)]
+### GroupResearch
+- Insights [button]
+- Researcher [button]
+### GroupCitationsAndBibliography
+- CitationInsert [gallery]
+-   BibliographyAddNewSource [button] < CitationInsert
+-   BibliographyAddNewPlaceholder [button] < CitationInsert
+- BibliographyManageSources [button]
+- BibliographyStyle [comboBox]
+- BibliographyGallery [gallery]
+-   BibliographyInsert [button] < BibliographyGallery
+-   SaveSelectionToBibliographyGallery [button] < BibliographyGallery
+### GroupCaptions
+- CaptionInsert [button]
+- TableOfFiguresInsert [button]
+- TableOfFiguresUpdate [button]
+- CrossReferenceInsert [button]
+### GroupIndex
+- IndexMarkEntry [button]
+- IndexInsert [button]
+- IndexUpdate [button]
+### GroupTableOfAuthorities
+- CitationMark [button]
+- TableOfAuthoritiesInsert [button]
+- TableOfAuthoritiesUpdate [button]
+### GroupAcronyms
+- Acronyms [button]
+
+## TabMailings  (None (Core Tab))
+### 
+- GroupEnvelopeLabelCreate [group]
+- GroupMailMergeStart [group]
+- GroupMailMergeWriteInsertFields [group]
+- GroupMailMergePreviewResults [group]
+- GroupMailMergeFinish [group]
+### GroupEnvelopeLabelCreate
+- EnvelopeChineseDialog [button]
+- JapaneseGreetingsInsertMenu [menu]
+-   MailMergeJapaneseGreetingInsert [button] < JapaneseGreetingsInsertMenu
+-   MailMergeJapaneseGreetingJapaneseOpeningSentenceInsert [button] < JapaneseGreetingsInsertMenu
+-   MailMergeJapaneseGreetingClosingSentenceInsert [button] < JapaneseGreetingsInsertMenu
+- JapanesePostcardMenu [menu]
+-   JapanesePostcardCreateAddressSide [button] < JapanesePostcardMenu
+-   JapanesePostcardCreateLetterSide [button] < JapanesePostcardMenu
+- EnvelopesAndLabelsDialog [button]
+- LabelsDialog [button]
+### GroupMailMergeStart
+- MailMergeStartMailMergeMenu [menu]
+-   MailMergeStartLetters [toggleButton] < MailMergeStartMailMergeMenu
+-   MailMergeStartEmail [toggleButton] < MailMergeStartMailMergeMenu
+-   MailMergeStartEnvelopes [toggleButton] < MailMergeStartMailMergeMenu
+-   MailMergeStartLabels [toggleButton] < MailMergeStartMailMergeMenu
+-   MailMergeStartDirectory [toggleButton] < MailMergeStartMailMergeMenu
+-   MailMergeClearMergeType [toggleButton] < MailMergeStartMailMergeMenu
+-   MailMergeWizard [toggleButton] < MailMergeStartMailMergeMenu
+- MailMergeSelectRecipients [menu]
+-   MailMergeCreateList [button] < MailMergeSelectRecipients
+-   MailMergeRecepientsUseExistingList [button] < MailMergeSelectRecipients
+-   MailMergeRecepientsUseOutlookContacts [button] < MailMergeSelectRecipients
+- MailMergeRecipientsEditList [button]
+### GroupMailMergeWriteInsertFields
+- MailMergeHighlightMergeFields [toggleButton]
+- MailMergeInsertBarcodeMenu [menu]
+-   MailMergeInsertBarcode [button] < MailMergeInsertBarcodeMenu
+-   MailMergeJapanesePostalBarcode [button] < MailMergeInsertBarcodeMenu
+- MailMergeAddressBlockInsert [button]
+- MailMergeGreetingLineInsert [button]
+- MailMergeMergeFieldInsertMenu [splitButton]
+-   MailMergeMergeFieldInsert [button] < MailMergeMergeFieldInsertMenu
+- MailMergeRules [menu]
+- MailMergeMatchFields [button]
+- MailMergeUpdateLabels [button]
+### GroupMailMergePreviewResults
+- MailMergeResultsPreview [toggleButton]
+- MailMergeGoToFirstRecord [button]
+- MailMergeGoToPreviousRecord [button]
+- MailMergeGoToRecord [control]
+- MailMergeGoToNextRecord [button]
+- MailMergeGotToLastRecord [button]
+- MailMergeFindRecipient [button]
+- MailMergeAutoCheckForErrors [button]
+### GroupMailMergeFinish
+- MailMergeFinishAndMergeMenu [menu]
+-   MailMergeMergeToDocument [button] < MailMergeFinishAndMergeMenu
+-   MailMergeMergeToPrinter [button] < MailMergeFinishAndMergeMenu
+-   MailMergeMergeToEMail [button] < MailMergeFinishAndMergeMenu
+
+## TabReviewWord  (None (Core Tab))
+### 
+- GroupProofing [group]
+- GroupSpeech [group]
+- GroupAccessibility [group]
+- GroupLanguage [group]
+- GroupChineseTranslation [group]
+- GroupComments [group]
+- GroupChangesTracking [group]
+- GroupChanges [group]
+- GroupCompare [group]
+- GroupProtect [group]
+- GroupInk [group]
+### GroupProofing
+- SpellingAndGrammar [button]
+- WritingAssistanceCheckDocument [button]
+- Thesaurus [button]
+- WordCount [button]
+- SplitButtonQuickCheck [splitButton]
+-   QuickCheck [button] < SplitButtonQuickCheck
+-   QuickCheckSpelling [toggleButton] < SplitButtonQuickCheck
+-   QuickCheckAll [toggleButton] < SplitButtonQuickCheck
+### GroupSpeech
+- ReadAloud [button]
+### GroupAccessibility
+- MenuAccessibility [splitButton]
+-   AccessibilityChecker [button] < MenuAccessibility
+-   AltTextPaneRibbon [toggleButton] < MenuAccessibility
+-   ShowNavigationPaneNewInAccCheckerSplitButton [toggleButton] < MenuAccessibility
+-   ViewFocusModeView [toggleButton] < MenuAccessibility
+-   OpenOptionsEaseOfAcess [button] < MenuAccessibility
+### GroupLanguage
+- TranslateMenu [menu]
+-   TranslatorLookup [button] < TranslateMenu
+-   TranslatorDocument [button] < TranslateMenu
+-   TranslateDocument [button] < TranslateMenu
+-   TranslationPane [button] < TranslateMenu
+-   MiniTranslator [toggleButton] < TranslateMenu
+-   TranslatorPreferences [button] < TranslateMenu
+-   TranslationLanguageOptions [button] < TranslateMenu
+- LanguageCommands [menu]
+-   SetLanguage [button] < LanguageCommands
+-   LanguagePreferences [button] < LanguageCommands
+- ReviewJapaneseConsistencyChecker [button]
+- ImeDictionaryUpdate [button]
+- HangulHanjaConversion [button]
+### GroupChineseTranslation
+- TranslateToSimplifiedChinese [button]
+- TranslateToTraditionalChinese [button]
+- ChineseTranslationDialog [button]
+### GroupComments
+- ReviewNewComment [button]
+- ReviewDeleteCommentsMenu [splitButton]
+-   ReviewDeleteComment [button] < ReviewDeleteCommentsMenu
+-   ReviewDeleteAllCommentsShown [button] < ReviewDeleteCommentsMenu
+-   ReviewDeleteAllCommentsInDocument [button] < ReviewDeleteCommentsMenu
+-   DeleteAllResolvedComments [button] < ReviewDeleteCommentsMenu
+- ReviewPreviousCommentWord [button]
+- ReviewNextCommentWord [button]
+- ShowCommentGutter [toggleButton]
+- ShowCommentsMenu [splitButton]
+-   ShowCommentGutter [toggleButton] < ShowCommentsMenu
+-   ShowCommentsContextualView [toggleButton] < ShowCommentsMenu
+-   ShowCommentsPane [toggleButton] < ShowCommentsMenu
+- ReviewInkCommentNew [button]
+- ReviewInkCommentPen [toggleButton]
+- ReviewInkCommentEraser [toggleButton]
+### GroupChangesTracking
+- ReviewTrackChangesMenu [splitButton]
+-   ReviewTrackChanges [toggleButton] < ReviewTrackChangesMenu
+-   RevisionsLockTracking [toggleButton] < ReviewTrackChangesMenu
+-   RevisionsTrackEveryone [toggleButton] < ReviewTrackChangesMenu
+-   RevisionsTrackMine [toggleButton] < ReviewTrackChangesMenu
+- ReviewDisplayForReview [dropDown]
+- ReviewShowMarkupMenu [menu]
+-   ReviewShowComments [toggleButton] < ReviewShowMarkupMenu
+-   ReviewShowInsertionsAndDeletions [toggleButton] < ReviewShowMarkupMenu
+-   ReviewShowFormatting [toggleButton] < ReviewShowMarkupMenu
+-   ReviewBalloonsMenu [menu] < ReviewShowMarkupMenu
+-     ReviewShowRevisionsInBalloons [toggleButton] < ReviewShowMarkupMenu
+-     ReviewShowRevisionsInline [toggleButton] < ReviewShowMarkupMenu
+-     ReviewShowOnlyCommentsAndFormattingInBaloons [toggleButton] < ReviewShowMarkupMenu
+-   ReviewShowReviewersMenu [menu] < ReviewShowMarkupMenu
+-   ReviewHighlightUpdates [toggleButton] < ReviewShowMarkupMenu
+-   ReviewOtherAuthors [toggleButton] < ReviewShowMarkupMenu
+- ReviewReviewingPaneMenu [splitButton]
+-   ReviewReviewingPane [toggleButton] < ReviewReviewingPaneMenu
+-   ReviewReviewingPaneVertical [toggleButton] < ReviewReviewingPaneMenu
+-   ReviewReviewingPaneHorizontal [toggleButton] < ReviewReviewingPaneMenu
+- ReviewChangeTrackingOptions [button (dialogBoxLauncher)]
+### GroupChanges
+- ReviewAcceptChangeMenu [splitButton]
+-   ReviewAcceptChangeAndMoveToNext [button] < ReviewAcceptChangeMenu
+-   ReviewAcceptChange [button] < ReviewAcceptChangeMenu
+-   ReviewAcceptAllChangesShown [button] < ReviewAcceptChangeMenu
+-   ReviewAcceptAllChangesInDocument [button] < ReviewAcceptChangeMenu
+-   AcceptAllChangesInDocAndStopTracking [button] < ReviewAcceptChangeMenu
+- ReviewRejectChangeMenu [splitButton]
+-   ReviewRejectChangeAndMoveToNext [button] < ReviewRejectChangeMenu
+-   ReviewRejectChange [button] < ReviewRejectChangeMenu
+-   ReviewRejectAllChangesShown [button] < ReviewRejectChangeMenu
+-   ReviewRejectAllChangesInDocument [button] < ReviewRejectChangeMenu
+-   RejectAllChangesInDocAndStopTracking [button] < ReviewRejectChangeMenu
+- ReviewPreviousChange [button]
+- ReviewNextChange [button]
+### GroupCompare
+- ReviewCompareMenu [menu]
+-   ReviewCompareMajorVersion [button] < ReviewCompareMenu
+-   ReviewCompareLastVersion [button] < ReviewCompareMenu
+-   ReviewCompareSpecificVersion [button] < ReviewCompareMenu
+-   ReviewViewChangesInTheSourceDocument [button] < ReviewCompareMenu
+-   ReviewCompareTwoVersions [button] < ReviewCompareMenu
+-   ReviewCombineRevisions [button] < ReviewCompareMenu
+-   ReviewShowSourceDocumentsMenu [gallery] < ReviewCompareMenu
+### GroupProtect
+- BlockAuthorsMenu [splitButton]
+-   ApplyCoAuthoringLock [toggleButton] < BlockAuthorsMenu
+-   ReleaseAllMyLocks [button] < BlockAuthorsMenu
+- ReviewRestrictFormatting [toggleButton]
+### GroupInk
+- InkingStart [button]
+- HideInkSplitButton [splitButton]
+-   HideInk [toggleButton] < HideInkSplitButton
+-   InkDeleteAll [button] < HideInkSplitButton
+
+## TabView  (None (Core Tab))
+### 
+- GroupDocumentViews [group]
+- GroupModes [group]
+- GroupNightMode [group]
+- GroupPageMovement [group]
+- GroupViewShowHide [group]
+- GroupZoom [group]
+- GroupWindow [group]
+- GroupMacros [group]
+- GroupSharePointProperties [group]
+### GroupDocumentViews
+- ViewFullScreenReadingView [toggleButton]
+- ViewPrintLayoutView [toggleButton]
+- ViewWebLayoutView [toggleButton]
+- ViewOutlineView [toggleButton]
+- ViewDraftView [toggleButton]
+### GroupModes
+- ViewFocusModeView [toggleButton]
+- ColorPickerFocusModeBackground [gallery]
+- ToggleLearningTools [toggleButton]
+### GroupNightMode
+- DarkModeOn [toggleButton]
+### GroupPageMovement
+- VerticalPageMovement [toggleButton]
+- TwoPageMode [toggleButton]
+### GroupViewShowHide
+- ViewRulerWord [checkBox]
+- ViewGridlines [checkBox]
+- NavigationPaneShowHide [checkBox]
+- ViewDocumentActionsPane [toggleButton]
+### GroupZoom
+- Thumbnails [toggleButton]
+- ZoomDialog [button]
+- ZoomCurrent100 [button]
+- ZoomOnePage [button]
+- ZoomTwoPages [button]
+- ZoomPageWidth [button]
+### GroupWindow
+- WindowNew [button]
+- WindowsArrangeAll [button]
+- WindowSplit [button]
+- WindowSideBySide [toggleButton]
+- WindowSideBySideSynchronousScrolling [toggleButton]
+- WindowResetPosition [button]
+- WindowSwitchWindowsMenuWord [menu]
+-   WindowMoreWindowsDialog [toggleButton] < WindowSwitchWindowsMenuWord
+### GroupMacros
+- MenuMacros [splitButton]
+-   PlayMacro [button] < MenuMacros
+-   MacroRecordOrStop [button] < MenuMacros
+-   MacroRecorderPause [button] < MenuMacros
+### GroupSharePointProperties
+- DocumentInformationShowHide [toggleButton]
+
+## TabDeveloper  (None (Core Tab))
+### 
+- GroupCode [group]
+- GroupAddins [group]
+- GroupControls [group]
+- GroupXmlMappingPane [group]
+- GroupProtect [group]
+- GroupTemplates [group]
+### GroupCode
+- VisualBasic [button]
+- MacroPlay [button]
+- MacroRecordOrStop [button]
+- MacroRecorderPause [button]
+- MacroSecurity [button]
+### GroupAddins
+- OfficeExtensionsGallery3 [button]
+- AddInManager [button]
+- ComAddInsDialog [button]
+### GroupControls
+- ContentControlRichText [button]
+- ContentControlText [button]
+- ContentControlPicture [button]
+- ContentControlBuildingBlockGallery [button]
+- ContentControlCheckBox [button]
+- ContentControlComboBox [button]
+- ContentControlDropDownList [button]
+- ContentControlDate [button]
+- ContentControlRepeating [button]
+- ControlsGalleryClassic [gallery]
+- DesignMode [toggleButton]
+- ControlProperties [button]
+- ContentControlsGroupMenu [menu]
+-   ContentControlsGroup [button] < ContentControlsGroupMenu
+-   ContentControlsUngroup [button] < ContentControlsGroupMenu
+### GroupXmlMappingPane
+- ToggleXmlMappingPane [button]
+### GroupProtect
+- BlockAuthorsMenu [splitButton]
+-   ApplyCoAuthoringLock [toggleButton] < BlockAuthorsMenu
+-   ReleaseAllMyLocks [button] < BlockAuthorsMenu
+- ReviewRestrictFormatting [toggleButton]
+### GroupTemplates
+- DocumentTemplate [button]
+
+## TabAddIns  (None (Core Tab))
+### 
+- GroupAddInsMenuCommands [group]
+- GroupAddInsToolbarCommands [group]
+- GroupAddInsCustomToolbars [group]
+
+## TabSyntex  (None (Core Tab))
+### 
+- GroupAgreements [group]
+### GroupAgreements
+- SyntexDocGen [button]
+- SyntexTemplates [button]
+- SyntexSnippets [button]
+- SyntexEsign [button]
+
+## HelpTab  (None (Core Tab))
+### 
+- GroupHelpAndSupport [group]
+### GroupHelpAndSupport
+- Help [button]
+- ContactUs [button]
+- OfficeFeedbackHelpTab [button]
+- OfficeFeedbackIcon [button]
+- ShowTraining [button]
+- WhatsNewRecentUpdates [button]
+
+## TabBlogPost  (None (Core Tab))
+### 
+- GroupBlogPublish [group]
+- GroupClipboard [group]
+- GroupBlogBasicText [group]
+- GroupBlogStyles [group]
+- GroupBlogProofing [group]
+### GroupBlogPublish
+- BlogPublishMenu [splitButton]
+-   BlogPublish [button] < BlogPublishMenu
+-   BlogPublishDraft [button] < BlogPublishMenu
+- BlogHomePage [button]
+- BlogCategoryInsert [button]
+- BlogInsertCategories [button]
+- BlogOpenExisting [button]
+- BlogManageAccounts [button]
+### GroupClipboard
+- PasteMenu [splitButton]
+-   Paste [button] < PasteMenu
+-   Cut [button] < PasteMenu
+-   Copy [button] < PasteMenu
+-   PasteGallery [gallery] < PasteMenu
+-     PasteSpecialDialog [button] < PasteMenu
+-     PasteSetDefault [button] < PasteMenu
+-     ShowClipboard [button] < PasteMenu
+- Cut [button]
+- Copy [button]
+- FormatPainter [control]
+- ShowClipboard [button (dialogBoxLauncher)]
+### GroupBlogBasicText
+- Font [comboBox]
+- FontSize [comboBox]
+- FontSizeIncreaseWord [button]
+- FontSizeDecreaseWord [button]
+- Bullets [toggleButton]
+- Numbering [toggleButton]
+- IndentDecreaseWord [button]
+- IndentIncreaseWord [button]
+- ParagraphMarks [toggleButton]
+- EastAsianEditingMarks [toggleButton]
+- Bold [toggleButton]
+- Italic [toggleButton]
+- Underline [toggleButton]
+- Strikethrough [toggleButton]
+- FontColorPicker [gallery]
+-   FontColorMoreColorsDialog [button] < FontColorPicker
+-   TextFillGradientGallery [gallery] < FontColorPicker
+-     TextFillMoreGradientsDialog [button] < FontColorPicker
+- TextHighlightColorPicker [gallery]
+-   HighlightingStop [button] < TextHighlightColorPicker
+- ShadingColorPicker [gallery]
+-   ShadingColorsMoreColorsDialog [button] < ShadingColorPicker
+- AlignLeft [toggleButton]
+- AlignCenter [toggleButton]
+- AlignRight [toggleButton]
+- ClearFormatting [button]
+- FontDialog [button (dialogBoxLauncher)]
+### GroupBlogStyles
+- QuickStylesGallery [gallery]
+-   QuickStylesSaveSelectionAsNew [button] < QuickStylesGallery
+-   ClearFormatting [button] < QuickStylesGallery
+-   ApplyStylesPane [toggleButton] < QuickStylesGallery
+- StylesPane [button (dialogBoxLauncher)]
+### GroupBlogProofing
+- SpellingMenu [splitButton]
+-   SpellingAndGrammar [button] < SpellingMenu
+-   ResearchPane [toggleButton] < SpellingMenu
+-   Thesaurus [button] < SpellingMenu
+-   TranslateMenu [menu] < SpellingMenu
+-     TranslatorLookup [button] < SpellingMenu
+-     TranslatorDocument [button] < SpellingMenu
+-     TranslateDocument [button] < SpellingMenu
+-     TranslationPane [button] < SpellingMenu
+-     MiniTranslator [toggleButton] < SpellingMenu
+-     TranslatorPreferences [button] < SpellingMenu
+-     TranslationLanguageOptions [button] < SpellingMenu
+-   ImeDictionaryUpdate [button] < SpellingMenu
+-   ReviewJapaneseConsistencyChecker [button] < SpellingMenu
+-   HangulHanjaConversion [button] < SpellingMenu
+-   TranslateToSimplifiedChinese [button] < SpellingMenu
+-   TranslateToTraditionalChinese [button] < SpellingMenu
+-   ChineseTranslationDialog [button] < SpellingMenu
+-   SetLanguage [button] < SpellingMenu
+-   WordCount [button] < SpellingMenu
+
+## TabBlogInsert  (None (Core Tab))
+### 
+- GroupInsertTables [group]
+- GroupInsertIllustrations [group]
+- GroupOfficeExtension [group]
+- GroupBlogInsertLinks [group]
+- GroupBlogInsertText [group]
+- GroupBlogSymbols [group]
+### GroupInsertTables
+- TableInsertGallery [gallery]
+-   TableInsertDialogWord [button] < TableInsertGallery
+-   TableDrawTable [toggleButton] < TableInsertGallery
+-   ConvertTextToTable [button] < TableInsertGallery
+-   TableExcelSpreadsheetInsert [button] < TableInsertGallery
+-   QuickTablesInsertGallery [gallery] < TableInsertGallery
+-     SaveSelectionToQuickTablesGallery [button] < TableInsertGallery
+### GroupInsertIllustrations
+- FlyoutAnchorInsertPictures [gallery]
+-   PictureInsertFromFile [button] < FlyoutAnchorInsertPictures
+-   InsertMobilePicture [button] < FlyoutAnchorInsertPictures
+-   InsertM365Picture [button] < FlyoutAnchorInsertPictures
+-   ClipArtInsertDialog [button] < FlyoutAnchorInsertPictures
+- InsertPictureFlyoutAnchor [menu]
+-   PictureInsertFromFile [button] < InsertPictureFlyoutAnchor
+-   ClipArtInsertDialog [button] < InsertPictureFlyoutAnchor
+- MovieFromClipOrganizerInsert [button]
+- GalleryAllShapesAndCanvas [gallery]
+-   DrawingCanvasInsert [button] < GalleryAllShapesAndCanvas
+- IconInsertFromFile [button]
+- Insert3DModelFallback [button]
+- Insert3DModelDropdown [splitButton]
+-   Insert3DModelDefault [button] < Insert3DModelDropdown
+-   Insert3DModelFromFile [button] < Insert3DModelDropdown
+-   Insert3DModelFromFileConsumer [button] < Insert3DModelDropdown
+-   Insert3DModelFromOnline [button] < Insert3DModelDropdown
+-   Insert3DModelFromOnlineConsumer [button] < Insert3DModelDropdown
+- SmartArtInsert [button]
+- ChartInsert [button]
+- ScreenshotInsertGallery [gallery]
+-   ScreenClipping [button] < ScreenshotInsertGallery
+### GroupOfficeExtension
+- OfficeExtensionsAppStore [button]
+- OfficeExtensionsGallery2 [gallery]
+-   OfficeExtensionsDialog [button] < OfficeExtensionsGallery2
+-   OfficeExtensionsManageOtherAddins [button] < OfficeExtensionsGallery2
+-   ExtensibilityExperimentation [button] < OfficeExtensionsGallery2
+- OfficeExtensionsFeaturedApp1 [button]
+- OfficeExtensionsFeaturedApp2 [button]
+- OfficeExtensionsFeaturedApp3 [button]
+- OfficeExtensionsFeaturedApp4 [button]
+- OfficeExtensionsFeaturedApp5 [button]
+- OfficeExtensionsFeaturedApp6 [button]
+- AddInsMenuAnchor [menu]
+-   OfficeExtensionsAppStore [button] < AddInsMenuAnchor
+-   OfficeExtensionsGallery2 [gallery] < AddInsMenuAnchor
+-     OfficeExtensionsDialog [button] < AddInsMenuAnchor
+-     OfficeExtensionsManageOtherAddins [button] < AddInsMenuAnchor
+-     ExtensibilityExperimentation [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp1 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp2 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp3 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp4 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp5 [button] < AddInsMenuAnchor
+-   OfficeExtensionsFeaturedApp6 [button] < AddInsMenuAnchor
+### GroupBlogInsertLinks
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkInsert [button]
+### GroupBlogInsertText
+- JapaneseGreetingsInsertMenu [menu]
+-   MailMergeJapaneseGreetingInsert [button] < JapaneseGreetingsInsertMenu
+-   MailMergeJapaneseGreetingJapaneseOpeningSentenceInsert [button] < JapaneseGreetingsInsertMenu
+-   MailMergeJapaneseGreetingClosingSentenceInsert [button] < JapaneseGreetingsInsertMenu
+- WordArtInsertGallery [gallery]
+- WordArtInsertGalleryClassic [gallery]
+### GroupBlogSymbols
+- SymbolInsertGallery [gallery]
+-   SymbolsDialog [button] < SymbolInsertGallery
+
+## TabPrintPreview  (None (Core Tab))
+### 
+- GroupPrintPreviewPrint [group]
+- GroupPrintPreviewPageSetup [group]
+- GroupZoom [group]
+- GroupPrintPreviewPreview [group]
+### GroupPrintPreviewPrint
+- PrintPreviewAndPrint [button]
+- PrintOptionsMenuWord [button]
+### GroupPrintPreviewPageSetup
+- PageMarginsGallery [gallery]
+-   MarginsCustomMargins [button] < PageMarginsGallery
+- PageOrientationGallery [gallery]
+- PageSizeGallery [gallery]
+-   PageSizeMorePaperSizesDialog [button] < PageSizeGallery
+- PageSetupDialog [button (dialogBoxLauncher)]
+### GroupZoom
+- Thumbnails [toggleButton]
+- ZoomDialog [button]
+- ZoomCurrent100 [button]
+- ZoomOnePage [button]
+- ZoomTwoPages [button]
+- ZoomPageWidth [button]
+### GroupPrintPreviewPreview
+- ShowRuler [checkBox]
+- Magnifier [checkBox]
+- PrintPreviewShrinkOnePage [button]
+- PageNextWord [button]
+- PagePreviousWord [button]
+- PrintPreviewClose [button]
+
+## TabOutlining  (None (Core Tab))
+### 
+- GroupOutliningTools [group]
+- GroupMasterDocument [group]
+- GroupOutliningClose [group]
+### GroupOutliningTools
+- OutlinePromoteToHeading [button]
+- OutlinePromote [button]
+- OutlineLevelGallery [dropDown]
+- OutlineDemote [button]
+- OutlineDemoteToBodyText [button]
+- OutlineMoveUp [button]
+- OutlineMoveDown [button]
+- OutlineExpand [button]
+- OutlineCollapse [button]
+- OutlineShowLevel [dropDown]
+- OutlineShowTextFormatting [checkBox]
+- OutlineShowFirstLineOnly [checkBox]
+### GroupMasterDocument
+- MasterDocumentShow [toggleButton]
+- MasterDocumentExpandOrCollapseSubdocuments [toggleButton]
+- MasterDocumentCreateSubdocument [button]
+- MasterDocumentInsertSubdocument [button]
+- MasterDocumentUnlinkSubdocument [button]
+- MasterDocumentMergeSubdocuments [button]
+- MasterDocumentSplitSubdocuments [button]
+- MasterDocumentLockSubdocument [toggleButton]
+### GroupOutliningClose
+- OutlineViewClose [button]
+
+## TabConflicts  (None (Core Tab))
+### 
+- GroupClipboard [group]
+- GroupConflicts [group]
+- GroupComments [group]
+- GroupInk [group]
+- GroupConflictsClose [group]
+### GroupClipboard
+- PasteMenu [splitButton]
+-   Paste [button] < PasteMenu
+-   Cut [button] < PasteMenu
+-   Copy [button] < PasteMenu
+-   PasteGallery [gallery] < PasteMenu
+-     PasteSpecialDialog [button] < PasteMenu
+-     PasteSetDefault [button] < PasteMenu
+-     ShowClipboard [button] < PasteMenu
+- Cut [button]
+- Copy [button]
+- FormatPainter [control]
+- ShowClipboard [button (dialogBoxLauncher)]
+### GroupConflicts
+- ConflictsAcceptMenu [splitButton]
+-   ConflictsAcceptAndMoveToNext [button] < ConflictsAcceptMenu
+-   ConflictsAcceptAllInDocument [button] < ConflictsAcceptMenu
+- ConflictsRejectMenu [splitButton]
+-   ConflictsRejectAndMoveToNext [button] < ConflictsRejectMenu
+-   ConflictsRejectAllInDocument [button] < ConflictsRejectMenu
+- ConflictsPrevious [button]
+- ConflictsNext [button]
+### GroupComments
+- ReviewNewComment [button]
+- ReviewDeleteCommentsMenu [splitButton]
+-   ReviewDeleteComment [button] < ReviewDeleteCommentsMenu
+-   ReviewDeleteAllCommentsShown [button] < ReviewDeleteCommentsMenu
+-   ReviewDeleteAllCommentsInDocument [button] < ReviewDeleteCommentsMenu
+-   DeleteAllResolvedComments [button] < ReviewDeleteCommentsMenu
+- ReviewPreviousCommentWord [button]
+- ReviewNextCommentWord [button]
+- ShowCommentGutter [toggleButton]
+- ShowCommentsMenu [splitButton]
+-   ShowCommentGutter [toggleButton] < ShowCommentsMenu
+-   ShowCommentsContextualView [toggleButton] < ShowCommentsMenu
+-   ShowCommentsPane [toggleButton] < ShowCommentsMenu
+- ReviewInkCommentNew [button]
+- ReviewInkCommentPen [toggleButton]
+- ReviewInkCommentEraser [toggleButton]
+### GroupInk
+- InkingStart [button]
+- HideInkSplitButton [splitButton]
+-   HideInk [toggleButton] < HideInkSplitButton
+-   InkDeleteAll [button] < HideInkSplitButton
+### GroupConflictsClose
+- ConflictViewClose [button]
+
+## TabBackgroundRemoval  (None (Core Tab))
+### 
+- GroupBackgroundRemovalMode [group]
+- GroupBackgroundRemovalClose [group]
+### GroupBackgroundRemovalMode
+- PictureBackgroundRemovalMarkForeground [toggleButton]
+- PictureBackgroundRemovalMarkBackground [toggleButton]
+- PictureBackgroundRemovalMarkDelete [toggleButton]
+### GroupBackgroundRemovalClose
+- BackgroundRemovalClose [button]
+- KeepBackgroundRemoval [button]
+
+## TabBroadcastPresentation  (None (Core Tab))
+### 
+- GroupBroadcastBroadcast [group]
+- GroupBroadcastTools [group]
+### GroupBroadcastBroadcast
+- BroadcastNotesSplitButton [splitButton]
+-   BroadcastNotes [button] < BroadcastNotesSplitButton
+-   OpenMeetingNotes [button] < BroadcastNotesSplitButton
+-   ShareNotesWithMeeting [button] < BroadcastNotesSplitButton
+- BroadcastSendInvitation [button]
+- BroadcastEdit [button]
+- BroadcastResume [button]
+- BroadcastEnd [button]
+### GroupBroadcastTools
+- NavigationPaneFind [button]
+
+## None (Not in the Ribbon)  (None (Not in the Ribbon))
+### 
+- FileNewDefault [button]
+- FileOpenUsingBackstage [button]
+- FileSave [button]
+- FileSendAsAttachment [button]
+- FilePrintQuick [button]
+- PrintPreviewAndPrint [button]
+- SpellingAndGrammar [button]
+- ReadAloud [button]
+- Undo [gallery]
+- RedoOrRepeat [button]
+- TableDrawTable [toggleButton]
+- FileOpenRecentFile [button]
+- PointerModeOptions [gallery]
+- FilePermissionRestrictAs [button]
+- SendDoc [button]
+- MdiChildSystemMenu [menu]
+- MinimizeRibbon [toggleButton]
+- SingleLineRibbonToggle [toggleButton]
+- WindowMinimize [button]
+- WindowRestore [button]
+- WindowClose [button]
+- HideRibbon [toggleButton]
+- FileCreateDocumentWorkspace [toggleButton]
+- ViewMessageBar [checkBox]
+- FileDocumentManagementInformation [toggleButton]
+- SearchLibraries [button]
+- NavPaneFindTellMe [control]
+- SmartLookup [control]
+- SendCopyAttachmentOptions [button]
+- ReadingViewClose [button]
+- ZoomClassic [button]
+- BrowseNext [button]
+- TableRowsOrColumnsOrCellsDelete [button]
+- BordersShadingDialog [button]
+- BulletsAndNumberingBulletsDialog [button]
+- TableRowsOrColumnsOrCellsInsert [button]
+- BreakInsertDialog [button]
+- Redo [gallery]
+- MergeOrSplitCells [button]
+- BrowsePrevious [button]
+- Reply [button]
+- ReplyAll [button]
+- FieldsUpdate [button]
+- AddressBook [button]
+- EnvelopesAndLabels [button]
+- ContrastMore [button]
+- HyperlinkEdit [button]
+- Forward [button]
+- FileCloseOrCloseAll [button]
+- ShapeRectangle [toggleButton]
+- SendCopySendToMailRecipient [toggleButton]
+- ChangeCaseDialogClassic [button]
+- Translate [button]
+- HyperlinkRemove [button]
+- BrightnessMore [button]
+- StylesModifyStyle [button]
+- ContrastLess [button]
+- ReadingViewFontSizeIncrease [button]
+- BrightnessLess [button]
+- HeaderOrFooterShow [button]
+- LookUp [button]
+- NumberingRestart [button]
+- WordCountRecount [button]
+- ShapeOval [toggleButton]
+- MessagePrevious [button]
+- Lock [toggleButton]
+- TableAutoFormatStyle [button]
+- IndexAndTables [button]
+- FontSizeIncrease1Point [button]
+- ViewMasterDocumentViewClassic [button]
+- ReadingViewFontSizeDecrease [button]
+- Grammar [button]
+- ReadingViewAllowMultiplePages [button]
+- TabsDialog [button]
+- EditField [button]
+- MessageNext [button]
+- AutoFormat [button]
+- ViewFullScreenView [button]
+- RevealFormatting [button]
+- FontSizeDecrease1Point [button]
+- TableRowsInsertWord [button]
+- AutoCorrect [button]
+- ReadingViewShowPrintedPage [button]
+- DocumentMapReadingView [button]
+- PasteAlternative [button]
+- FormControlCheckBox [button]
+- DeleteStyle [button]
+- About [button]
+- FormControlEditBox [button]
+- NumberingContinue [button]
+- FormFieldProperties [button]
+- FilePermission [button]
+- ChangeCase [button]
+- HyperlinkOpen [button]
+- FieldCodesToggle [button]
+- DrawingCanvasExpand [button]
+- CompareAndCombine [button]
+- FileSaveAsWebPage [button]
+- WordArtInsertDialogClassic [button]
+- PropertySheet [button]
+- AutoSum [button]
+- FindNext [button]
+- Spelling [button]
+- DrawingCanvasScale [button]
+- TextAllCaps [toggleButton]
+- HyperlinkCopy [button]
+- NormalizeText [button]
+- ReviewSendForReview [button]
+- PictureEditWord [button]
+- ObjectSaveAsPicture [button]
+- ObjectSetShapeDefaults [button]
+- ReviewEditComment [button]
+- WebGoBack [button]
+- WebPagePreview [button]
+- PrivacyOptionsDialog [button]
+- Heading2Apply [button]
+- SignaturesStationeryDialog [button]
+- ShapeCurve [toggleButton]
+- BodyTextHide [button]
+- TextSmallCaps [toggleButton]
+- Heading3Apply [button]
+- StylesRedefineStyle [button]
+- SendCopySendNow [button]
+- ShapeFreeform [toggleButton]
+- ShapeConvertToFreeform [button]
+- DrawingCanvasFit [button]
+- FullScreenViewClassic [button]
+- ClosePane [button]
+- CellsInsertDialog [button]
+- SetLanguageMenu [comboBox]
+- AutoTextCreate [button]
+- Heading1Apply [button]
+- DoubleStrikethrough [toggleButton]
+- OleConvert [button]
+- ShapeScribble [toggleButton]
+- MacroRecorderStop [button]
+- CheckForUpdates [button]
+- ShapeRoundedRectangle [toggleButton]
+- OfficeOnTheWeb [button]
+- MailMergeSetDocumentType [button]
+- ImeReconvert [button]
+- FieldShading [toggleButton]
+- HyperlinkSelect [button]
+- HangingIndent [button]
+- ReadingViewResearchPane [button]
+- ThesaurusClassic [button]
+- JumpBetweenCommentCardAndAnchor [button]
+- ShowCommentsPane [toggleButton]
+- DeleteAllResolvedComments [button]
+- ShapeStraightConnectorArrow [toggleButton]
+- ShapeRoundedRectangularCallout [toggleButton]
+- SortAscendingWord [button]
+- ShapeRightArrow [toggleButton]
+- FormControlComboBox [button]
+- StylesDialogClassic [button]
+- CharacterFormattingReset [button]
+- ParagraphSpacingDecrease [button]
+- FramePropertiesDialog [button]
+- EmailOptions [button]
+- GoToTableOfContents [button]
+- ShapeElbowConnectorArrow [toggleButton]
+- FrameDialog [button]
+- ReviewReplyWithChanges [button]
+- Cancel [button]
+- ShapeLeftBrace [toggleButton]
+- ShapeStraightConnector [toggleButton]
+- UnderlineDouble [toggleButton]
+- ReviewNextChangeClassic [button]
+- FrameDelete [button]
+- ProofingOptions [button]
+- GrammarHideErrors [toggleButton]
+- EnableBackgroundProofing [button]
+- PasteApplyStyle [button]
+- FrameInsertHorizontal [button]
+- SpellingHideErrors [toggleButton]
+- MergeOptions [button]
+- ShapeDownArrow [toggleButton]
+- FileCloseAll [button]
+- WhoIs [button]
+- OrganizationChartInsert [button]
+- FrameCreateLeft [button]
+- ShapeRightBrace [toggleButton]
+- ActiveXCheckBox [button]
+- ActivateProduct [button]
+- FormFieldReset [button]
+- DataFormWord [button]
+- InkDrawingAndWriting [button]
+- ShapeArc [toggleButton]
+- ParagraphSpacingIncrease [button]
+- ParagraphKeepWithNext [toggleButton]
+- ShapeStar [toggleButton]
+- ShapeIsoscelesTriangle [toggleButton]
+- ActiveXTextBox [button]
+- CharacterLeft [button]
+- StyleByExample [button]
+- SortDescendingWord [button]
+- FieldCodes [toggleButton]
+- TextToOrFromTable [button]
+- FrameCreateRight [button]
+- ObjectsMultiSelect [button]
+- ActiveXLabel [button]
+- DocumentLocation [comboBox]
+- WebDesignMode [toggleButton]
+- ViewVisualBasicCode [button]
+- ActiveXButton [button]
+- FrameCreateBelow [button]
+- FrameCreateAbove [button]
+- OrganizationChartDeleteNode [button]
+- ActiveXRadioButton [button]
+- StyleNormal [button]
+- ReviewNextComment [button]
+- HideText [button]
+- FileSendToPowerPoint [button]
+- ShapeElbowConnector [toggleButton]
+- Calculate [button]
+- ActiveXSpinButton [button]
+- ParagraphSpaceAddOrRemoveBefore [button]
+- MarginsAdjust [button]
+- ActiveXImage [button]
+- DiagramAutoFormatClassic [button]
+- MoreControlsDialog [button]
+- ExchangeFolder [button]
+- EndnoteOrFootnoteConvert [button]
+- FileNewDialogClassic [button]
+- UnderlineDotted [toggleButton]
+- DatabaseInsert [button]
+- SaveAll [button]
+- ColumnWidth [button]
+- MailMergeHelper [button]
+- GoToFootnote [button]
+- ActiveXComboBox [button]
+- MacroRecord [button]
+- ShowAllHeadings [button]
+- UnderlineWords [button]
+- ActiveXListBox [button]
+- XmlViewStructure [button]
+- ReviewPreviousChangeClassic [button]
+- DataFormAddRecord [button]
+- PreviousEdit [button]
+- FieldsManage [button]
+- XmlToggleTagView [button]
+- TableFind [button]
+- ProtectOrUnprotectDocument [button]
+- ActiveXScrollBar [button]
+- ReviewPreviousComment [button]
+- TextBoxNextLinked [button]
+- VoiceInsertInComment [button]
+- MailMergeEditAddressBlock [button]
+- ParagraphKeepLinesTogether [button]
+- StylesStyleVisibility [button]
+- IndentClassic [button]
+- ReviewShowAllComments [button]
+- Zoom100 [button]
+- ZoomIn [button]
+- ZoomOut [button]
+- PageOrientationPortraitLandscape [button]
+- WindowNext [button]
+- WebGoForward [button]
+- FieldsUnlock [button]
+- UnHang [button]
+- ReviewEndReview [button]
+- MicrosoftPublisher [button]
+- MailMergeEditGreetingLine [button]
+- MailMergeEditBarcode [button]
+- PrintSetupDialog [button]
+- FilePrint [button]
+- FilePrintPreview [toggleButton]
+- MailMergeDocument [button]
+- StartOfDocument [button]
+- FileNewBlankDocument [button]
+- OutdentClassic [button]
+- ActiveXToggleButton [button]
+- MicrosoftAccess [button]
+- FieldsLock [button]
+- MicrosoftProject [button]
+- FormField [button]
+- ParagraphReset [button]
+- GoToNextPage [button]
+- AutoFormatNow [button]
+- StylesStyleSeparator [button]
+- MicrosoftExcel [button]
+- GoToPreviousPage [button]
+- TextBoxPreviousLinked [button]
+- MessageHeaderToggle [button]
+- GoToEndnote [button]
+- PictureDisassemble [button]
+- DataFormDeleteRecord [button]
+- DataFormSource [button]
+- MicrosoftPowerPoint [button]
+- TableCellHeightWidth [button]
+- FootnoteSeparatorReset [button]
+- Organizer [button]
+- AddToFavorites [button]
+- ParagraphSpaceBefore [button]
+- NumberingSkip [button]
+- MicrosoftOutlook [button]
+- TextWrappingNoneClassic [toggleButton]
+- DiagramCycleInsertClassic [button]
+- SubdocumentOpen [button]
+- NextMisspeling [button]
+- HorizontalLineInsertClassic [button]
+- AutoScroll [button]
+- WordPicture [button]
+- AutoTextInsert [button]
+- FrameSaveCurrentAs [button]
+- RowHeight [button]
+- CharacterCodeToggle [button]
+- PictureBulletsInsert [button]
+- OutlookTaskCreate [button]
+- InkCopyAsText [button]
+- StyleGalleryDialog [button]
+- MailMergeMergeToFax [button]
+- FormatSectionLayout [button]
+- FormatNumberDefault [button]
+- DiagramTargetInsertClassic [button]
+- ListCommands [button]
+- WebComponent [button]
+- DiagramVennDiagramInsertClassic [button]
+- FieldsUnlink [button]
+- SmartTagOptions [button]
+- SymbolFont [button]
+- DrawingCanvasResize [button]
+- Repaginate [button]
+- DiagramPyramidInsertClassic [button]
+- SectionBreakInsert [button]
+- InsertEmSpace [button]
+- OutlineNumberDefault [button]
+- TextBoxWordClassic [button]
+- WindowPrevious [button]
+- Overtype [button]
+- WindowOtherPane [button]
+- ViewOnlineLayoutViewClassic [button]
+- ParagraphSpaceBeforeNone [button]
+- FieldNext [button]
+- SendCopyOptions [button]
+- ListNumFieldInsert [button]
+- TableOfAuthoritiesEditCategory [button]
+- DeleteWord [button]
+- FileNewWebPage [button]
+- PictureEditClassic [button]
+- GoToNextSection [button]
+- GoToPreviousSection [button]
+- FieldPrevious [button]
+- ObjectNext [button]
+- ObjectPrevious [button]
+- NextEdit [button]
+- DraftViewClassic [button]
+- WhiteSpaceBetweenPagesShowHide [button]
+- AutoMarkIndexEntries [button]
+- TableOfContentsMarkEntry [button]
+- VoiceInsert [button]
+- InsertEnSpace [button]
+- DiagramRadialInsertClassic [button]
+- StylesRenameStyle [button]
+- BreakParagraphPageBreakBefore [button]
+- ParagraphWidowOrphanControl [button]
+- FontPositionNormal [button]
+- FontSpacingNormal [button]
+- Dictionary [button]
+- AutoCorrectExceptions [button]
+- WebOptionsDialog [button]
+- DocumentUpdatePane [button]
+- ContentsAndIndex [button]
+- OrganizationChartResize [button]
+- KeyboardCustomization [button]
+- KeyboardCustomizationWord [button]
+- ObjectActivate [button]
+- ListBulletApply [button]
+- WindowMaximizeAll [button]
+- WindowMinimizeAll [button]
+- WindowMoveAll [button]
+- WindowRestoreAll [button]
+- WindowSizeAll [button]
+- AutoFormatChange [button]
+- AutoSummaryUpdateProperties [button]
+- ReplaceWithAutoText [button]
+- BoldRun [button]
+- TableCellOptions [button]
+- CharacterLeftExtend [button]
+- CharacterRight [button]
+- CharacterRightExtend [button]
+- FormFieldClear [button]
+- TableColumnSelectWord [button]
+- ConnectToNetworkDrive [button]
+- ControlRun [button]
+- TextBoxConvertToFrame [button]
+- CopyText [button]
+- CssLinksEdit [button]
+- DeleteWordBack [button]
+- IndentIncrease [button]
+- TableRowsOrColumnsDistribute [button]
+- WindowMove [button]
+- WindowSize [button]
+- FieldClick [button]
+- AlignDialog [button]
+- Callout [button]
+- PasteDuplicate [button]
+- NudgeMenu [menu]
+- DrawingSelectNext [button]
+- DrawingSelectPrevious [button]
+- DrawingUnselect [button]
+- EndnotesConvertAll [button]
+- FootnotesConvertAll [button]
+- CopyAsPicture [button]
+- ObjectEditDialog [button]
+- SwapAllNotes [button]
+- SendCopyCheckNames [button]
+- AccountSettings [button]
+- SendCopyFlag [button]
+- SendCopyFocusIntroduction [button]
+- SendCopyFocusSubject [button]
+- SendCopySaveAttachment [button]
+- SendCopyAddressBookBcc [button]
+- SendCopyAddressBookCc [button]
+- SendCopySelectNames [button]
+- SendCopyAddressBookTo [button]
+- EndOfColumn [button]
+- EndOfDocumentExtend [button]
+- EndOfDocument [button]
+- EndOfLine [button]
+- EndOfLineExtend [button]
+- EndOfRow [button]
+- GoToEndOfWindow [button]
+- EndOfWindowExtend [button]
+- SendCopySetup [button]
+- ExtendSelection [button]
+- FileCloseOrExit [button]
+- FileConfirmConversions [button]
+- FileFind [button]
+- FileSaveAsHtml [button]
+- SummaryInformation [button]
+- FontSubstitution [button]
+- AddressFontsFormat [button]
+- CalloutOptions [button]
+- ConsistencyCheck [button]
+- FrameInsertOrFormat [button]
+- LinkToPreviousClassic [button]
+- HeadingNumbers [button]
+- PictureFormatDialog [button]
+- ReturnAddressFormatFontDialog [button]
+- StyleEnforcementSettings [button]
+- GoToAnnotationScope [button]
+- CaptionInsertWord [button]
+- AutoCaptionInsert [button]
+- InsertCaptionNumbering [button]
+- DrawingInsert [button]
+- FieldCharactersInsert [button]
+- ActiveXFrame [button]
+- DrawingNewClassic [button]
+- SpikeInsert [button]
+- ItalicRun [button]
+- LabelOptions [button]
+- SpeakLearnFromDocument [button]
+- LineDown [button]
+- LineDownExtend [button]
+- LineUp [button]
+- LineUpExtend [button]
+- ListDemote [button]
+- ListPromote [button]
+- LeftToRightRun [button]
+- MailMergeAskToConvertChevrons [button]
+- MailMergeConvertChevrons [button]
+- MailMergeCreateDataSource [button]
+- MailMergeCreateHeaderSource [button]
+- HeaderSourceEdit [button]
+- MailMergeEditList [button]
+- MailMergeRuleAsk [button]
+- MailMergeRuleFillIn [button]
+- MailMergeRuleIfThenElse [button]
+- MailMergeRuleMergeRecordNumber [button]
+- MailMergeRuleMergeSequenceNumber [button]
+- MailMergeRuleNextRecord [button]
+- MailMergeRuleNextRecordIf [button]
+- MailMergeRuleSetBookmark [button]
+- MailMergeRuleSkipRecordIf [button]
+- MailMergeOpenHeaderSource [button]
+- MailMergeQueryOptions [button]
+- MailMergeReset [button]
+- MailDelete [button]
+- MailMove [button]
+- MessageProperties [button]
+- MailSelectNames [button]
+- TableCellVerticalAlignmentMenu [menu]
+- ClearMenuWord [menu]
+- FramesetMenu [menu]
+- MenuMode [button]
+- RevisionsMenu [menu]
+- SystemInformation [button]
+- MailMergeEmailOptions [button]
+- MailMergeFaxOptions [button]
+- MailMergeMergeToNewDocumentOptions [button]
+- MailMergePrintOptions [button]
+- MoveText [button]
+- TableCellNext [button]
+- NormalViewHeaderArea [button]
+- FootnoteEndnoteOptions [button]
+- OK [button]
+- PageNext [button]
+- PageDownExtend [button]
+- PagePrevious [button]
+- PageUpExtend [button]
+- ParagraphDown [button]
+- ParagraphDownExtend [button]
+- ParagraphUp [button]
+- ParagraphUpExtend [button]
+- TableCellPrevious [button]
+- IndentDecrease [button]
+- ReadingViewUnlockDocumentLayout [button]
+- NumberingRemove [button]
+- FramesRemove [button]
+- RightToLeftRun [button]
+- SaveTemplate [button]
+- ScreenRefresh [button]
+- SelectCurrentAlignment [button]
+- SelectCurrentColor [button]
+- SelectCurrentFont [button]
+- SelectCurrentIndent [button]
+- SelectCurrentSpacing [button]
+- SelectCurrentTabs [button]
+- SelectObjects [button]
+- SelectNumber [button]
+- ExtendSelectionLeft [button]
+- ExtendSelectionLeftSentence [button]
+- ExtendSelectionRight [button]
+- ExtendSelectionRightSentence [button]
+- ShowRepairs [button]
+- ShrinkSelection [button]
+- Spike [button]
+- StartOfColumn [button]
+- StartOfDocumentExtend [button]
+- StartOfLine [button]
+- StartOfLineExtend [button]
+- StartOfRow [button]
+- GoToStartOfWindow [button]
+- StartOfWindowExtend [button]
+- TableAutoFormat [button]
+- TableAutoFormatUpdate [button]
+- TableWrapping [button]
+- None [button]
+- ReadingViewStartInking [button]
+- AutoCorrectCapsLockOff [button]
+- AutoCorrectDays [button]
+- AutoCorrectHECorrect [button]
+- AutoCorrectInitialCaps [button]
+- AutoCorrectReplaceText [button]
+- AutoCorrectSentenceCaps [button]
+- AutoCorrectSmartQuotes [button]
+- AutoManager [button]
+- BulletListDefault [button]
+- BulletsAndNumberingClassic [button]
+- CreateDirectoryClassic [button]
+- GrammarSettingsDialog [button]
+- NumberListDefault [button]
+- AutoFormatOptions [button]
+- AutoFormatAsYouType [button]
+- CopyPasteSettings [button]
+- FileLocations [button]
+- Security [button]
+- SpellingRecheckDocument [button]
+- TextBoxAutosize [button]
+- UpdateSource [button]
+- TableOfContentsUpdateClassic [button]
+- TableOfContentsRebuild [button]
+- EndnoteContinuationNotice [button]
+- EndnoteContinuationSeparator [button]
+- EndnoteSeparator [button]
+- FootnoteContinuationNotice [button]
+- FootnoteContinuationSeparator [button]
+- FootnoteSeparatorWord [button]
+- MasterDocument [button]
+- Zoom200 [button]
+- Zoom75 [button]
+- WebOpenInNewWindow [button]
+- WordLeft [button]
+- WordLeftExtend [button]
+- WordRight [button]
+- WordRightExtend [button]
+- FormatObjectDialogClassic [button]
+- XmlOptionsDialog [button]
+- StylesStyleInspector [toggleButton]
+- StylesManageStyles [button]
+- StylesPaneNewStyle [button]
+- AutoSummaryToolsMenu [menu]
+- PanningHand [toggleButton]
+- AutoTextGallery [gallery]
+- CustomHeaderGallery [gallery]
+- CustomFooterGallery [gallery]
+- CustomCoverPageGallery [gallery]
+- CustomPageNumberGallery [gallery]
+- CustomPageNumberTopGallery [gallery]
+- CustomPageNumberBottomGallery [gallery]
+- CustomPageMargins [gallery]
+- CustomWatermarkGallery [gallery]
+- CustomEquationsGallery [gallery]
+- CustomTablesGallery [gallery]
+- CustomQuickPartsGallery [gallery]
+- CustomAutoTextGallery [gallery]
+- CustomTableOfContentsGallery [gallery]
+- CustomBibliographyGallery [gallery]
+- CustomTextBoxGallery [gallery]
+- CustomGallery1 [gallery]
+- CustomGallery2 [gallery]
+- CustomGallery3 [gallery]
+- CustomGallery4 [gallery]
+- CustomGallery5 [gallery]
+- CombineCharacters [toggleButton]
+- QuickAccessToolbarCustomization [button]
+- RibbonCustomization [button]
+- StyleGalleryClassic [comboBox]
+- ObjectSizeDialog [button]
+- AlternativeText [button]
+- AdvancedFileProperties [button]
+- LineSpacingMenu [menu]
+- TextWrappingMenu [menu]
+- TextWrappingInLineWithText [toggleButton]
+- TextWrappingSquare [toggleButton]
+- TextWrappingTight [toggleButton]
+- TextWrappingBehindText [toggleButton]
+- TextWrappingInFrontOfText [toggleButton]
+- TextWrappingTopAndBottom [toggleButton]
+- TextWrappingThrough [toggleButton]
+- TextWrappingEditWrapPoints [toggleButton]
+- LayoutOptionsDialog [button]
+- ViewDocumentMap [checkBox]
+- ViewThumbnails [checkBox]
+- _3DExtrusionDepthCustom [control]
+- InkingStart [button]
+- InkToolsClose [button]
+- FileDiscardCachedChanges [button]
+- ReopenFromServer [button]
+- RefreshServerFile [button]
+- ReopenServerFile [button]
+- FileSaveACopy [button]
+- None [button]
+- PictureBrightnessGallery [gallery]
+- PictureContrastGallery [gallery]
+- PictureCorrectionsReset [button]
+- PictureColorReset [button]
+- PictureArtisticEffectsReset [button]
+- ObjectSizeAndPropertiesDialog [button]
+- JapanesePostcardDialog [button]
+- QuickPartsInsertFromOnline [button]
+- NumberInsert [button]
+- ListIndentsAdjust [button]
+- TableInsertMultidiagonalCell [button]
+- ContentControlRemove [button]
+- PlaybackTipPlay [button]
+- InkDeleteAllInk [button]
+- ObjectBringToFrontMenu [splitButton]
+- ObjectSendToBackMenu [splitButton]
+- AcetateModeOriginalMarkup [toggleButton]
+- ClipArtInsert [toggleButton]
+- XmlSchema [button]
+- XmlTransformation [toggleButton]
+- XmlExpansionPacksWord [button]
+- ReviewChangeUserName [button]
+- TrackChangesAdvancedOptions [button]
+- ReviewPeopleFilterMenu [splitButton]
+- ReviewTimeFilterMenu [splitButton]
+- TableBordersMenu [splitButton]
+- QuickStylesResetDocumentStyles [button]
+- ChangeStylesMenu [menu]
+- ExpandHeading [button]
+- CollapseHeading [button]
+- ExpandAllHeadings [button]
+- CollapseAllHeadings [button]
+- FileOpen [button]
+- ReviewShowMarkupAreaHighlight [toggleButton]
+- EnglishWritingAssistant [button]
+- Collaborate [toggleButton]
+- CollaborateActivity [toggleButton]
+- None [toggleButton]
+- WhatsNewRecentUpdates [button]
+- OfficeFeedbackBackstage [button]
+- GroupOfficeInsider [button]
+- HeaderFooterEditHeader [button]
+- HeaderFooterRemoveHeaderWord [button]
+- HeaderFooterEditFooter [button]
+- HeaderFooterRemoveFooterWord [button]
+- PageNumbersRemove [button]
+- WatermarkRemove [button]
+- TableColumnsDelete [button]
+- TableRowsDelete [button]
+- OpenOptionsAddIns [button]
+- OpenOptionsAdvanced [button]
+- OpenOptionsCustomization [button]
+- OpenOptionsEaseOfAcess [button]
+- OpenOptionsExperimentSettings [button]
+- OpenOptionsLanguage [button]
+- OpenOptionsSaving [button]
+- OpenOptionsSetup [button]
+- OpenOptionsSpelling [button]
+- OpenOptionsTrustCenterSettings [button]
+- OpenOptionsDisplay [button]
+- OpenOptionsWordCustomizeRibbon [button]
+- SaveACopyButton [button]
+- MarkAsDecorative [button]
+- GenerateAutoAltText [button]
+- ColorPickerParagraphShading [gallery]
+- ColorPickerTableCellShading [gallery]
+- ShowNavigationPaneHeadingsView [button]
+- ManagePrivacy [button]
+- ShowTextPredictions [toggleButton]
+- TextPredictionsFeedback [button]
+- None [button]
+- OfficeExtensionsAppStore [button]
+- OfficeExtensionsGallery2 [gallery]
+- OfficeExtensionsFeaturedApp1 [button]
+- OfficeExtensionsFeaturedApp2 [button]
+- OfficeExtensionsFeaturedApp3 [button]
+- OfficeExtensionsFeaturedApp4 [button]
+- OfficeExtensionsFeaturedApp5 [button]
+- OfficeExtensionsFeaturedApp6 [button]
+- PasteExcelTableSourceFormatting [button]
+- PasteExcelTableDestinationTableStyle [button]
+- PasteSingleCellExcelTableDestinationFormatting [button]
+- PasteSingleCellTableAsText [button]
+- PasteSingleCellTableAsTable [button]
+- PasteContinueList [button]
+- PasteNewList [button]
+- PasteMergeList [button]
+- PasteDontMergeList [button]
+- PasteAsNestedTable [button]
+- PasteByAppendingTable [button]
+- PasteTableAsNewRows [button]
+- PasteTableByOverwritingCells [button]
+- PasteTableWithSourceFormatting [button]
+- PasteAsPicture [button]
+- PasteSourceFormatting [button]
+- PasteDestinationStyle [button]
+- PasteDestinationTheme [button]
+- PasteMergeFormatting [button]
+- PasteTextOnly [button]
+- PasteLinkedExcelTableSourceFormatting [button]
+- PasteLinkedExcelTableDestinationTableStyle [button]
+- PasteLinkedSingleCellExcelTableDestinationFormatting [button]
+- PasteBitmap [button]
+- PasteGif [button]
+- PastePng [button]
+- PasteJpeg [button]
+- PasteExcelChartSourceFormatting [button]
+- PasteExcelChartDestinationTheme [button]
+- PasteLinkedExcelChartSourceFormatting [button]
+- PasteLinkedExcelChartDestinationTheme [button]
+- PasteAsHyperlink [button]
+- PasteTableByInsertingColumns [button]
+- ConflictViewEnter [button]
+- ConflictViewClose [button]
+- SaveAndCloseConflictView [button]
+- GroupXml [group]
+- GroupThemesWord [group]
+- PictureInsertFromFile [button]
+- ParagraphDialog [button]
+- PageSetupDialog [button]
+- FontDialog [button]
+- ReviewTrackChanges [toggleButton]
+- ReviewAcceptChangeAndMoveToNext [button]
+- ReviewRejectChangeAndMoveToNext [button]
+- ReviewNewComment [button]
+- BreaksGallery [gallery]
+- StylesPane [button]
+- AlignLeft [toggleButton]
+- AlignCenter [toggleButton]
+- Copy [button]
+- Cut [button]
+- ReviewDeleteComment [button]
+- NavigationPaneFind [button]
+- FormatPainter [control]
+- FontSizeIncreaseWord [button]
+- FootnoteInsert [button]
+- MacroPlay [button]
+- ReviewNextCommentWord [button]
+- ZoomOnePage [button]
+- ZoomPageWidth [button]
+- ReviewPreviousCommentWord [button]
+- FileSaveAs [button]
+- FontSizeDecreaseWord [button]
+- ZoomTwoPages [button]
+- LineSpacingGallery [gallery]
+- FontSize [comboBox]
+- Font [comboBox]
+- ShapesInsertGallery [gallery]
+- QuickStylesGallery [gallery]
+- BulletsGalleryWord [gallery]
+- FontColorPicker [gallery]
+- TableInsertGallery [gallery]
+- NumberingGalleryWord [gallery]
+- TextBoxInsertGallery [gallery]
+- TextHighlightColorPicker [gallery]
+- PasteMenu [splitButton]
+- UpgradeDocument [button]
+- FileExit [button]
+- FileNew [button]
+- ApplicationOptionsDialog [button]
+- None [button]
+- FileStartWorkflow [button]
+- LeaveReader [button]
+- MenuAccessibility [splitButton]
+- BroadcastSlideShowGeneric [button]
+- BroadcastSlideShowBackstage [button]
+- EditDocument [button]
+- ReviewRestrictFormatting [toggleButton]
+- OfficeFeedback [button]
+- DigitalPrint [button]
+- AppGuardTrustPromotion [button]
+- OfficeExtensionsGetAddinsButtonOnBackstageBelowOpenDivider [button]
+- FilePrepareMenu [menu]
+- FilePrintMenu [splitButton]
+- MenuPublish [menu]
+- FileSaveAsMenu [splitButton]
+- FileSendMenu [menu]
+- FileServerTasksMenu [menu]
+- ProtectDocument [toggleButton]
+- ReviewProtectDocumentMenu [menu]
+- ChartShowData [button]
+- ButtonAddinDisabled [button]
+### None (Not in the Ribbon)
+-   ObjectNudgeUp [button] < NudgeMenu
+-   ObjectNudgeDown [button] < NudgeMenu
+-   ObjectNudgeLeft [button] < NudgeMenu
+-   ObjectNudgeRight [button] < NudgeMenu
+-   TableCellAlignTop [toggleButton] < TableCellVerticalAlignmentMenu
+-   TableCellAlignCenterVertically [toggleButton] < TableCellVerticalAlignmentMenu
+-   TableCellAlignBottom [toggleButton] < TableCellVerticalAlignmentMenu
+-   ClearFormats [button] < ClearMenuWord
+-   ClearContentsWord [button] < ClearMenuWord
+-   TableOfContentsInFrame [button] < FramesetMenu
+-   FramesNewFramesPageWizard [button] < FramesetMenu
+-   ReviewHighlightChanges [button] < RevisionsMenu
+-   ReviewAcceptOrRejectChangeDialog [button] < RevisionsMenu
+-   AutoSummarize [button] < AutoSummaryToolsMenu
+-   AutoSummaryResummarize [button] < AutoSummaryToolsMenu
+-   AutoSummaryViewByHighlight [toggleButton] < AutoSummaryToolsMenu
+-   AutoSummaryExitView [button] < AutoSummaryToolsMenu
+-   SaveSelectionToAutoTextGallery [button] < AutoTextGallery
+-   TextWrappingInLineWithText [toggleButton] < TextWrappingMenu
+-   TextWrappingSquare [toggleButton] < TextWrappingMenu
+-   TextWrappingTight [toggleButton] < TextWrappingMenu
+-   TextWrappingBehindText [toggleButton] < TextWrappingMenu
+-   TextWrappingInFrontOfText [toggleButton] < TextWrappingMenu
+-   TextWrappingTopAndBottom [toggleButton] < TextWrappingMenu
+-   TextWrappingThrough [toggleButton] < TextWrappingMenu
+-   TextWrappingEditWrapPoints [toggleButton] < TextWrappingMenu
+-   LayoutOptionsDialog [button] < TextWrappingMenu
+-   PictureCorrectionsDialog [button] < PictureBrightnessGallery
+-   PictureCorrectionsDialog [button] < PictureContrastGallery
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+-   ReviewPeopleFilter [toggleButton] < ReviewPeopleFilterMenu
+-   ReviewFilterByEveryone [toggleButton] < ReviewPeopleFilterMenu
+-   ReviewFilterByMe [toggleButton] < ReviewPeopleFilterMenu
+-   ReviewFilterByOthers [toggleButton] < ReviewPeopleFilterMenu
+-   ReviewShowReviewersMenu [menu] < ReviewPeopleFilterMenu
+-   ReviewTimeFilter [toggleButton] < ReviewTimeFilterMenu
+-   ReviewFilterByEver [toggleButton] < ReviewTimeFilterMenu
+-   ReviewFilterByToday [toggleButton] < ReviewTimeFilterMenu
+-   ReviewFilterByYesterday [toggleButton] < ReviewTimeFilterMenu
+-   ReviewFilterByLastWeek [toggleButton] < ReviewTimeFilterMenu
+-   ReviewFilterByCustom [toggleButton] < ReviewTimeFilterMenu
+-   BorderBottomWord [toggleButton] < TableBordersMenu
+-   BorderTopWord [toggleButton] < TableBordersMenu
+-   BorderLeftWord [toggleButton] < TableBordersMenu
+-   BorderRightWord [toggleButton] < TableBordersMenu
+-   BorderNone [toggleButton] < TableBordersMenu
+-   BordersAll [toggleButton] < TableBordersMenu
+-   BorderOutside [toggleButton] < TableBordersMenu
+-   BorderInside [toggleButton] < TableBordersMenu
+-   BorderInsideHorizontal [toggleButton] < TableBordersMenu
+-   BorderInsideVertical [toggleButton] < TableBordersMenu
+-   BorderDiagonalDown [toggleButton] < TableBordersMenu
+-   BorderDiagonalUp [toggleButton] < TableBordersMenu
+-   HorizontalLineInsert [button] < TableBordersMenu
+-   TableDrawTable [toggleButton] < TableBordersMenu
+-   TableShowGridlines [toggleButton] < TableBordersMenu
+-   BordersShadingDialogWord [button] < TableBordersMenu
+-   QuickStylesSets [gallery] < ChangeStylesMenu
+-     QuickStylesResetFromTemplate [button] < ChangeStylesMenu
+-     QuickStylesSaveQuickStyleSet [button] < ChangeStylesMenu
+-   ThemeColorsGallery [gallery] < ChangeStylesMenu
+-     ThemeColorsCreateNew [button] < ChangeStylesMenu
+-   ThemeFontsGallery [gallery] < ChangeStylesMenu
+-     ThemeFontsCreateNew [button] < ChangeStylesMenu
+-   ParagraphSpacing [gallery] < ChangeStylesMenu
+-     ParagraphSpacingCustom [button] < ChangeStylesMenu
+-   QuickStylesSetAsDefault [button] < ChangeStylesMenu
+-   ShadingColorsMoreColorsDialog [button] < ColorPickerParagraphShading
+-   ShadingColorsMoreColorsDialog [button] < ColorPickerTableCellShading
+-   OfficeExtensionsDialog [button] < OfficeExtensionsGallery2
+-   OfficeExtensionsManageOtherAddins [button] < OfficeExtensionsGallery2
+-   ExtensibilityExperimentation [button] < OfficeExtensionsGallery2
+-   QuickStylesSaveSelectionAsNew [button] < QuickStylesGallery
+-   ClearFormatting [button] < QuickStylesGallery
+-   ApplyStylesPane [toggleButton] < QuickStylesGallery
+-   ListLevelGallery [gallery] < BulletsGalleryWord
+-   BulletDefineNew [button] < BulletsGalleryWord
+-   FontColorMoreColorsDialog [button] < FontColorPicker
+-   TextFillGradientGallery [gallery] < FontColorPicker
+-     TextFillMoreGradientsDialog [button] < FontColorPicker
+-   TableInsertDialogWord [button] < TableInsertGallery
+-   TableDrawTable [toggleButton] < TableInsertGallery
+-   ConvertTextToTable [button] < TableInsertGallery
+-   TableExcelSpreadsheetInsert [button] < TableInsertGallery
+-   QuickTablesInsertGallery [gallery] < TableInsertGallery
+-     SaveSelectionToQuickTablesGallery [button] < TableInsertGallery
+-   ListLevelGallery [gallery] < NumberingGalleryWord
+-   DefineNewNumberFormat [button] < NumberingGalleryWord
+-   ListSetNumberingValue [button] < NumberingGalleryWord
+-   None [gallery] < TextBoxInsertGallery
+-   None [button] < TextBoxInsertGallery
+-   None [button] < TextBoxInsertGallery
+-   TextBoxInsert [button] < TextBoxInsertGallery
+-   TextBoxInsertVerticalWord [button] < TextBoxInsertGallery
+-   SaveSelectionToTextBoxGallery [button] < TextBoxInsertGallery
+-   HighlightingStop [button] < TextHighlightColorPicker
+-   Paste [button] < PasteMenu
+-   Cut [button] < PasteMenu
+-   Copy [button] < PasteMenu
+-   PasteGallery [gallery] < PasteMenu
+-     PasteSpecialDialog [button] < PasteMenu
+-     PasteSetDefault [button] < PasteMenu
+-     ShowClipboard [button] < PasteMenu
+-   AccessibilityChecker [button] < MenuAccessibility
+-   AltTextPaneRibbon [toggleButton] < MenuAccessibility
+-   ShowNavigationPaneNewInAccCheckerSplitButton [toggleButton] < MenuAccessibility
+-   ViewFocusModeView [toggleButton] < MenuAccessibility
+-   OpenOptionsEaseOfAcess [button] < MenuAccessibility
+-   FileProperties [toggleButton] < FilePrepareMenu
+-   FileDocumentInspect [button] < FilePrepareMenu
+-   FileDocumentEncrypt [toggleButton] < FilePrepareMenu
+-   FilePermissionView [button] < FilePrepareMenu
+-   FilePermissionRestrictMenu [menu] < FilePrepareMenu
+-     FilePermissionUnrestricted [toggleButton] < FilePrepareMenu
+-     FilePermissionDoNotDistribute [toggleButton] < FilePrepareMenu
+-   FileAddDigitalSignature [button] < FilePrepareMenu
+-   FileViewDigitalSignatures [toggleButton] < FilePrepareMenu
+-   FileMarkAsFinal [toggleButton] < FilePrepareMenu
+-   FileMarkAsReadOnlyRecommended [toggleButton] < FilePrepareMenu
+-   FileCompatibilityCheckerWord [button] < FilePrepareMenu
+-   FileLinksToFiles [button] < FilePrepareMenu
+-   PrintPreviewAndPrint [button] < FilePrintMenu
+-   FilePrintQuick [button] < FilePrintMenu
+-   PrintPreviewEditMode [toggleButton] < FilePrintMenu
+-   FileNewBlogPost [button] < MenuPublish
+-   FileSaveToDocumentManagementServer [button] < MenuPublish
+-   FileSaveAs [button] < FileSaveAsMenu
+-   FileSaveAsWordDocx [button] < FileSaveAsMenu
+-   FileSaveAsWordDotx [button] < FileSaveAsMenu
+-   FileSaveAsWord97_2003 [button] < FileSaveAsMenu
+-   FileSaveAsWordOpenDocumentText [button] < FileSaveAsMenu
+-   AdvertisePublishAs [button] < FileSaveAsMenu
+-   FileSaveAsPdfOrXps [button] < FileSaveAsMenu
+-   FileSaveAsOtherFormats [button] < FileSaveAsMenu
+-   FileSendAsAttachment [button] < FileSendMenu
+-   FileEmailAsPdfEmailAttachment [button] < FileSendMenu
+-   FileEmailAsXpsEmailAttachment [button] < FileSendMenu
+-   FileInternetFax [button] < FileSendMenu
+-   FileCheckIn [button] < FileServerTasksMenu
+-   FileCheckOut [button] < FileServerTasksMenu
+-   FileCheckOutDiscard [button] < FileServerTasksMenu
+-   FileVersionHistoryWord [button] < FileServerTasksMenu
+-   FileWorkflowTasks [button] < FileServerTasksMenu
+-   FilePermissionUnrestricted [toggleButton] < ReviewProtectDocumentMenu
+-   FilePermissionDoNotDistribute [toggleButton] < ReviewProtectDocumentMenu
+### GroupXml
+- XmlStructure [toggleButton]
+### GroupThemesWord
+- ThemesGallery [gallery]
+-   ThemeResetFromTemplate [button] < ThemesGallery
+-   ThemeSearchOfficeOnline [button] < ThemesGallery
+-   ThemeBrowseForThemes [button] < ThemesGallery
+-   ThemeSaveCurrent [button] < ThemesGallery
+- ThemeColorsGallery [gallery]
+-   ThemeColorsCreateNew [button] < ThemeColorsGallery
+- ThemeFontsGallery [gallery]
+-   ThemeFontsCreateNew [button] < ThemeFontsGallery
+- ThemeEffectsGallery [gallery]
+
+##   ()
+### 
+- TabSetSmartArtTools [tabSet]
+- TabSetChartTools [tabSet]
+- TabSetTextBoxTools [tabSet]
+- TabSetDrawingTools [tabSet]
+- TabSetDrawingToolsClassic [tabSet]
+- TabSetWordArtTools [tabSet]
+- TabSetDiagramTools [tabSet]
+- TabSetOrganizationChartTools [tabSet]
+- TabSetPictureTools [tabSet]
+- TabSetPictureToolsClassic [tabSet]
+- TabSetTableTools [tabSet]
+- TabSetHeaderAndFooterTools [tabSet]
+- TabSetEquationTools [tabSet]
+- TabSetInkTools [tabSet]
+- TabSetSVGTools [tabSet]
+- TabSet3DModelTools [tabSet]
+- TabSetLearningTools [tabSet]
+
+##   (TabSetSmartArtTools)
+### 
+- TabSmartArtToolsDesign [tab]
+- TabSmartArtToolsFormat [tab]
+
+## TabSmartArtToolsDesign  (TabSetSmartArtTools)
+### 
+- GroupSmartArtCreateGraphic [group]
+- GroupSmartArtLayouts [group]
+- GroupSmartArtQuickStyles [group]
+- GroupSmartArtReset [group]
+### GroupSmartArtCreateGraphic
+- SmartArtAddShapeSplitMenu [splitButton]
+-   SmartArtAddShape [button] < SmartArtAddShapeSplitMenu
+-   SmartArtAddShapeAfter [button] < SmartArtAddShapeSplitMenu
+-   SmartArtAddShapeBefore [button] < SmartArtAddShapeSplitMenu
+-   SmartArtAddShapeAbove [button] < SmartArtAddShapeSplitMenu
+-   SmartArtAddShapeBelow [button] < SmartArtAddShapeSplitMenu
+-   SmartArtAddAssistant [button] < SmartArtAddShapeSplitMenu
+- SmartArtAddBullet [button]
+- SmartArtTextPane [toggleButton]
+- SmartArtPromote [button]
+- SmartArtDemote [button]
+- SmartArtRightToLeft [toggleButton]
+- SmartArtReorderUp [button]
+- SmartArtReorderDown [button]
+- SmartArtOrganizationChartMenu [menu]
+-   SmartArtOrganizationChartStandard [button] < SmartArtOrganizationChartMenu
+-   SmartArtOrganizationChartBoth [button] < SmartArtOrganizationChartMenu
+-   SmartArtOrganizationChartLeftHanging [button] < SmartArtOrganizationChartMenu
+-   SmartArtOrganizationChartRightHanging [button] < SmartArtOrganizationChartMenu
+### GroupSmartArtLayouts
+- SmartArtLayoutGallery [gallery]
+-   SmartArtMoreLayoutsDialog [button] < SmartArtLayoutGallery
+### GroupSmartArtQuickStyles
+- SmartArtChangeColorsGallery [gallery]
+-   SmartArtRecolorImages [toggleButton] < SmartArtChangeColorsGallery
+- SmartArtStylesGallery [gallery]
+### GroupSmartArtReset
+- SmartArtResetGraphic [button]
+
+## TabSmartArtToolsFormat  (TabSetSmartArtTools)
+### 
+- GroupSmartArtShapes [group]
+- GroupShapeStyles [group]
+- GroupWordArtStyles [group]
+- GroupAltText [group]
+- GroupArrangeWith3DEditor [group]
+- GroupSmartArtSize [group]
+### GroupSmartArtShapes
+- SmartArtEditIn2D [toggleButton]
+- ShapeChangeShapeGallery [gallery]
+- SmartArtLargerShape [button]
+- SmartArtSmallerShape [button]
+### GroupShapeStyles
+- ShapeStylesGallery [gallery]
+-   ShapeStylesOtherThemeFillsGallery [gallery] < ShapeStylesGallery
+- ShapeFillColorPicker [gallery]
+-   ObjectFillMoreColorsDialog [button] < ShapeFillColorPicker
+-   ObjectPictureFill [button] < ShapeFillColorPicker
+-   GradientGallery [gallery] < ShapeFillColorPicker
+-     ShapeFillMoreGradientsDialog [button] < ShapeFillColorPicker
+-   ShapeFillTextureGallery [gallery] < ShapeFillColorPicker
+-     MoreTextureOptions [button] < ShapeFillColorPicker
+- ShapeOutlineColorPicker [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < ShapeOutlineColorPicker
+-   OutlineWeightGallery [gallery] < ShapeOutlineColorPicker
+-     LineStylesDialog [button] < ShapeOutlineColorPicker
+-   GallerySketchyShapes [gallery] < ShapeOutlineColorPicker
+-     MoreLines2 [button] < ShapeOutlineColorPicker
+-   OutlineDashesGallery [gallery] < ShapeOutlineColorPicker
+-     LineStylesDialog [button] < ShapeOutlineColorPicker
+-   ArrowStyleGallery [gallery] < ShapeOutlineColorPicker
+-     ArrowsMore [button] < ShapeOutlineColorPicker
+- ShapeEffectsMenu [menu]
+-   ObjectEffectPresetGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   ObjectEffectShadowGallery [gallery] < ShapeEffectsMenu
+-     ShadowOptionsDialog [button] < ShapeEffectsMenu
+-   ReflectionGallery [gallery] < ShapeEffectsMenu
+-     ReflectionsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectGlowGallery [gallery] < ShapeEffectsMenu
+-     GlowColorPicker [gallery] < ShapeEffectsMenu
+-     GlowColorMoreColorsDialog [button] < ShapeEffectsMenu
+-     GlowsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectSoftEdgesGallery [gallery] < ShapeEffectsMenu
+-     SoftEdgesMoreOptions [button] < ShapeEffectsMenu
+-   BevelShapeGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   _3DRotationGallery [gallery] < ShapeEffectsMenu
+-     _3DRotationOptionsDialog [button] < ShapeEffectsMenu
+- ObjectFormatDialog [button (dialogBoxLauncher)]
+### GroupWordArtStyles
+- TextStylesGallery [gallery]
+-   WordArtClear [button] < TextStylesGallery
+- TextFillColorPicker [gallery]
+-   TextFillColorMoreColorsDialog [button] < TextFillColorPicker
+-   TextPictureFill [button] < TextFillColorPicker
+-   TextFillGradientGallery [gallery] < TextFillColorPicker
+-     TextFillMoreGradientsDialog [button] < TextFillColorPicker
+-   TextFillTextureGallery [gallery] < TextFillColorPicker
+-     TextFillMoreTextures [button] < TextFillColorPicker
+- TextOutlineColorPicker [gallery]
+-   TextOutlineColorMoreColorsDialog [button] < TextOutlineColorPicker
+-   TextOutlineWeightGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+-   TextOutlineDashesGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+- TextEffectsMenu [menu]
+-   TextEffectShadowGallery [gallery] < TextEffectsMenu
+-     TextEffectsMoreShadowsDialog [button] < TextEffectsMenu
+-   TextReflectionGallery [gallery] < TextEffectsMenu
+-     TextEffectsReflectionsMoreOptions [button] < TextEffectsMenu
+-   TextEffectGlowGallery [gallery] < TextEffectsMenu
+-     TextGlowColorPicker [gallery] < TextEffectsMenu
+-     TextGlowColorMoreColorsDialog [button] < TextEffectsMenu
+-     TextEffectsGlowsMoreOptions [button] < TextEffectsMenu
+-   BevelTextGallery [gallery] < TextEffectsMenu
+-     TextEffectsBevelMore3DOptionsDialog [button] < TextEffectsMenu
+-   TextEffects3DRotationGallery [gallery] < TextEffectsMenu
+-     TextEffects3DRotationOptionsDialog [button] < TextEffectsMenu
+-   TextEffectTransformGallery [gallery] < TextEffectsMenu
+- WordArtFormatDialog [button (dialogBoxLauncher)]
+### GroupAltText
+- AltTextPaneRibbon [toggleButton]
+### GroupArrangeWith3DEditor
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupSmartArtSize
+- ShapeHeight [control]
+- ShapeWidth [control]
+- LayoutOptionsDialogSize [button (dialogBoxLauncher)]
+
+##   (TabSetChartTools)
+### 
+- TabChartToolsDesignNew [tab]
+- TabChartToolsFormatNew [tab]
+- TabChartToolsDesign [tab]
+- TabChartToolsLayout [tab]
+- TabChartToolsFormat [tab]
+
+## TabChartToolsDesignNew  (TabSetChartTools)
+### 
+- GroupChartLayouts [group]
+- GroupChartStyles [group]
+- GroupChartData [group]
+- GroupChartType [group]
+### GroupChartLayouts
+- AddChartElementMenu [menu]
+-   ChartAxesGallery [gallery] < AddChartElementMenu
+-     ChartAxesOptionsDialog [button] < AddChartElementMenu
+-   ChartAxisTitlesGallery [gallery] < AddChartElementMenu
+-     ChartAxesTitlesOptionsDialog [button] < AddChartElementMenu
+-   ChartTitle [gallery] < AddChartElementMenu
+-     ChartTitleOptionsDialog [button] < AddChartElementMenu
+-   ChartDataLabel [gallery] < AddChartElementMenu
+-     ChartDataLabelDialog [button] < AddChartElementMenu
+-   ChartDataTable [gallery] < AddChartElementMenu
+-     ChartDataTableOptionsDialog [button] < AddChartElementMenu
+-   ChartErrorBars [gallery] < AddChartElementMenu
+-     ChartErrorBarsOptionsDialog [button] < AddChartElementMenu
+-   ChartGridlinesGallery [gallery] < AddChartElementMenu
+-     ChartGridlineOptionsDialog [button] < AddChartElementMenu
+-   ChartLegend [gallery] < AddChartElementMenu
+-     ChartLegendOptionsDialogDialog [button] < AddChartElementMenu
+-   ChartLines [gallery] < AddChartElementMenu
+-   ChartTrendline [gallery] < AddChartElementMenu
+-     ChartTrendlineOptionsDialog [button] < AddChartElementMenu
+-   ChartUpDownBars [gallery] < AddChartElementMenu
+-     ChartUpDownBarsOptionsDialog [button] < AddChartElementMenu
+- ChartLayoutGallery [gallery]
+### GroupChartStyles
+- ChartColorsGallery [gallery]
+- ChartStylesGallery [gallery]
+### GroupChartData
+- ChartSwitchRowColumn [button]
+- ChartEditDataSource [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- ChartRefresh [button]
+### GroupChartType
+- ChartChangeType [button]
+
+## TabChartToolsFormatNew  (TabSetChartTools)
+### 
+- GroupChartCurrentSelection [group]
+- GroupShapesChart [group]
+- GroupChartShapeStyles [group]
+- GroupWordArtStyles [group]
+- GroupAltText [group]
+- GroupArrange [group]
+- GroupSize [group]
+### GroupChartCurrentSelection
+- ChartElementSelector [comboBox]
+- ChartFormatSelection [button]
+- ChartResetToMatchStyle [button]
+### GroupShapesChart
+- ShapesInsertGallery [gallery]
+- ShapeChangeShapeGallery [gallery]
+### GroupChartShapeStyles
+- ShapeStylesGallery [gallery]
+-   ShapeStylesOtherThemeFillsGallery [gallery] < ShapeStylesGallery
+- ShapeFillColorPicker [gallery]
+-   ObjectFillMoreColorsDialog [button] < ShapeFillColorPicker
+-   ObjectPictureFill [button] < ShapeFillColorPicker
+-   GradientGallery [gallery] < ShapeFillColorPicker
+-     ShapeFillMoreGradientsDialog [button] < ShapeFillColorPicker
+-   ShapeFillTextureGallery [gallery] < ShapeFillColorPicker
+-     MoreTextureOptions [button] < ShapeFillColorPicker
+- ColorPickerChartLineStyles [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < ColorPickerChartLineStyles
+-   OutlineWeightGallery [gallery] < ColorPickerChartLineStyles
+-     LineStylesDialog [button] < ColorPickerChartLineStyles
+-   OutlineDashesGallery [gallery] < ColorPickerChartLineStyles
+-     LineStylesDialog [button] < ColorPickerChartLineStyles
+-   ArrowStyleGallery [gallery] < ColorPickerChartLineStyles
+-     ArrowsMore [button] < ColorPickerChartLineStyles
+- ShapeEffectsMenu [menu]
+-   ObjectEffectPresetGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   ObjectEffectShadowGallery [gallery] < ShapeEffectsMenu
+-     ShadowOptionsDialog [button] < ShapeEffectsMenu
+-   ReflectionGallery [gallery] < ShapeEffectsMenu
+-     ReflectionsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectGlowGallery [gallery] < ShapeEffectsMenu
+-     GlowColorPicker [gallery] < ShapeEffectsMenu
+-     GlowColorMoreColorsDialog [button] < ShapeEffectsMenu
+-     GlowsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectSoftEdgesGallery [gallery] < ShapeEffectsMenu
+-     SoftEdgesMoreOptions [button] < ShapeEffectsMenu
+-   BevelShapeGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   _3DRotationGallery [gallery] < ShapeEffectsMenu
+-     _3DRotationOptionsDialog [button] < ShapeEffectsMenu
+- ObjectFormatDialog [button (dialogBoxLauncher)]
+### GroupWordArtStyles
+- TextStylesGallery [gallery]
+-   WordArtClear [button] < TextStylesGallery
+- TextFillColorPicker [gallery]
+-   TextFillColorMoreColorsDialog [button] < TextFillColorPicker
+-   TextPictureFill [button] < TextFillColorPicker
+-   TextFillGradientGallery [gallery] < TextFillColorPicker
+-     TextFillMoreGradientsDialog [button] < TextFillColorPicker
+-   TextFillTextureGallery [gallery] < TextFillColorPicker
+-     TextFillMoreTextures [button] < TextFillColorPicker
+- TextOutlineColorPicker [gallery]
+-   TextOutlineColorMoreColorsDialog [button] < TextOutlineColorPicker
+-   TextOutlineWeightGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+-   TextOutlineDashesGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+- TextEffectsMenu [menu]
+-   TextEffectShadowGallery [gallery] < TextEffectsMenu
+-     TextEffectsMoreShadowsDialog [button] < TextEffectsMenu
+-   TextReflectionGallery [gallery] < TextEffectsMenu
+-     TextEffectsReflectionsMoreOptions [button] < TextEffectsMenu
+-   TextEffectGlowGallery [gallery] < TextEffectsMenu
+-     TextGlowColorPicker [gallery] < TextEffectsMenu
+-     TextGlowColorMoreColorsDialog [button] < TextEffectsMenu
+-     TextEffectsGlowsMoreOptions [button] < TextEffectsMenu
+-   BevelTextGallery [gallery] < TextEffectsMenu
+-     TextEffectsBevelMore3DOptionsDialog [button] < TextEffectsMenu
+-   TextEffects3DRotationGallery [gallery] < TextEffectsMenu
+-     TextEffects3DRotationOptionsDialog [button] < TextEffectsMenu
+-   TextEffectTransformGallery [gallery] < TextEffectsMenu
+- WordArtFormatDialog [button (dialogBoxLauncher)]
+### GroupAltText
+- AltTextPaneRibbon [toggleButton]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupSize
+- ShapeHeight [control]
+- ShapeWidth [control]
+- LayoutOptionsDialogSize [button (dialogBoxLauncher)]
+
+## TabChartToolsDesign  (TabSetChartTools)
+### 
+- GroupChartData [group]
+- GroupChartStyles [group]
+### GroupChartData
+- ChartSwitchRowColumn [button]
+- ChartEditDataSource [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- ChartRefresh [button]
+### GroupChartStyles
+- ChartColorsGallery [gallery]
+- ChartStylesGallery [gallery]
+
+## TabChartToolsLayout  (TabSetChartTools)
+### 
+- GroupChartCurrentSelection [group]
+- GroupChartShapes [group]
+- GroupChartLabels [group]
+- GroupChartAxes [group]
+- GroupChartBackground [group]
+- GroupChartAnalysis [group]
+### GroupChartCurrentSelection
+- ChartElementSelector [comboBox]
+- ChartFormatSelection [button]
+- ChartResetToMatchStyle [button]
+### GroupChartShapes
+- PictureInsertFromFile [button]
+- ShapesInsertGallery [gallery]
+- TextBoxInsertWord [button]
+- TextBoxDrawMenu [menu]
+-   TextBoxInsert [button] < TextBoxDrawMenu
+-   TextBoxInsertVerticalWord [button] < TextBoxDrawMenu
+### GroupChartLabels
+- ChartTitle [gallery]
+-   ChartTitleOptionsDialog [button] < ChartTitle
+- ChartAxisTitles [menu]
+-   ChartPrimaryHorizontalAxisTitle [gallery] < ChartAxisTitles
+-     ChartPrimaryHorizontalAxisTitleOptionsDialog [button] < ChartAxisTitles
+-   ChartPrimaryVerticalAxisTitle [gallery] < ChartAxisTitles
+-     ChartPrimaryVerticalAxisTitleOptionsDialog [button] < ChartAxisTitles
+-   ChartSecondaryHorizontalAxisTitle [gallery] < ChartAxisTitles
+-     ChartSecondaryHorizontalAxisTitleOptionsDialog [button] < ChartAxisTitles
+-   ChartSecondaryVerticalAxisTitle [gallery] < ChartAxisTitles
+-     ChartSecondaryVerticalAxisTitleOptionsDialog [button] < ChartAxisTitles
+-   ChartDepthAxisTitle [gallery] < ChartAxisTitles
+-     ChartDepthAxisTitleOptionsDialog [button] < ChartAxisTitles
+- ChartLegend [gallery]
+-   ChartLegendOptionsDialogDialog [button] < ChartLegend
+- ChartDataLabel [gallery]
+-   ChartDataLabelDialog [button] < ChartDataLabel
+- ChartDataTable [gallery]
+-   ChartDataTableOptionsDialog [button] < ChartDataTable
+### GroupChartAxes
+- ChartAxes [menu]
+-   ChartPrimaryHorizontalAxis [gallery] < ChartAxes
+-     ChartPrimaryHorizontalAxisOptionsDialog [button] < ChartAxes
+-   ChartPrimaryVerticalAxis [gallery] < ChartAxes
+-     ChartPrimaryVerticalAxisOptionsDialog [button] < ChartAxes
+-   ChartSecondaryHorizontalAxis [gallery] < ChartAxes
+-     ChartSecondaryHorizontalAxisOption [button] < ChartAxes
+-   ChartSecondaryVerticalAxis [gallery] < ChartAxes
+-     ChartSecondaryVerticalAxisOptionsDialog [button] < ChartAxes
+-   ChartDepthAxis [gallery] < ChartAxes
+-     ChartDepthAxisOptionsDialog [button] < ChartAxes
+- ChartGridlines [menu]
+-   ChartPrimaryHorizontalGridlines [gallery] < ChartGridlines
+-     ChartPrimaryHorizontalGridlinesOptionsDialog [button] < ChartGridlines
+-   ChartPrimaryVerticalGridlines [gallery] < ChartGridlines
+-     ChartPrimaryVerticalGridlinesOptionsDialog [button] < ChartGridlines
+-   ChartSecondaryHorizontalGridlines [gallery] < ChartGridlines
+-     ChartSecondaryHorizontalGridlinesOptionsDialog [button] < ChartGridlines
+-   ChartSecondaryVerticalGridlines [gallery] < ChartGridlines
+-     ChartSecondaryVerticalGridlinesOptionsDialog [button] < ChartGridlines
+-   ChartDepthGridlines [gallery] < ChartGridlines
+-     ChartDepthGridlinesOptionsDialog [button] < ChartGridlines
+### GroupChartBackground
+- ChartPlotArea [gallery]
+-   ChartPlotAreaOptionsDialog [button] < ChartPlotArea
+- ChartWall [gallery]
+-   ChartWallOptionsDialog [button] < ChartWall
+- ChartFloor [gallery]
+-   ChartFloorOptionsDialog [button] < ChartFloor
+- Chart3DView [button]
+### GroupChartAnalysis
+- ChartTrendline [gallery]
+-   ChartTrendlineOptionsDialog [button] < ChartTrendline
+- ChartLines [gallery]
+- ChartUpDownBars [gallery]
+-   ChartUpDownBarsOptionsDialog [button] < ChartUpDownBars
+- ChartErrorBars [gallery]
+-   ChartErrorBarsOptionsDialog [button] < ChartErrorBars
+
+## TabChartToolsFormat  (TabSetChartTools)
+### 
+- GroupChartCurrentSelection [group]
+- GroupShapeStyles [group]
+- GroupWordArtStyles [group]
+- GroupArrange [group]
+- GroupSize [group]
+### GroupChartCurrentSelection
+- ChartElementSelector [comboBox]
+- ChartFormatSelection [button]
+- ChartResetToMatchStyle [button]
+### GroupShapeStyles
+- ShapeStylesGallery [gallery]
+-   ShapeStylesOtherThemeFillsGallery [gallery] < ShapeStylesGallery
+- ShapeFillColorPicker [gallery]
+-   ObjectFillMoreColorsDialog [button] < ShapeFillColorPicker
+-   ObjectPictureFill [button] < ShapeFillColorPicker
+-   GradientGallery [gallery] < ShapeFillColorPicker
+-     ShapeFillMoreGradientsDialog [button] < ShapeFillColorPicker
+-   ShapeFillTextureGallery [gallery] < ShapeFillColorPicker
+-     MoreTextureOptions [button] < ShapeFillColorPicker
+- ShapeOutlineColorPicker [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < ShapeOutlineColorPicker
+-   OutlineWeightGallery [gallery] < ShapeOutlineColorPicker
+-     LineStylesDialog [button] < ShapeOutlineColorPicker
+-   GallerySketchyShapes [gallery] < ShapeOutlineColorPicker
+-     MoreLines2 [button] < ShapeOutlineColorPicker
+-   OutlineDashesGallery [gallery] < ShapeOutlineColorPicker
+-     LineStylesDialog [button] < ShapeOutlineColorPicker
+-   ArrowStyleGallery [gallery] < ShapeOutlineColorPicker
+-     ArrowsMore [button] < ShapeOutlineColorPicker
+- ShapeEffectsMenu [menu]
+-   ObjectEffectPresetGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   ObjectEffectShadowGallery [gallery] < ShapeEffectsMenu
+-     ShadowOptionsDialog [button] < ShapeEffectsMenu
+-   ReflectionGallery [gallery] < ShapeEffectsMenu
+-     ReflectionsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectGlowGallery [gallery] < ShapeEffectsMenu
+-     GlowColorPicker [gallery] < ShapeEffectsMenu
+-     GlowColorMoreColorsDialog [button] < ShapeEffectsMenu
+-     GlowsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectSoftEdgesGallery [gallery] < ShapeEffectsMenu
+-     SoftEdgesMoreOptions [button] < ShapeEffectsMenu
+-   BevelShapeGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   _3DRotationGallery [gallery] < ShapeEffectsMenu
+-     _3DRotationOptionsDialog [button] < ShapeEffectsMenu
+- ObjectFormatDialog [button (dialogBoxLauncher)]
+### GroupWordArtStyles
+- TextStylesGallery [gallery]
+-   WordArtClear [button] < TextStylesGallery
+- TextFillColorPicker [gallery]
+-   TextFillColorMoreColorsDialog [button] < TextFillColorPicker
+-   TextPictureFill [button] < TextFillColorPicker
+-   TextFillGradientGallery [gallery] < TextFillColorPicker
+-     TextFillMoreGradientsDialog [button] < TextFillColorPicker
+-   TextFillTextureGallery [gallery] < TextFillColorPicker
+-     TextFillMoreTextures [button] < TextFillColorPicker
+- TextOutlineColorPicker [gallery]
+-   TextOutlineColorMoreColorsDialog [button] < TextOutlineColorPicker
+-   TextOutlineWeightGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+-   TextOutlineDashesGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+- TextEffectsMenu [menu]
+-   TextEffectShadowGallery [gallery] < TextEffectsMenu
+-     TextEffectsMoreShadowsDialog [button] < TextEffectsMenu
+-   TextReflectionGallery [gallery] < TextEffectsMenu
+-     TextEffectsReflectionsMoreOptions [button] < TextEffectsMenu
+-   TextEffectGlowGallery [gallery] < TextEffectsMenu
+-     TextGlowColorPicker [gallery] < TextEffectsMenu
+-     TextGlowColorMoreColorsDialog [button] < TextEffectsMenu
+-     TextEffectsGlowsMoreOptions [button] < TextEffectsMenu
+-   BevelTextGallery [gallery] < TextEffectsMenu
+-     TextEffectsBevelMore3DOptionsDialog [button] < TextEffectsMenu
+-   TextEffects3DRotationGallery [gallery] < TextEffectsMenu
+-     TextEffects3DRotationOptionsDialog [button] < TextEffectsMenu
+-   TextEffectTransformGallery [gallery] < TextEffectsMenu
+- WordArtFormatDialog [button (dialogBoxLauncher)]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupSize
+- ShapeHeight [control]
+- ShapeWidth [control]
+- LayoutOptionsDialogSize [button (dialogBoxLauncher)]
+
+##   (TabSetTextBoxTools)
+### 
+- TabTextBoxToolsFormat [tab]
+
+## TabTextBoxToolsFormat  (TabSetTextBoxTools)
+### 
+- GroupTextBoxText [group]
+- GroupTextBoxStyles [group]
+- GroupShadowEffects [group]
+- Group3DEffects [group]
+- GroupTextBoxArrange [group]
+- GroupSizeClassic [group]
+### GroupTextBoxText
+- TextBoxInsertWord [button]
+- TextBoxDrawMenu [menu]
+-   TextBoxInsert [button] < TextBoxDrawMenu
+-   TextBoxInsertVerticalWord [button] < TextBoxDrawMenu
+- TextDirection [button]
+- TextBoxLinkCreate [button]
+- TextBoxLinkBreak [button]
+### GroupTextBoxStyles
+- TextBoxStyleGallery [gallery]
+- Drawing1ColorPickerFill [gallery]
+-   ObjectFillMoreColorsDialog [button] < Drawing1ColorPickerFill
+-   ObjectPictureFill [button] < Drawing1ColorPickerFill
+-   ShapeFillGradientGalleryClassic [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreGradientsDialogClassic [button] < Drawing1ColorPickerFill
+-   Drawing1GalleryTextures [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreTexturesDialogClassic [button] < Drawing1ColorPickerFill
+-   ShapeFillEffectPatternClassic [button] < Drawing1ColorPickerFill
+- Drawing1ColorPickerLineStyles [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineWeightGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineDashesGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   ArrowStyleGallery [gallery] < Drawing1ColorPickerLineStyles
+-     ArrowsMore [button] < Drawing1ColorPickerLineStyles
+-   OutlineLinePatternFill [button] < Drawing1ColorPickerLineStyles
+- ShapeChangeShapeGallery [gallery]
+- DrawingObjectFormatDialog [button (dialogBoxLauncher)]
+### GroupShadowEffects
+- ShadowStyleGalleryClassic [gallery]
+-   ShadowColorPickerClassic [gallery] < ShadowStyleGalleryClassic
+-     ShadowSemitransparentClassic [toggleButton] < ShadowStyleGalleryClassic
+-     ObjectShadowColorMoreColorsDialog [button] < ShadowStyleGalleryClassic
+- ShadowNudgeUpClassic [button]
+- ShadowNudgeLeftClassic [button]
+- ShadowOnOrOffClassic [toggleButton]
+- ShadowNudgeRightClassic [button]
+- ShadowNudgeDownClassic [button]
+### Group3DEffects
+- _3DEffectsGalleryClassic [gallery]
+-   _3DEffectColorPickerClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DEffectColorPickerMoreClassic [button] < _3DEffectsGalleryClassic
+-   _3DExtrusionDepthGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-   _3DDirectionGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DExtrusionPerspectiveClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DExtrusionParallelClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DLightingGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DLightingFlatClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingNormalClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingDimClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DSurfaceMaterialGalleryClassic [gallery] < _3DEffectsGalleryClassic
+- _3DTiltUpClassic [button]
+- _3DTiltLeftClassic [button]
+- _3DEffectsOnOffClassic [toggleButton]
+- _3DTiltRightClassic [button]
+- _3DTiltDownClassic [button]
+### GroupTextBoxArrange
+- TextBoxPositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < TextBoxPositionGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+### GroupSizeClassic
+- ShapeHeight [control]
+- ShapeWidth [control]
+- ObjectSizeDialogClassic [button (dialogBoxLauncher)]
+
+##   (TabSetDrawingTools)
+### 
+- TabDrawingToolsFormat [tab]
+
+## TabDrawingToolsFormat  (TabSetDrawingTools)
+### 
+- GroupShapes [group]
+- GroupShapeStyles [group]
+- GroupWordArtStyles [group]
+- GroupTextbox [group]
+- GroupAltText [group]
+- GroupArrangeWith3DEditor [group]
+- GroupSize [group]
+### GroupShapes
+- ShapesInsertGallery [gallery]
+- ObjectEditShapeMenu [menu]
+-   ShapeChangeShapeGallery [gallery] < ObjectEditShapeMenu
+-   ObjectEditPoints [toggleButton] < ObjectEditShapeMenu
+-   ShapeRerouteConnectors [toggleButton] < ObjectEditShapeMenu
+- TextBoxInsertWord [button]
+- TextBoxInsertMenu [splitButton]
+-   TextBoxInsertHorizontal [toggleButton] < TextBoxInsertMenu
+-   TextBoxInsertVertical [toggleButton] < TextBoxInsertMenu
+- TextboxFlyoutMenuAnchor [menu]
+-   TextBoxInsertHorizontal [toggleButton] < TextboxFlyoutMenuAnchor
+-   TextBoxInsertVertical [toggleButton] < TextboxFlyoutMenuAnchor
+### GroupShapeStyles
+- ShapeStylesGallery [gallery]
+-   ShapeStylesOtherThemeFillsGallery [gallery] < ShapeStylesGallery
+- ShapeFillColorPicker [gallery]
+-   ObjectFillMoreColorsDialog [button] < ShapeFillColorPicker
+-   ObjectPictureFill [button] < ShapeFillColorPicker
+-   GradientGallery [gallery] < ShapeFillColorPicker
+-     ShapeFillMoreGradientsDialog [button] < ShapeFillColorPicker
+-   ShapeFillTextureGallery [gallery] < ShapeFillColorPicker
+-     MoreTextureOptions [button] < ShapeFillColorPicker
+- ShapeOutlineColorPicker [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < ShapeOutlineColorPicker
+-   OutlineWeightGallery [gallery] < ShapeOutlineColorPicker
+-     LineStylesDialog [button] < ShapeOutlineColorPicker
+-   GallerySketchyShapes [gallery] < ShapeOutlineColorPicker
+-     MoreLines2 [button] < ShapeOutlineColorPicker
+-   OutlineDashesGallery [gallery] < ShapeOutlineColorPicker
+-     LineStylesDialog [button] < ShapeOutlineColorPicker
+-   ArrowStyleGallery [gallery] < ShapeOutlineColorPicker
+-     ArrowsMore [button] < ShapeOutlineColorPicker
+- ShapeEffectsMenu [menu]
+-   ObjectEffectPresetGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   ObjectEffectShadowGallery [gallery] < ShapeEffectsMenu
+-     ShadowOptionsDialog [button] < ShapeEffectsMenu
+-   ReflectionGallery [gallery] < ShapeEffectsMenu
+-     ReflectionsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectGlowGallery [gallery] < ShapeEffectsMenu
+-     GlowColorPicker [gallery] < ShapeEffectsMenu
+-     GlowColorMoreColorsDialog [button] < ShapeEffectsMenu
+-     GlowsMoreOptions [button] < ShapeEffectsMenu
+-   ObjectEffectSoftEdgesGallery [gallery] < ShapeEffectsMenu
+-     SoftEdgesMoreOptions [button] < ShapeEffectsMenu
+-   BevelShapeGallery [gallery] < ShapeEffectsMenu
+-     _3DBevelOptionsDialog [button] < ShapeEffectsMenu
+-   _3DRotationGallery [gallery] < ShapeEffectsMenu
+-     _3DRotationOptionsDialog [button] < ShapeEffectsMenu
+- ObjectFormatDialog [button (dialogBoxLauncher)]
+### GroupWordArtStyles
+- TextStylesGallery [gallery]
+-   WordArtClear [button] < TextStylesGallery
+- TextFillColorPicker [gallery]
+-   TextFillColorMoreColorsDialog [button] < TextFillColorPicker
+-   TextPictureFill [button] < TextFillColorPicker
+-   TextFillGradientGallery [gallery] < TextFillColorPicker
+-     TextFillMoreGradientsDialog [button] < TextFillColorPicker
+-   TextFillTextureGallery [gallery] < TextFillColorPicker
+-     TextFillMoreTextures [button] < TextFillColorPicker
+- TextOutlineColorPicker [gallery]
+-   TextOutlineColorMoreColorsDialog [button] < TextOutlineColorPicker
+-   TextOutlineWeightGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+-   TextOutlineDashesGallery [gallery] < TextOutlineColorPicker
+-     TextOutlineMoreLinesDialog [button] < TextOutlineColorPicker
+- TextEffectsMenu [menu]
+-   TextEffectShadowGallery [gallery] < TextEffectsMenu
+-     TextEffectsMoreShadowsDialog [button] < TextEffectsMenu
+-   TextReflectionGallery [gallery] < TextEffectsMenu
+-     TextEffectsReflectionsMoreOptions [button] < TextEffectsMenu
+-   TextEffectGlowGallery [gallery] < TextEffectsMenu
+-     TextGlowColorPicker [gallery] < TextEffectsMenu
+-     TextGlowColorMoreColorsDialog [button] < TextEffectsMenu
+-     TextEffectsGlowsMoreOptions [button] < TextEffectsMenu
+-   BevelTextGallery [gallery] < TextEffectsMenu
+-     TextEffectsBevelMore3DOptionsDialog [button] < TextEffectsMenu
+-   TextEffects3DRotationGallery [gallery] < TextEffectsMenu
+-     TextEffects3DRotationOptionsDialog [button] < TextEffectsMenu
+-   TextEffectTransformGallery [gallery] < TextEffectsMenu
+- WordArtFormatDialog [button (dialogBoxLauncher)]
+### GroupTextbox
+- TextDirectionGallery [gallery]
+-   TextDirectionOptionsDialog [button] < TextDirectionGallery
+- TextAlignGallery [gallery]
+- TextBoxLinkCreate [button]
+- TextBoxLinkBreak [button]
+### GroupAltText
+- AltTextPaneRibbon [toggleButton]
+### GroupArrangeWith3DEditor
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupSize
+- ShapeHeight [control]
+- ShapeWidth [control]
+- LayoutOptionsDialogSize [button (dialogBoxLauncher)]
+
+##   (TabSetDrawingToolsClassic)
+### 
+- TabDrawingToolsFormatClassic [tab]
+
+## TabDrawingToolsFormatClassic  (TabSetDrawingToolsClassic)
+### 
+- GroupShapesClassic [group]
+- GroupShapeStylesClassic [group]
+- GroupShadowEffects [group]
+- Group3DEffects [group]
+- GroupArrange [group]
+- GroupSizeClassic [group]
+### GroupShapesClassic
+- ShapesInsertGallery [gallery]
+- ObjectEditShapeMenuClassic [menu]
+-   ObjectEditPoints [toggleButton] < ObjectEditShapeMenuClassic
+-   ShapeRerouteConnectors [toggleButton] < ObjectEditShapeMenuClassic
+- ObjectAddText [button]
+### GroupShapeStylesClassic
+- ShapeStylesGalleryClassic [gallery]
+- Drawing1ColorPickerFill [gallery]
+-   ObjectFillMoreColorsDialog [button] < Drawing1ColorPickerFill
+-   ObjectPictureFill [button] < Drawing1ColorPickerFill
+-   ShapeFillGradientGalleryClassic [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreGradientsDialogClassic [button] < Drawing1ColorPickerFill
+-   Drawing1GalleryTextures [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreTexturesDialogClassic [button] < Drawing1ColorPickerFill
+-   ShapeFillEffectPatternClassic [button] < Drawing1ColorPickerFill
+- Drawing1ColorPickerLineStyles [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineWeightGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineDashesGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   ArrowStyleGallery [gallery] < Drawing1ColorPickerLineStyles
+-     ArrowsMore [button] < Drawing1ColorPickerLineStyles
+-   OutlineLinePatternFill [button] < Drawing1ColorPickerLineStyles
+- ShapeChangeShapeGallery [gallery]
+- DrawingObjectFormatDialog [button (dialogBoxLauncher)]
+### GroupShadowEffects
+- ShadowStyleGalleryClassic [gallery]
+-   ShadowColorPickerClassic [gallery] < ShadowStyleGalleryClassic
+-     ShadowSemitransparentClassic [toggleButton] < ShadowStyleGalleryClassic
+-     ObjectShadowColorMoreColorsDialog [button] < ShadowStyleGalleryClassic
+- ShadowNudgeUpClassic [button]
+- ShadowNudgeLeftClassic [button]
+- ShadowOnOrOffClassic [toggleButton]
+- ShadowNudgeRightClassic [button]
+- ShadowNudgeDownClassic [button]
+### Group3DEffects
+- _3DEffectsGalleryClassic [gallery]
+-   _3DEffectColorPickerClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DEffectColorPickerMoreClassic [button] < _3DEffectsGalleryClassic
+-   _3DExtrusionDepthGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-   _3DDirectionGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DExtrusionPerspectiveClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DExtrusionParallelClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DLightingGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DLightingFlatClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingNormalClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingDimClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DSurfaceMaterialGalleryClassic [gallery] < _3DEffectsGalleryClassic
+- _3DTiltUpClassic [button]
+- _3DTiltLeftClassic [button]
+- _3DEffectsOnOffClassic [toggleButton]
+- _3DTiltRightClassic [button]
+- _3DTiltDownClassic [button]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupSizeClassic
+- ShapeHeight [control]
+- ShapeWidth [control]
+- ObjectSizeDialogClassic [button (dialogBoxLauncher)]
+
+##   (TabSetWordArtTools)
+### 
+- TabWordArtToolsFormat [tab]
+
+## TabWordArtToolsFormat  (TabSetWordArtTools)
+### 
+- GroupWordArtText [group]
+- GroupWordArtStylesClassic [group]
+- GroupShadowEffects [group]
+- Group3DEffects [group]
+- GroupArrange [group]
+- GroupSizeClassic [group]
+### GroupWordArtText
+- WordArtEditTextClassic [button]
+- WordArtSpacingMenu [menu]
+-   WordArtSpacingVeryTight [toggleButton] < WordArtSpacingMenu
+-   WordArtSpacingTight [toggleButton] < WordArtSpacingMenu
+-   WordArtSpacingNormal [toggleButton] < WordArtSpacingMenu
+-   WordArtSpacingLoose [toggleButton] < WordArtSpacingMenu
+-   WordArtSpacingVeryLoose [toggleButton] < WordArtSpacingMenu
+-   WordArtSpacingKernCharacterPairs [toggleButton] < WordArtSpacingMenu
+- WordArtEvenTextHeightClassic [toggleButton]
+- WordArtVerticalText [toggleButton]
+- TextAlignMenu [menu]
+-   TextAlignLeft [toggleButton] < TextAlignMenu
+-   TextAlignCenter [toggleButton] < TextAlignMenu
+-   TextAlignRight [toggleButton] < TextAlignMenu
+-   TextAlignWordJustify [toggleButton] < TextAlignMenu
+-   TextAlignLetterJustify [toggleButton] < TextAlignMenu
+-   TextAlignStretchJustify [toggleButton] < TextAlignMenu
+### GroupWordArtStylesClassic
+- WordArtStylesGalleryClassic [gallery]
+- Drawing1ColorPickerFillWordArt [gallery]
+-   ObjectFillMoreColorsDialog [button] < Drawing1ColorPickerFillWordArt
+-   ObjectPictureFill [button] < Drawing1ColorPickerFillWordArt
+-   ShapeFillGradientGalleryClassic [gallery] < Drawing1ColorPickerFillWordArt
+-     ShapeFillEffectMoreGradientsDialogClassic [button] < Drawing1ColorPickerFillWordArt
+-   Drawing1GalleryTextures [gallery] < Drawing1ColorPickerFillWordArt
+-     ShapeFillEffectMoreTexturesDialogClassic [button] < Drawing1ColorPickerFillWordArt
+-   ShapeFillEffectPatternClassic [button] < Drawing1ColorPickerFillWordArt
+- Drawing1ColorPickerLineStylesWordArt [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < Drawing1ColorPickerLineStylesWordArt
+-   OutlineWeightGallery [gallery] < Drawing1ColorPickerLineStylesWordArt
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStylesWordArt
+-   OutlineDashesGallery [gallery] < Drawing1ColorPickerLineStylesWordArt
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStylesWordArt
+-   ArrowStyleGallery [gallery] < Drawing1ColorPickerLineStylesWordArt
+-     ArrowsMore [button] < Drawing1ColorPickerLineStylesWordArt
+-   OutlineLinePatternFill [button] < Drawing1ColorPickerLineStylesWordArt
+- WordArtChangeShapeGallery [gallery]
+### GroupShadowEffects
+- ShadowStyleGalleryClassic [gallery]
+-   ShadowColorPickerClassic [gallery] < ShadowStyleGalleryClassic
+-     ShadowSemitransparentClassic [toggleButton] < ShadowStyleGalleryClassic
+-     ObjectShadowColorMoreColorsDialog [button] < ShadowStyleGalleryClassic
+- ShadowNudgeUpClassic [button]
+- ShadowNudgeLeftClassic [button]
+- ShadowOnOrOffClassic [toggleButton]
+- ShadowNudgeRightClassic [button]
+- ShadowNudgeDownClassic [button]
+### Group3DEffects
+- _3DEffectsGalleryClassic [gallery]
+-   _3DEffectColorPickerClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DEffectColorPickerMoreClassic [button] < _3DEffectsGalleryClassic
+-   _3DExtrusionDepthGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-   _3DDirectionGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DExtrusionPerspectiveClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DExtrusionParallelClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DLightingGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DLightingFlatClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingNormalClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingDimClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DSurfaceMaterialGalleryClassic [gallery] < _3DEffectsGalleryClassic
+- _3DTiltUpClassic [button]
+- _3DTiltLeftClassic [button]
+- _3DEffectsOnOffClassic [toggleButton]
+- _3DTiltRightClassic [button]
+- _3DTiltDownClassic [button]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupSizeClassic
+- ShapeHeight [control]
+- ShapeWidth [control]
+- ObjectSizeDialogClassic [button (dialogBoxLauncher)]
+
+##   (TabSetDiagramTools)
+### 
+- TabDiagramToolsFormatClassic [tab]
+
+## TabDiagramToolsFormatClassic  (TabSetDiagramTools)
+### 
+- GroupDiagramLayoutClassic [group]
+- GroupDiagramStylesClassic [group]
+- GroupShadowEffects [group]
+- Group3DEffects [group]
+- GroupDiagramArrangeClassic [group]
+- GroupSizeClassic [group]
+### GroupDiagramLayoutClassic
+- DiagramShapeInsertClassic [button]
+- DiagramReverseClassic [button]
+- DiagramShapeMoveForwardClassic [button]
+- DiagramShapeMoveBackwardClassic [button]
+- DiagramAutoLayoutClassic [toggleButton]
+- DiagramFitToContentsClassic [button]
+- DiagramExpandClassic [button]
+- DiagramResizeClassic [toggleButton]
+### GroupDiagramStylesClassic
+- DiagramStylesClassic [button]
+- Drawing1ColorPickerFill [gallery]
+-   ObjectFillMoreColorsDialog [button] < Drawing1ColorPickerFill
+-   ObjectPictureFill [button] < Drawing1ColorPickerFill
+-   ShapeFillGradientGalleryClassic [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreGradientsDialogClassic [button] < Drawing1ColorPickerFill
+-   Drawing1GalleryTextures [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreTexturesDialogClassic [button] < Drawing1ColorPickerFill
+-   ShapeFillEffectPatternClassic [button] < Drawing1ColorPickerFill
+- Drawing1ColorPickerLineStyles [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineWeightGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineDashesGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   ArrowStyleGallery [gallery] < Drawing1ColorPickerLineStyles
+-     ArrowsMore [button] < Drawing1ColorPickerLineStyles
+-   OutlineLinePatternFill [button] < Drawing1ColorPickerLineStyles
+- DiagramChangeToMenuClassic [menu]
+-   DiagramChangeToCycleClassic [button] < DiagramChangeToMenuClassic
+-   DiagramChangeToRadialClassic [button] < DiagramChangeToMenuClassic
+-   DiagramChangeToPyramidClassic [button] < DiagramChangeToMenuClassic
+-   DiagramChangeToVennDiagramClassic [button] < DiagramChangeToMenuClassic
+-   DiagramChangeToTargetClassic [button] < DiagramChangeToMenuClassic
+### GroupShadowEffects
+- ShadowStyleGalleryClassic [gallery]
+-   ShadowColorPickerClassic [gallery] < ShadowStyleGalleryClassic
+-     ShadowSemitransparentClassic [toggleButton] < ShadowStyleGalleryClassic
+-     ObjectShadowColorMoreColorsDialog [button] < ShadowStyleGalleryClassic
+- ShadowNudgeUpClassic [button]
+- ShadowNudgeLeftClassic [button]
+- ShadowOnOrOffClassic [toggleButton]
+- ShadowNudgeRightClassic [button]
+- ShadowNudgeDownClassic [button]
+### Group3DEffects
+- _3DEffectsGalleryClassic [gallery]
+-   _3DEffectColorPickerClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DEffectColorPickerMoreClassic [button] < _3DEffectsGalleryClassic
+-   _3DExtrusionDepthGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-   _3DDirectionGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DExtrusionPerspectiveClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DExtrusionParallelClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DLightingGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DLightingFlatClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingNormalClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingDimClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DSurfaceMaterialGalleryClassic [gallery] < _3DEffectsGalleryClassic
+- _3DTiltUpClassic [button]
+- _3DTiltLeftClassic [button]
+- _3DEffectsOnOffClassic [toggleButton]
+- _3DTiltRightClassic [button]
+- _3DTiltDownClassic [button]
+### GroupDiagramArrangeClassic
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+### GroupSizeClassic
+- ShapeHeight [control]
+- ShapeWidth [control]
+- ObjectSizeDialogClassic [button (dialogBoxLauncher)]
+
+##   (TabSetOrganizationChartTools)
+### 
+- TabOrganizationChartToolsFormat [tab]
+
+## TabOrganizationChartToolsFormat  (TabSetOrganizationChartTools)
+### 
+- GroupOrganizationChartShapeInsert [group]
+- GroupOrganizationChartLayoutClassic [group]
+- GroupOrganizationChartStyleClassic [group]
+- GroupOrganizationChartSelect [group]
+- GroupShadowEffects [group]
+- Group3DEffects [group]
+- GroupDiagramArrangeClassic [group]
+- GroupSizeClassic [group]
+### GroupOrganizationChartShapeInsert
+- OrganizationChartInsertSubordinate [button]
+- OrganizationChartInsertCoworker [button]
+- OrganizationChartInsertAssistant [button]
+### GroupOrganizationChartLayoutClassic
+- OrganizationChartLayoutStandard [toggleButton]
+- OrganizationChartLayoutRightHanging [toggleButton]
+- OrganizationChartLayoutLeftHanging [toggleButton]
+- OrganizationChartLayoutBothHanging [toggleButton]
+- OrganizationChartAutoLayout [toggleButton]
+### GroupOrganizationChartStyleClassic
+- OrganizationChartStyle [button]
+- Drawing1ColorPickerFill [gallery]
+-   ObjectFillMoreColorsDialog [button] < Drawing1ColorPickerFill
+-   ObjectPictureFill [button] < Drawing1ColorPickerFill
+-   ShapeFillGradientGalleryClassic [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreGradientsDialogClassic [button] < Drawing1ColorPickerFill
+-   Drawing1GalleryTextures [gallery] < Drawing1ColorPickerFill
+-     ShapeFillEffectMoreTexturesDialogClassic [button] < Drawing1ColorPickerFill
+-   ShapeFillEffectPatternClassic [button] < Drawing1ColorPickerFill
+- Drawing1ColorPickerLineStyles [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineWeightGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   OutlineDashesGallery [gallery] < Drawing1ColorPickerLineStyles
+-     LineStylesDialog [button] < Drawing1ColorPickerLineStyles
+-   ArrowStyleGallery [gallery] < Drawing1ColorPickerLineStyles
+-     ArrowsMore [button] < Drawing1ColorPickerLineStyles
+-   OutlineLinePatternFill [button] < Drawing1ColorPickerLineStyles
+### GroupOrganizationChartSelect
+- OrganizationChartSelectLevel [button]
+- OrganizationChartSelectBranch [button]
+- OrganizationChartSelectAllAssistants [button]
+- OrganizationChartSelectAllConnectors [button]
+### GroupShadowEffects
+- ShadowStyleGalleryClassic [gallery]
+-   ShadowColorPickerClassic [gallery] < ShadowStyleGalleryClassic
+-     ShadowSemitransparentClassic [toggleButton] < ShadowStyleGalleryClassic
+-     ObjectShadowColorMoreColorsDialog [button] < ShadowStyleGalleryClassic
+- ShadowNudgeUpClassic [button]
+- ShadowNudgeLeftClassic [button]
+- ShadowOnOrOffClassic [toggleButton]
+- ShadowNudgeRightClassic [button]
+- ShadowNudgeDownClassic [button]
+### Group3DEffects
+- _3DEffectsGalleryClassic [gallery]
+-   _3DEffectColorPickerClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DEffectColorPickerMoreClassic [button] < _3DEffectsGalleryClassic
+-   _3DExtrusionDepthGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-   _3DDirectionGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DExtrusionPerspectiveClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DExtrusionParallelClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DLightingGalleryClassic [gallery] < _3DEffectsGalleryClassic
+-     _3DLightingFlatClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingNormalClassic [toggleButton] < _3DEffectsGalleryClassic
+-     _3DLightingDimClassic [toggleButton] < _3DEffectsGalleryClassic
+-   _3DSurfaceMaterialGalleryClassic [gallery] < _3DEffectsGalleryClassic
+- _3DTiltUpClassic [button]
+- _3DTiltLeftClassic [button]
+- _3DEffectsOnOffClassic [toggleButton]
+- _3DTiltRightClassic [button]
+- _3DTiltDownClassic [button]
+### GroupDiagramArrangeClassic
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+### GroupSizeClassic
+- ShapeHeight [control]
+- ShapeWidth [control]
+- ObjectSizeDialogClassic [button (dialogBoxLauncher)]
+
+##   (TabSetPictureTools)
+### 
+- TabPictureToolsFormat [tab]
+
+## TabPictureToolsFormat  (TabSetPictureTools)
+### 
+- GroupImagePlay [group]
+- GroupPictureTools [group]
+- GroupPictureStyles [group]
+- GroupAltText [group]
+- GroupArrangeWith3DEditor [group]
+- GroupPictureSize [group]
+### GroupImagePlay
+- ImagePlay [button]
+### GroupPictureTools
+- PictureBackgroundRemoval [toggleButton]
+- PictureCorrectionsMenu [menu]
+-   PictureSharpenSoftenGallery [gallery] < PictureCorrectionsMenu
+-   PictureBrightnessAndContrastGallery [gallery] < PictureCorrectionsMenu
+-   PictureCorrectionsDialog [button] < PictureCorrectionsMenu
+- PictureColorMenu [menu]
+-   PictureSaturationGallery [gallery] < PictureColorMenu
+-   PictureColorTempertatureGallery [gallery] < PictureColorMenu
+-   PictureRecolorGallery [gallery] < PictureColorMenu
+-   RecolorColorPicker [gallery] < PictureColorMenu
+-     PictureRecolorMoreColorsDialog [button] < PictureColorMenu
+-   PictureSetTransparentColor [toggleButton] < PictureColorMenu
+-   PictureColorDialog [button] < PictureColorMenu
+- PictureArtisticEffectsGallery [gallery]
+-   ArtisticEffectsDialog [button] < PictureArtisticEffectsGallery
+- PictureTransparencyGallery [gallery]
+-   PictureMoreTransparency [button] < PictureTransparencyGallery
+- PicturesCompress [button]
+- PictureChange [button]
+- PictureChangeMenu [menu]
+-   PictureChangeFromFile [button] < PictureChangeMenu
+-   PictureChangeFromMobile [button] < PictureChangeMenu
+-   PictureChangeFromM365 [button] < PictureChangeMenu
+-   PictureChangeFromOnline [button] < PictureChangeMenu
+-   ChangeIcon [button] < PictureChangeMenu
+-   PictureChangeFromClipboard [button] < PictureChangeMenu
+- PictureResetSplitButton [splitButton]
+-   PictureReset [button] < PictureResetSplitButton
+-   PictureResetAndSize [button] < PictureResetSplitButton
+### GroupPictureStyles
+- PictureStylesGallery [gallery]
+- OutlineColorPicker [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < OutlineColorPicker
+-   OutlineWeightGallery [gallery] < OutlineColorPicker
+-     LineStylesDialog [button] < OutlineColorPicker
+-   GallerySketchyShapes [gallery] < OutlineColorPicker
+-     MoreLines2 [button] < OutlineColorPicker
+-   OutlineDashesGallery [gallery] < OutlineColorPicker
+-     LineStylesDialog [button] < OutlineColorPicker
+- PictureEffectsMenu [menu]
+-   PictureEffectsPresetGallery [gallery] < PictureEffectsMenu
+-     _3DBevelOptionsDialog [button] < PictureEffectsMenu
+-   PictureEffectsShadowGallery [gallery] < PictureEffectsMenu
+-     ShadowOptionsDialog [button] < PictureEffectsMenu
+-   PictureReflectionGallery [gallery] < PictureEffectsMenu
+-     ReflectionsMoreOptions [button] < PictureEffectsMenu
+-   PictureEffectsGlowGallery [gallery] < PictureEffectsMenu
+-     GlowColorPicker [gallery] < PictureEffectsMenu
+-     GlowColorMoreColorsDialog [button] < PictureEffectsMenu
+-     GlowsMoreOptions [button] < PictureEffectsMenu
+-   PictureEffectsSoftEdgesGallery [gallery] < PictureEffectsMenu
+-     SoftEdgesMoreOptions [button] < PictureEffectsMenu
+-   _3DBevelPictureTopGallery [gallery] < PictureEffectsMenu
+-     _3DBevelOptionsDialog [button] < PictureEffectsMenu
+-   PictureRotationGallery [gallery] < PictureEffectsMenu
+-     _3DRotationOptionsDialog [button] < PictureEffectsMenu
+- PicturesConvertToSmartArt [gallery]
+- PictureFormatDialog [button (dialogBoxLauncher)]
+### GroupAltText
+- AltTextPaneRibbon [toggleButton]
+### GroupArrangeWith3DEditor
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupPictureSize
+- PictureCropTools [splitButton]
+-   PictureCrop [toggleButton] < PictureCropTools
+-   PictureShapeGallery [gallery] < PictureCropTools
+-   PictureCropAspectRatioMenu [menu] < PictureCropTools
+-     PictureCropAspectRatio1To1 [button] < PictureCropTools
+-     PictureCropAspectRatio2To3 [button] < PictureCropTools
+-     PictureCropAspectRatio3To4 [button] < PictureCropTools
+-     PictureCropAspectRatio3To5 [button] < PictureCropTools
+-     PictureCropAspectRatio4To5 [button] < PictureCropTools
+-     PictureCropAspectRatio3To2 [button] < PictureCropTools
+-     PictureCropAspectRatio4To3 [button] < PictureCropTools
+-     PictureCropAspectRatio5To3 [button] < PictureCropTools
+-     PictureCropAspectRatio5To4 [button] < PictureCropTools
+-     PictureCropAspectRatio16To9 [button] < PictureCropTools
+-     PictureCropAspectRatio16To10 [button] < PictureCropTools
+-   PictureFillCrop [button] < PictureCropTools
+-   PictureFitCrop [button] < PictureCropTools
+- ShapeHeight [control]
+- ShapeWidth [control]
+- LayoutOptionsDialogSize [button (dialogBoxLauncher)]
+
+##   (TabSetPictureToolsClassic)
+### 
+- TabPictureToolsFormatClassic [tab]
+
+## TabPictureToolsFormatClassic  (TabSetPictureToolsClassic)
+### 
+- GroupPictureToolsClassic [group]
+- GroupShadowEffects [group]
+- GroupBorder [group]
+- GroupArrange [group]
+- GroupPictureSizeClassic [group]
+### GroupPictureToolsClassic
+- Drawing1GalleryBrightness [gallery]
+-   PictureBrightnessAndContrastDialog [button] < Drawing1GalleryBrightness
+- Drawing1GalleryContrast [gallery]
+-   PictureBrightnessAndContrastDialog [button] < Drawing1GalleryContrast
+- PictureRecolorGalleryWord [gallery]
+- PicturesCompress [button]
+- PictureReset [button]
+### GroupShadowEffects
+- ShadowStyleGalleryClassic [gallery]
+-   ShadowColorPickerClassic [gallery] < ShadowStyleGalleryClassic
+-     ShadowSemitransparentClassic [toggleButton] < ShadowStyleGalleryClassic
+-     ObjectShadowColorMoreColorsDialog [button] < ShadowStyleGalleryClassic
+- ShadowNudgeUpClassic [button]
+- ShadowNudgeLeftClassic [button]
+- ShadowOnOrOffClassic [toggleButton]
+- ShadowNudgeRightClassic [button]
+- ShadowNudgeDownClassic [button]
+### GroupBorder
+- PictureBorderColorPickerClassic [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < PictureBorderColorPickerClassic
+- OutlineDashesGallery [gallery]
+-   LineStylesDialog [button] < OutlineDashesGallery
+- OutlineWeightGallery [gallery]
+-   LineStylesDialog [button] < OutlineWeightGallery
+- LineStylesDialog [button (dialogBoxLauncher)]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupPictureSizeClassic
+- PictureCrop [toggleButton]
+- ShapeHeight [control]
+- ShapeWidth [control]
+- ObjectSizeDialogClassic [button (dialogBoxLauncher)]
+
+##   (TabSetTableTools)
+### 
+- TabTableToolsDesign [tab]
+- TabTableToolsLayout [tab]
+
+## TabTableToolsDesign  (TabSetTableTools)
+### 
+- GroupTableLayout [group]
+- GroupTableStylesWord [group]
+- GroupTableBorders [group]
+### GroupTableLayout
+- TableStyleHeaderRowWord [checkBox]
+- TableStyleTotalRowWord [checkBox]
+- TableStyleBandedRowsWord [checkBox]
+- TableStylesFirstColumnWord [checkBox]
+- TableStyleLastColumnWord [checkBox]
+- TableStyleBandedColumnsWord [checkBox]
+- TableStyleOptionsMenu [menu]
+-   TableStyleHeaderRowWord [checkBox] < TableStyleOptionsMenu
+-   TableStyleTotalRowWord [checkBox] < TableStyleOptionsMenu
+-   TableStyleBandedRowsWord [checkBox] < TableStyleOptionsMenu
+-   TableStylesFirstColumnWord [checkBox] < TableStyleOptionsMenu
+-   TableStyleLastColumnWord [checkBox] < TableStyleOptionsMenu
+-   TableStyleBandedColumnsWord [checkBox] < TableStyleOptionsMenu
+### GroupTableStylesWord
+- TableStylesGalleryWord [gallery]
+-   TableStyleModify [button] < TableStylesGalleryWord
+-   TableStyleClear [button] < TableStylesGalleryWord
+-   NewTableStyleWord [button] < TableStylesGalleryWord
+- ShadingColorPicker [gallery]
+-   ShadingColorsMoreColorsDialog [button] < ShadingColorPicker
+### GroupTableBorders
+- BorderStylesGallery [gallery]
+-   TableSampleBorder [toggleButton] < BorderStylesGallery
+- TableDrawBorderPenStyle [dropDown]
+- TableDrawBorderPenWeight [dropDown]
+- BorderColorPicker [gallery]
+-   BorderMoreColorsDialog [button] < BorderColorPicker
+- BordersSelectionGallery [gallery]
+-   HorizontalLineInsert [button] < BordersSelectionGallery
+-   TableDrawTable [toggleButton] < BordersSelectionGallery
+-   TableShowGridlines [toggleButton] < BordersSelectionGallery
+-   BordersShadingDialogWord [button] < BordersSelectionGallery
+- TablePaintBorder [toggleButton]
+- BordersShadingDialogWord [button (dialogBoxLauncher)]
+
+## TabTableToolsLayout  (TabSetTableTools)
+### 
+- GroupTable [group]
+- GroupTableDraw [group]
+- GroupTableRowsAndColumns [group]
+- GroupTableMerge [group]
+- GroupTableAlignment [group]
+- GroupTableCellSize [group]
+- GroupTableData [group]
+### GroupTable
+- TableSelectMenu [menu]
+-   TableSelectCell [button] < TableSelectMenu
+-   TableColumnSelect [button] < TableSelectMenu
+-   TableRowSelect [button] < TableSelectMenu
+-   TableSelect [button] < TableSelectMenu
+- TableShowGridlines [toggleButton]
+- TablePropertiesDialog [button]
+### GroupTableDraw
+- TableDrawTable [toggleButton]
+- TableEraser [toggleButton]
+### GroupTableRowsAndColumns
+- TableDeleteRowsAndColumnsMenuWord [menu]
+-   CellsDelete [button] < TableDeleteRowsAndColumnsMenuWord
+-   TableColumnsDelete [button] < TableDeleteRowsAndColumnsMenuWord
+-   TableRowsDelete [button] < TableDeleteRowsAndColumnsMenuWord
+-   TableDelete [button] < TableDeleteRowsAndColumnsMenuWord
+- TableRowsInsertAboveWord [button]
+- TableRowsInsertBelowWord [button]
+- TableColumnsInsertLeft [button]
+- TableColumnsInsertRight [button]
+- TableInsertCellsDialog [button (dialogBoxLauncher)]
+### GroupTableMerge
+- MergeCells [button]
+- SplitCells [button]
+- TableSplitTable [button]
+### GroupTableAlignment
+- AlignmentMenu [menu]
+-   TableCellAlignTopLeft [toggleButton] < AlignmentMenu
+-   TableCellAlignTopCenter [toggleButton] < AlignmentMenu
+-   TableCellAlignTopRight [toggleButton] < AlignmentMenu
+-   TableCellAlignMiddleLeft [toggleButton] < AlignmentMenu
+-   TableCellAlignMiddleCenter [toggleButton] < AlignmentMenu
+-   TableCellAlignMiddleRight [toggleButton] < AlignmentMenu
+-   TableCellAlignBottomLeft [toggleButton] < AlignmentMenu
+-   TableCellAlignBottomCenter [toggleButton] < AlignmentMenu
+-   TableCellAlignBottomRight [toggleButton] < AlignmentMenu
+- TextDirection [button]
+- TableOptionsDialog [button]
+- TableCellAlignTopLeft [toggleButton]
+- TableCellAlignTopCenter [toggleButton]
+- TableCellAlignTopRight [toggleButton]
+- TableCellAlignMiddleLeft [toggleButton]
+- TableCellAlignMiddleCenter [toggleButton]
+- TableCellAlignMiddleRight [toggleButton]
+- TableCellAlignBottomLeft [toggleButton]
+- TableCellAlignBottomCenter [toggleButton]
+- TableCellAlignBottomRight [toggleButton]
+### GroupTableCellSize
+- TableAutoFitMenu [menu]
+-   TableAutoFitContents [button] < TableAutoFitMenu
+-   TableAutoFitWindow [button] < TableAutoFitMenu
+-   TableAutoFitFixedColumnWidth [button] < TableAutoFitMenu
+- TableRowHeight [control]
+- TableColumnWidth [control]
+- TableRowsDistribute [button]
+- TableColumnsDistribute [button]
+- TablePropertiesDialog [button (dialogBoxLauncher)]
+### GroupTableData
+- SortDialogClassic [button]
+- TableRepeatHeaderRows [toggleButton]
+- ConvertTableToText [button]
+- TableFormulaDialog [button]
+
+##   (TabSetHeaderAndFooterTools)
+### 
+- TabHeaderAndFooterToolsDesign [tab]
+
+## TabHeaderAndFooterToolsDesign  (TabSetHeaderAndFooterTools)
+### 
+- GroupHeaderFooter [group]
+- GroupHeaderFooterInsert [group]
+- GroupHeaderFooterNavigation [group]
+- GroupHeaderFooterOptions [group]
+- GroupHeaderFooterPosition [group]
+- GroupHeaderFooterClose [group]
+### GroupHeaderFooter
+- HeaderInsertGallery [gallery]
+-   None [gallery] < HeaderInsertGallery
+-   None [button] < HeaderInsertGallery
+-   None [button] < HeaderInsertGallery
+-   ThemeSearchOfficeOnline [button] < HeaderInsertGallery
+-   HeaderFooterEditHeader [button] < HeaderInsertGallery
+-   HeaderFooterRemoveHeaderWord [button] < HeaderInsertGallery
+-   SaveSelectionToHeaderGallery [button] < HeaderInsertGallery
+- FooterInsertGallery [gallery]
+-   None [gallery] < FooterInsertGallery
+-   None [button] < FooterInsertGallery
+-   None [button] < FooterInsertGallery
+-   ThemeSearchOfficeOnline [button] < FooterInsertGallery
+-   HeaderFooterEditFooter [button] < FooterInsertGallery
+-   HeaderFooterRemoveFooterWord [button] < FooterInsertGallery
+-   SaveSelectionToFooterGallery [button] < FooterInsertGallery
+- HeaderAndFooterMenuAnchor [menu]
+-   HeaderInsertGallery [gallery] < HeaderAndFooterMenuAnchor
+-     None [gallery] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     ThemeSearchOfficeOnline [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterEditHeader [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterRemoveHeaderWord [button] < HeaderAndFooterMenuAnchor
+-     SaveSelectionToHeaderGallery [button] < HeaderAndFooterMenuAnchor
+-   FooterInsertGallery [gallery] < HeaderAndFooterMenuAnchor
+-     None [gallery] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     None [button] < HeaderAndFooterMenuAnchor
+-     ThemeSearchOfficeOnline [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterEditFooter [button] < HeaderAndFooterMenuAnchor
+-     HeaderFooterRemoveFooterWord [button] < HeaderAndFooterMenuAnchor
+-     SaveSelectionToFooterGallery [button] < HeaderAndFooterMenuAnchor
+- HeaderFooterPageNumberInsert [menu]
+-   PageNumbersInHeaderInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberTop [button] < HeaderFooterPageNumberInsert
+-   PageNambersInFooterInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberBottom [button] < HeaderFooterPageNumberInsert
+-   PageNambersInMarginsInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberMargin [button] < HeaderFooterPageNumberInsert
+-   PageNumberFieldInsertGallery [gallery] < HeaderFooterPageNumberInsert
+-     None [gallery] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     None [button] < HeaderFooterPageNumberInsert
+-     SaveSelectionToPageNumberGallery [button] < HeaderFooterPageNumberInsert
+-   PageNumberFormat [button] < HeaderFooterPageNumberInsert
+-   PageNumbersRemove [button] < HeaderFooterPageNumberInsert
+### GroupHeaderFooterInsert
+- DateAndTimeInsert [button]
+- DocumentInfo [menu]
+-   DocInfoAuthor [button] < DocumentInfo
+-   DocInfoFileName [button] < DocumentInfo
+-   DocInfoFilePath [button] < DocumentInfo
+-   DocInfoDocTitle [button] < DocumentInfo
+-   PropertyInsert [gallery] < DocumentInfo
+-   FieldInsert [button] < DocumentInfo
+- QuickPartsInsertGallery [gallery]
+-   AutoTextGallery [gallery] < QuickPartsInsertGallery
+-     SaveSelectionToAutoTextGallery [button] < QuickPartsInsertGallery
+-   PropertyInsert [gallery] < QuickPartsInsertGallery
+-   FieldInsert [button] < QuickPartsInsertGallery
+-   BuildingBlocksOrganizer [button] < QuickPartsInsertGallery
+-   SaveSelectionToQuickPartGallery [button] < QuickPartsInsertGallery
+- PictureInsertFromFile [button]
+- ClipArtInsertDialog [button]
+### GroupHeaderFooterNavigation
+- GoToHeader [button]
+- GoToFooter [button]
+- HeaderFooterPreviousSection [button]
+- HeaderFooterNextSection [button]
+- HeaderFooterLinkToPrevious [toggleButton]
+### GroupHeaderFooterOptions
+- HeaderFooterDifferentFirstPageWord [checkBox]
+- HeaderFooterDifferentOddEvenPageWord [checkBox]
+- HeaderFooterShowDocumentText [checkBox]
+### GroupHeaderFooterPosition
+- HeaderFooterPositionHeaderFromTop [control]
+- HeaderFooterPositionFooterFromBottom [control]
+- InsertAlignmentTab [button]
+### GroupHeaderFooterClose
+- HeaderFooterClose [button]
+
+##   (TabSetEquationTools)
+### 
+- TabEquationToolsDesign [tab]
+
+## TabEquationToolsDesign  (TabSetEquationTools)
+### 
+- GroupEquationTools [group]
+- GroupConversions [group]
+- GroupEquationSymbols [group]
+- GroupEquationStructures [group]
+### GroupEquationTools
+- EquationInsertGallery [gallery]
+-   None [gallery] < EquationInsertGallery
+-   None [button] < EquationInsertGallery
+-   None [button] < EquationInsertGallery
+-   SaveSelectionToEquationGallery [button] < EquationInsertGallery
+- InkEquation [button]
+### GroupConversions
+- EquationUnicodeFormat [toggleButton]
+- EquationLaTexFormat [toggleButton]
+- EquationNormalText [toggleButton]
+- EquationConvertSplitButton [splitButton]
+-   EquationConvert [toggleButton] < EquationConvertSplitButton
+-   EquationProfessionalOne [toggleButton] < EquationConvertSplitButton
+-   EquationLinearOne [toggleButton] < EquationConvertSplitButton
+-   EquationProfessionalAll [toggleButton] < EquationConvertSplitButton
+-   EquationLinearAll [toggleButton] < EquationConvertSplitButton
+- EquationOptions [button (dialogBoxLauncher)]
+### GroupEquationSymbols
+- EquationSymbolsInsertGallery [gallery]
+### GroupEquationStructures
+- EquationFractionGallery [gallery]
+- EquationScriptGallery [gallery]
+- EquationRadicalGallery [gallery]
+- EquationIntegralGallery [gallery]
+- EquationLargeOperatorGallery [gallery]
+- EquationDelimiterGallery [gallery]
+- EquationFunctionGallery [gallery]
+- EquationAccentGallery [gallery]
+- EquationLimitGallery [gallery]
+- EquationOperatorGallery [gallery]
+- EquationMatrixGallery [gallery]
+
+##   (TabSetInkTools)
+### 
+- TabInkToolsPens [tab]
+
+## TabInkToolsPens  (TabSetInkTools)
+### 
+- GroupPensWrite [group]
+- GroupPens [group]
+- GroupInkSelect [group]
+- GroupInkFormat [group]
+- GroupInkPens [group]
+- GroupInkConvertOneNote [group]
+- GroupInkClose [group]
+### GroupPensWrite
+- InkBallpointPen [toggleButton]
+- InkHighlighter [toggleButton]
+- InkEraser [toggleButton]
+- ObjectsSelect [toggleButton]
+### GroupPens
+- PensGallery [gallery]
+-   PenAddFavorite [button] < PensGallery
+- InkColorPicker [gallery]
+-   InkColorMoreColorsDialog [button] < InkColorPicker
+- LineThickness [gallery]
+-   LineStylesDialog [button] < LineThickness
+### GroupInkSelect
+- ObjectsSelect [toggleButton]
+### GroupInkFormat
+- ObjectsSelect [toggleButton]
+### GroupInkPens
+- InkFeltTipPen [toggleButton]
+### GroupInkConvertOneNote
+- InkEditorSplitButton [splitButton]
+-   InkEditor [toggleButton] < InkEditorSplitButton
+-   InkEditorEnable [toggleButton] < InkEditorSplitButton
+-   InkEditorInkGestureHelp [button] < InkEditorSplitButton
+- DiagrammingOnline [toggleButton]
+- SelectionToMathConvert [button]
+### GroupInkClose
+- InkStopInkingReadingView [button]
+
+##   (TabSetSVGTools)
+### 
+- TabGraphicsToolsFormat [tab]
+
+## TabGraphicsToolsFormat  (TabSetSVGTools)
+### 
+- GroupIcons [group]
+- GroupGraphicsStyles [group]
+- GroupAltText [group]
+- GroupArrange [group]
+- GroupGraphicsSize [group]
+### GroupIcons
+- GraphicChangeMenu [menu]
+-   PictureChangeFromFile [button] < GraphicChangeMenu
+-   PictureChangeFromMobile [button] < GraphicChangeMenu
+-   PictureChangeFromM365 [button] < GraphicChangeMenu
+-   PictureChangeFromOnline [button] < GraphicChangeMenu
+-   ChangeIcon [button] < GraphicChangeMenu
+-   PictureChangeFromClipboard [button] < GraphicChangeMenu
+- SVGEdit [button]
+### GroupGraphicsStyles
+- GraphicsStylesGallery [gallery]
+- GraphicsColorPicker [gallery]
+-   ObjectFillMoreColorsDialog [button] < GraphicsColorPicker
+- GraphicsOutlineColorPicker [gallery]
+-   ObjectBorderOutlineColorMoreColorsDialog [button] < GraphicsOutlineColorPicker
+-   OutlineWeightGallery [gallery] < GraphicsOutlineColorPicker
+-     LineStylesDialog [button] < GraphicsOutlineColorPicker
+-   OutlineDashesGallery [gallery] < GraphicsOutlineColorPicker
+-     LineStylesDialog [button] < GraphicsOutlineColorPicker
+- GraphicsEffectsMenu [menu]
+-   ObjectEffectPresetGallery [gallery] < GraphicsEffectsMenu
+-     _3DBevelOptionsDialog [button] < GraphicsEffectsMenu
+-   ObjectEffectShadowGallery [gallery] < GraphicsEffectsMenu
+-     ShadowOptionsDialog [button] < GraphicsEffectsMenu
+-   ReflectionGallery [gallery] < GraphicsEffectsMenu
+-     ReflectionsMoreOptions [button] < GraphicsEffectsMenu
+-   ObjectEffectGlowGallery [gallery] < GraphicsEffectsMenu
+-     GlowColorPicker [gallery] < GraphicsEffectsMenu
+-     GlowColorMoreColorsDialog [button] < GraphicsEffectsMenu
+-     GlowsMoreOptions [button] < GraphicsEffectsMenu
+-   ObjectEffectSoftEdgesGallery [gallery] < GraphicsEffectsMenu
+-     SoftEdgesMoreOptions [button] < GraphicsEffectsMenu
+-   BevelShapeGallery [gallery] < GraphicsEffectsMenu
+-     _3DBevelOptionsDialog [button] < GraphicsEffectsMenu
+-   _3DRotationGallery [gallery] < GraphicsEffectsMenu
+-     _3DRotationOptionsDialog [button] < GraphicsEffectsMenu
+- GraphicsFormatDialog [button (dialogBoxLauncher)]
+### GroupAltText
+- AltTextPaneRibbon [toggleButton]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectRotateGallery [gallery]
+-   ChartRotationOptionsDialog [button] < ObjectRotateGallery
+- ObjectsArrangeMenu [menu]
+-   ObjectBringToFront [button] < ObjectsArrangeMenu
+-   ObjectBringForward [button] < ObjectsArrangeMenu
+-   ObjectBringInFrontOfText [button] < ObjectsArrangeMenu
+-   ObjectSendToBack [button] < ObjectsArrangeMenu
+-   ObjectSendBackward [button] < ObjectsArrangeMenu
+-   ObjectSendBehindText [button] < ObjectsArrangeMenu
+-   SelectionPane [toggleButton] < ObjectsArrangeMenu
+-   ObjectsGroup [button] < ObjectsArrangeMenu
+-   ObjectsUngroup [button] < ObjectsArrangeMenu
+-   ObjectsRegroup [button] < ObjectsArrangeMenu
+-   ObjectAlignMenu [menu] < ObjectsArrangeMenu
+-     ObjectsAlignLeftSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignCenterHorizontalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignRightSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignTopSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignMiddleVerticalSmart [button] < ObjectsArrangeMenu
+-     ObjectsAlignBottomSmart [button] < ObjectsArrangeMenu
+-     AlignDistributeHorizontally [button] < ObjectsArrangeMenu
+-     AlignDistributeVertically [button] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignRelativeToMargin [toggleButton] < ObjectsArrangeMenu
+-     ObjectsAlignSelectedSmart [toggleButton] < ObjectsArrangeMenu
+-     AlignmentGuides [checkBox] < ObjectsArrangeMenu
+-     ViewGridlinesWord [checkBox] < ObjectsArrangeMenu
+-     GridSettings [button] < ObjectsArrangeMenu
+-   ObjectRotateGallery [gallery] < ObjectsArrangeMenu
+-     ChartRotationOptionsDialog [button] < ObjectsArrangeMenu
+### GroupGraphicsSize
+- PictureCropTools [splitButton]
+-   PictureCrop [toggleButton] < PictureCropTools
+-   PictureShapeGallery [gallery] < PictureCropTools
+-   PictureCropAspectRatioMenu [menu] < PictureCropTools
+-     PictureCropAspectRatio1To1 [button] < PictureCropTools
+-     PictureCropAspectRatio2To3 [button] < PictureCropTools
+-     PictureCropAspectRatio3To4 [button] < PictureCropTools
+-     PictureCropAspectRatio3To5 [button] < PictureCropTools
+-     PictureCropAspectRatio4To5 [button] < PictureCropTools
+-     PictureCropAspectRatio3To2 [button] < PictureCropTools
+-     PictureCropAspectRatio4To3 [button] < PictureCropTools
+-     PictureCropAspectRatio5To3 [button] < PictureCropTools
+-     PictureCropAspectRatio5To4 [button] < PictureCropTools
+-     PictureCropAspectRatio16To9 [button] < PictureCropTools
+-     PictureCropAspectRatio16To10 [button] < PictureCropTools
+-   PictureFillCrop [button] < PictureCropTools
+-   PictureFitCrop [button] < PictureCropTools
+- ShapeHeight [control]
+- ShapeWidth [control]
+- LayoutOptionsDialogSize [button (dialogBoxLauncher)]
+
+##   (TabSet3DModelTools)
+### 
+- Tab3DModelToolsFormat [tab]
+
+## Tab3DModelToolsFormat  (TabSet3DModelTools)
+### 
+- Group3DModelPlay [group]
+- GroupAdjust3DModel [group]
+- Group3DModelStyles [group]
+- GroupAltText [group]
+- GroupArrange [group]
+- Group3DModelSize [group]
+### Group3DModelPlay
+- _3DModelPlay [button]
+- _3DModelSceneGallery [gallery]
+### GroupAdjust3DModel
+- Insert3DModelFallback [button]
+- Insert3DModelDropdown [splitButton]
+-   Insert3DModelDefault [button] < Insert3DModelDropdown
+-   Insert3DModelFromFile [button] < Insert3DModelDropdown
+-   Insert3DModelFromFileConsumer [button] < Insert3DModelDropdown
+-   Insert3DModelFromOnline [button] < Insert3DModelDropdown
+-   Insert3DModelFromOnlineConsumer [button] < Insert3DModelDropdown
+- Reset3DModelSplitButton [splitButton]
+-   Reset3DModel [button] < Reset3DModelSplitButton
+-   Reset3DModelAndSize [button] < Reset3DModelSplitButton
+### Group3DModelStyles
+- Gallery3DModelViewPresets [gallery]
+- FormatDialog3DModel [button (dialogBoxLauncher)]
+### GroupAltText
+- AltTextPaneRibbon [toggleButton]
+### GroupArrange
+- PicturePositionGallery [gallery]
+-   LayoutOptionsDialogPosition [button] < PicturePositionGallery
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ObjectBringForwardMenu [splitButton]
+-   ObjectBringForward [button] < ObjectBringForwardMenu
+-   ObjectBringToFront [button] < ObjectBringForwardMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringForwardMenu
+- ObjectSendBackwardMenu [splitButton]
+-   ObjectSendBackward [button] < ObjectSendBackwardMenu
+-   ObjectSendToBack [button] < ObjectSendBackwardMenu
+-   ObjectSendBehindText [button] < ObjectSendBackwardMenu
+- SelectionPane [toggleButton]
+- ObjectAlignMenu [menu]
+-   ObjectsAlignLeftSmart [button] < ObjectAlignMenu
+-   ObjectsAlignCenterHorizontalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignRightSmart [button] < ObjectAlignMenu
+-   ObjectsAlignTopSmart [button] < ObjectAlignMenu
+-   ObjectsAlignMiddleVerticalSmart [button] < ObjectAlignMenu
+-   ObjectsAlignBottomSmart [button] < ObjectAlignMenu
+-   AlignDistributeHorizontally [button] < ObjectAlignMenu
+-   AlignDistributeVertically [button] < ObjectAlignMenu
+-   ObjectsAlignRelativeToContainerSmart [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignRelativeToMargin [toggleButton] < ObjectAlignMenu
+-   ObjectsAlignSelectedSmart [toggleButton] < ObjectAlignMenu
+-   AlignmentGuides [checkBox] < ObjectAlignMenu
+-   ViewGridlinesWord [checkBox] < ObjectAlignMenu
+-   GridSettings [button] < ObjectAlignMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+### Group3DModelSize
+- AdvancedEdit3DModel [toggleButton]
+- ShapeHeight [control]
+- ShapeWidth [control]
+- LayoutOptionsDialogSize [button (dialogBoxLauncher)]
+
+##   (TabSetLearningTools)
+### 
+- TabLearningTools [tab]
+
+## TabLearningTools  (TabSetLearningTools)
+### 
+- ChunkLearningTools [group]
+- ChunkLearningToolsClose [group]
+### ChunkLearningTools
+- LearningToolsWebViewColumnWidthMenu [menu]
+-   LearningToolsWebViewColumnWidthNarrow [toggleButton] < LearningToolsWebViewColumnWidthMenu
+-   LearningToolsWebViewColumnWidthMedium [toggleButton] < LearningToolsWebViewColumnWidthMenu
+-   LearningToolsWebViewColumnWidthStandard [toggleButton] < LearningToolsWebViewColumnWidthMenu
+-   LearningToolsWebViewColumnWidthNone [toggleButton] < LearningToolsWebViewColumnWidthMenu
+- LearningToolsWebViewPageColorMenu [menu]
+-   LearningToolsWebViewPageColorNone [toggleButton] < LearningToolsWebViewPageColorMenu
+-   LearningToolsWebViewPageColorSepia [toggleButton] < LearningToolsWebViewPageColorMenu
+-   LearningToolsWebViewPageColorInverse [toggleButton] < LearningToolsWebViewPageColorMenu
+- ColorPickerLearningToolsWebView [gallery]
+-   LearningToolsPageColorMoreColors [button] < ColorPickerLearningToolsWebView
+- LineFocusMenu [menu]
+-   LineFocusNone [toggleButton] < LineFocusMenu
+-   LineFocusOneLine [toggleButton] < LineFocusMenu
+-   LineFocusThreeLines [toggleButton] < LineFocusMenu
+-   LineFocusFiveLines [toggleButton] < LineFocusMenu
+- LearningToolsTextSpacing [toggleButton]
+- LearningToolsSyllables [toggleButton]
+- ReadAloud [button]
+### ChunkLearningToolsClose
+- CloseLearningTools [button]
+
+##   (None (Backstage View))
+### 
+- NoTcid [control]
+- None [button]
+- PlaceTabHome [tab]
+- TabInfo [tab]
+- None [button]
+- TabOfficeStart [tab]
+- None [button]
+- TabRecent [tab]
+- OfficeExtensionsGetAddinsButtonOnBackstageBelowOpenDivider [button]
+- FileSave [button]
+- TabSave [tab]
+- MoveDocument [button]
+- HistoryTab [button]
+- TabPrint [tab]
+- ShareDocument [button]
+- TabShare [tab]
+- TabPublish [tab]
+- DigitalPrint [button]
+- FileClose [button]
+- TabHelp [tab]
+- None [button]
+- TabOfficeFeedback [tab]
+- OfficeFeedback [button]
+- OfficeFeedbackBackstage [button]
+- ApplicationOptionsDialog [button]
+
+## PlaceTabHome  (None (Backstage View))
+### 
+- HomePageSlabCreateNew [group]
+- None [group]
+- None [control]
+- HomePlaceRecommendedDocuments [group]
+- GroupRecentDocuments [group]
+### GroupRecentDocuments
+- None [button]
+
+## TabInfo  (None (Backstage View))
+### 
+- GroupUploadErrors [group]
+- GroupUpdatesAvailable [group]
+- None [group]
+- GroupBroadcastResumeWarning [group]
+- GroupARMPreview [group]
+- GroupWorkflows [group]
+- GrupPolicyWarning [group]
+- GroupSecurityInformation [group]
+- GroupSecurityWarning [group]
+- None [group]
+- AppGuardTrustPromotion [button]
+- GroupProtectedView [group]
+- GroupReadOnly [group]
+- GroupReadOnlyServer [group]
+- GroupReadOnlyOffline [group]
+- GroupReadOnlyCheckOutRequired [group]
+- GroupCachedOfflineMergeable [group]
+- GroupReadOnlyCachedMergeable [group]
+- GroupReadOnlyCached [group]
+- GroupCheckIn [group]
+- GroupFileConvert [group]
+- OfficePolicyTips [group]
+- GroupAllAuthors [group]
+- GroupSignatures [group]
+- GroupPermissions [group]
+- GroupPrepareForSharing [group]
+- DocuemntVersionHistory [group]
+- GroupVersions [group]
+- AddinDisabledGroup [group]
+- GroupThumbnail [group]
+- GroupDocumentProperties [group]
+### GroupCheckIn
+- FileCheckOutDiscard [button]
+### GroupFileConvert
+- UpgradeDocument [button]
+### GroupPermissions
+- FileMarkAsFinal [control]
+- FileMarkAsReadOnlyRecommended [control]
+- FileDocumentEncrypt [control]
+- UsagePermissions [button]
+- FileAddDigitalSignature [button]
+### GroupPrepareForSharing
+- AllowPersonallyIdentifiableInformation [control]
+
+## TabOfficeStart  (None (Backstage View))
+### 
+- GroupOfficeStart [group]
+
+## TabRecent  (None (Backstage View))
+### 
+- GroupOpenPlaces [taskFormGroup]
+- GroupModernOpenPlaces [group]
+### GroupOpenPlaces
+- ButtonCategoryRecentDocuments [category]
+-   ButtonTaskRecentDocuments [task] < ButtonCategoryRecentDocuments
+-     GroupRecentDocuments [group] < ButtonCategoryRecentDocuments
+-     None [control] < ButtonCategoryRecentDocuments
+-     ButtonOpenBrowse [button] < ButtonCategoryRecentDocuments
+-     GroupRecoverUnsavedFiles [group] < ButtonCategoryRecentDocuments
+-   ButtonTaskFixItHub [task] < ButtonCategoryRecentDocuments
+-     FixItHub [group] < ButtonCategoryRecentDocuments
+-   ButtonTaskSharedWithMe [task] < ButtonCategoryRecentDocuments
+-     GroupSharedWithMeDocuments [group] < ButtonCategoryRecentDocuments
+-     None [button] < ButtonCategoryRecentDocuments
+-   ButtonTaskDynamicServiceProvider [task] < ButtonCategoryRecentDocuments
+-     GroupRecentPlaces [group] < ButtonCategoryRecentDocuments
+-     None [control] < ButtonCategoryRecentDocuments
+-     None [group] < ButtonCategoryRecentDocuments
+-     GroupGettingStartedOpenMRUPlacesOrNavSlab [group] < ButtonCategoryRecentDocuments
+-     None [button] < ButtonCategoryRecentDocuments
+-     SkyDriveUpsellGroup [group] < ButtonCategoryRecentDocuments
+-     LoadingServicesGroup [group] < ButtonCategoryRecentDocuments
+-     GroupAddLocation [group] < ButtonCategoryRecentDocuments
+### GroupModernOpenPlaces
+- ButtonGroupRecentDocuments [control]
+- ButtonGroupCloudServices [control]
+- ButtonCategoryCloudServices [category]
+-   ButtonTaskRecentDocuments [task] < ButtonCategoryCloudServices
+-     GroupRecentDocumentsNew [group] < ButtonCategoryCloudServices
+-     None [control] < ButtonCategoryCloudServices
+-     ButtonOpenBrowse [button] < ButtonCategoryCloudServices
+-   ButtonTaskFixItHub [task] < ButtonCategoryCloudServices
+-     CloudFixItHub [group] < ButtonCategoryCloudServices
+-   ButtonTaskSharedWithMe [task] < ButtonCategoryCloudServices
+-     GroupSharedWithMeDocumentsNew [group] < ButtonCategoryCloudServices
+-     None [button] < ButtonCategoryCloudServices
+-   ButtonTaskDynamicServiceProvider [task] < ButtonCategoryCloudServices
+-     GroupRecentCloudPlaces [group] < ButtonCategoryCloudServices
+-     None [control] < ButtonCategoryCloudServices
+-     None [group] < ButtonCategoryCloudServices
+-     GroupCloudGettingStartedOpenMRUPlacesOrNavSlab [group] < ButtonCategoryCloudServices
+-     None [button] < ButtonCategoryCloudServices
+-   ButtonTaskDynamicServiceProvider [control] < ButtonCategoryCloudServices
+-     CloudSkyDriveUpsellGroup [group] < ButtonCategoryCloudServices
+-     LoadingCloudServicesGroup [group] < ButtonCategoryCloudServices
+- ButtonTaskRecentDocuments [task]
+-   GroupRecentDocumentsNew [group] < ButtonTaskRecentDocuments
+-     None [control] < ButtonTaskRecentDocuments
+-     ButtonOpenBrowse [button] < ButtonTaskRecentDocuments
+- GroupRecentDocumentsNew [group]
+-   None [control] < GroupRecentDocumentsNew
+-   ButtonOpenBrowse [button] < GroupRecentDocumentsNew
+- None [control]
+- ButtonOpenBrowse [button]
+- ButtonTaskFixItHub [task]
+-   CloudFixItHub [group] < ButtonTaskFixItHub
+- CloudFixItHub [group]
+- ButtonTaskSharedWithMe [task]
+-   GroupSharedWithMeDocumentsNew [group] < ButtonTaskSharedWithMe
+-     None [button] < ButtonTaskSharedWithMe
+- GroupSharedWithMeDocumentsNew [group]
+-   None [button] < GroupSharedWithMeDocumentsNew
+- None [button]
+- ButtonTaskDynamicServiceProvider [task]
+-   GroupRecentCloudPlaces [group] < ButtonTaskDynamicServiceProvider
+-     None [control] < ButtonTaskDynamicServiceProvider
+-   None [group] < ButtonTaskDynamicServiceProvider
+-   GroupCloudGettingStartedOpenMRUPlacesOrNavSlab [group] < ButtonTaskDynamicServiceProvider
+-     None [button] < ButtonTaskDynamicServiceProvider
+- GroupRecentCloudPlaces [group]
+-   None [control] < GroupRecentCloudPlaces
+- None [group]
+- GroupCloudGettingStartedOpenMRUPlacesOrNavSlab [group]
+-   None [button] < GroupCloudGettingStartedOpenMRUPlacesOrNavSlab
+- ButtonTaskDynamicServiceProvider [control]
+- GroupRecentPinnableCloudPlaces [group]
+-   None [control] < GroupRecentPinnableCloudPlaces
+- None [group]
+- PinnableGroupCloudGettingStartedOpenMRUPlacesOrNavSlab [group]
+-   None [button] < PinnableGroupCloudGettingStartedOpenMRUPlacesOrNavSlab
+-   CloudSkyDriveUpsellGroup [group] < ButtonTaskDynamicServiceProvider
+-     None [button] < ButtonTaskDynamicServiceProvider
+- CloudSkyDriveUpsellGroup [group]
+-   None [button] < CloudSkyDriveUpsellGroup
+-   LoadingCloudServicesGroup [group] < ButtonTaskDynamicServiceProvider
+- LoadingCloudServicesGroup [group]
+- ButtonGroupLocalServices [control]
+- ButtonCategoryLocalServices [category]
+-   ButtonTaskDynamicServiceProvider [task] < ButtonCategoryLocalServices
+-     GroupRecentLocalPlaces [group] < ButtonCategoryLocalServices
+-     None [control] < ButtonCategoryLocalServices
+-     GroupLocalGettingStartedOpenMRUPlacesOrNavSlab [group] < ButtonCategoryLocalServices
+-     None [button] < ButtonCategoryLocalServices
+-     GroupAddLocationLocal [group] < ButtonCategoryLocalServices
+-   GroupRecentLocalPlaces [group] < ButtonTaskDynamicServiceProvider
+-     None [control] < ButtonTaskDynamicServiceProvider
+-   GroupLocalGettingStartedOpenMRUPlacesOrNavSlab [group] < ButtonTaskDynamicServiceProvider
+-     None [button] < ButtonTaskDynamicServiceProvider
+- GroupRecentLocalPlaces [group]
+-   None [control] < GroupRecentLocalPlaces
+- GroupLocalGettingStartedOpenMRUPlacesOrNavSlab [group]
+-   None [button] < GroupLocalGettingStartedOpenMRUPlacesOrNavSlab
+-   GroupAddLocationLocal [group] < ButtonTaskDynamicServiceProvider
+- GroupAddLocationLocal [group]
+
+## TabSave  (None (Backstage View))
+### 
+- SaveGroup [taskFormGroup]
+- ModernSaveGroup [group]
+### SaveGroup
+- Save [category]
+-   None [task] < Save
+-   None [group] < Save
+-   AppGuardTrustPromotion [button] < Save
+-   ButtonTaskDynamicServiceProvider [task] < Save
+-     GroupDynamicServiceProvider [group] < Save
+-     TabSave [control] < Save
+-     SlabSaveAsAccessibility [group] < Save
+-     None [group] < Save
+-     GroupGettingStartedSaveAsMRUPlacesOrNavSlab [group] < Save
+-     None [button] < Save
+-     SkyDriveUpsellGroup [group] < Save
+-     LoadingServicesGroup [group] < Save
+-     GroupAddLocation [group] < Save
+### ModernSaveGroup
+- ButtonGroupsSave [control]
+- ButtonGroupItemSaveCloudServices [control]
+- SaveCloudServices [category]
+-   None [task] < SaveCloudServices
+-   None [group] < SaveCloudServices
+-   AppGuardTrustPromotion [button] < SaveCloudServices
+-   ButtonTaskDynamicServiceProvider [task] < SaveCloudServices
+-     GroupDynamicSaveCloudServiceProvider [group] < SaveCloudServices
+-     TabSave [control] < SaveCloudServices
+-     SlabCloudSaveAsAccessibility [group] < SaveCloudServices
+-     None [group] < SaveCloudServices
+-     GroupGettingStartedSaveAsMRUCloudPlacesOrNavSlab [group] < SaveCloudServices
+-     None [button] < SaveCloudServices
+-   ButtonTaskDynamicServiceProvider [control] < SaveCloudServices
+-     CloudSkyDriveUpsellGroup [group] < SaveCloudServices
+-     LoadingCloudServicesGroup [group] < SaveCloudServices
+- None [task]
+- None [group]
+- AppGuardTrustPromotion [button]
+- ButtonTaskDynamicServiceProvider [task]
+-   GroupDynamicSaveCloudServiceProvider [group] < ButtonTaskDynamicServiceProvider
+-     TabSave [control] < ButtonTaskDynamicServiceProvider
+-   SlabCloudSaveAsAccessibility [group] < ButtonTaskDynamicServiceProvider
+-   None [group] < ButtonTaskDynamicServiceProvider
+-   GroupGettingStartedSaveAsMRUCloudPlacesOrNavSlab [group] < ButtonTaskDynamicServiceProvider
+-     None [button] < ButtonTaskDynamicServiceProvider
+- GroupDynamicSaveCloudServiceProvider [group]
+-   TabSave [control] < GroupDynamicSaveCloudServiceProvider
+- TabSave [control]
+- SlabCloudSaveAsAccessibility [group]
+- None [group]
+- GroupGettingStartedSaveAsMRUCloudPlacesOrNavSlab [group]
+-   None [button] < GroupGettingStartedSaveAsMRUCloudPlacesOrNavSlab
+- None [button]
+- ButtonTaskDynamicServiceProvider [control]
+- GroupDynamicSavePinnableCloudServiceProvider [group]
+-   TabSave [control] < GroupDynamicSavePinnableCloudServiceProvider
+- GroupPinnableCloudSaveAsAccessibility [group]
+- None [group]
+- GroupPinnableGettingStartedSaveAsMRUCloudPlacesOrNav [group]
+-   None [button] < GroupPinnableGettingStartedSaveAsMRUCloudPlacesOrNav
+-   CloudSkyDriveUpsellGroup [group] < ButtonTaskDynamicServiceProvider
+-     None [button] < ButtonTaskDynamicServiceProvider
+- CloudSkyDriveUpsellGroup [group]
+-   None [button] < CloudSkyDriveUpsellGroup
+-   LoadingCloudServicesGroup [group] < ButtonTaskDynamicServiceProvider
+- LoadingCloudServicesGroup [group]
+- ButtonGroupItemSaveLocalServices [control]
+- LocalSave [category]
+-   ButtonTaskDynamicServiceProvider [task] < LocalSave
+-     GroupDynamicSaveLocalServiceProvider [group] < LocalSave
+-     TabSave [control] < LocalSave
+-     SlabLocalSaveAsAccessibility [group] < LocalSave
+-     None [group] < LocalSave
+-     GroupGettingStartedSaveAsMRULocalPlacesOrNavSlab [group] < LocalSave
+-     None [button] < LocalSave
+-     GroupAddLocationLocal [group] < LocalSave
+-   GroupDynamicSaveLocalServiceProvider [group] < ButtonTaskDynamicServiceProvider
+-     TabSave [control] < ButtonTaskDynamicServiceProvider
+-   SlabLocalSaveAsAccessibility [group] < ButtonTaskDynamicServiceProvider
+-   None [group] < ButtonTaskDynamicServiceProvider
+-   GroupGettingStartedSaveAsMRULocalPlacesOrNavSlab [group] < ButtonTaskDynamicServiceProvider
+-     None [button] < ButtonTaskDynamicServiceProvider
+- GroupDynamicSaveLocalServiceProvider [group]
+-   TabSave [control] < GroupDynamicSaveLocalServiceProvider
+- SlabLocalSaveAsAccessibility [group]
+- None [group]
+- GroupGettingStartedSaveAsMRULocalPlacesOrNavSlab [group]
+-   None [button] < GroupGettingStartedSaveAsMRULocalPlacesOrNavSlab
+-   GroupAddLocationLocal [group] < ButtonTaskDynamicServiceProvider
+- GroupAddLocationLocal [group]
+
+## TabPrint  (None (Backstage View))
+### 
+- GroupPrintProtectedView [group]
+- GroupPrintSettings [group]
+- GroupPrintPreview [group]
+### GroupPrintSettings
+- FilePrintCustomRange [control]
+
+## TabShare  (None (Backstage View))
+### 
+- GroupShare [taskFormGroup]
+### GroupShare
+- Share [category]
+-   ShareWithPeopleFromSharePane [task] < Share
+-     SlabShareWithPeopleFromSharePane [group] < Share
+-   SendUsingEmail [task] < Share
+-     GroupSendUsingEmail [group] < Share
+-     GroupSendAsAttachment [group] < Share
+-     GroupSendAsLink [group] < Share
+-     GroupSendAsPdf [group] < Share
+-     GroupSendAsXps [group] < Share
+-     GroupSendAsInternetFax [group] < Share
+-   BroadcastSlideShowBackstage [task] < Share
+-     GroupBroadcast [group] < Share
+-   SendByInstantMessage [task] < Share
+-     GroupSendByInstantMessage [group] < Share
+-   FileNewBlogPost [task] < Share
+-     GroupSendToBlog [group] < Share
+- Workflow [category]
+-   WorkflowStart [task] < Workflow
+-     GroupWorkflowStart [group] < Workflow
+-   WorkflowsUnavailable [task] < Workflow
+-     GroupWorkflowsUnavailable [group] < Workflow
+
+## TabPublish  (None (Backstage View))
+### 
+- PublishGroup [taskFormGroup]
+### PublishGroup
+- FileTypes [category]
+-   FileSaveAsPdfOrXps [task] < FileTypes
+-     GroupCreatePdfOrXpsDocumentSlab [group] < FileTypes
+-     GroupCreatePdfOrXpsDocument [group] < FileTypes
+-   FileTypeChange [task] < FileTypes
+-     GroupFileSave [group] < FileTypes
+-   NoTcid [task] < FileTypes
+-     NoTcid [group] < FileTypes
+
+## TabHelp  (None (Backstage View))
+### 
+- GroupBackstageIdentity [group]
+- GroupBackstagePrivacy [group]
+- Personalization [group]
+- Theming [group]
+- ManageServices [group]
+- GroupBackstageSignInDisabled [group]
+- GroupBackstageSignIn [group]
+- GroupOfficeBranding [group]
+- GroupClickToRunUpdateStatus [group]
+- GroupUpdateChannel [group]
+- GroupOfficeInsider [group]
+- GroupAboutOfficeProducts [group]
+- GroupWhatsNewInOfficeProducts [group]
+### GroupBackstagePrivacy
+- ManagePrivacy [button]
+### GroupBackstageSignIn
+- None [button]
+### GroupUpdateChannel
+- UpdateChannel [button]
+### GroupOfficeInsider
+- GroupOfficeInsiderRegistration [button]
+- GroupOfficeInsiderChannel [button]
+- GroupOfficeInsiderAbout [button]
+- GroupOfficeInsiderHelp [button]
+
+## TabOfficeFeedback  (None (Backstage View))
+### 
+- GroupOfficeSendSmile [group]
+- GroupOfficeSendFrown [group]
+- GroupOfficeSendSuggestion [group]
+
+## None (Context Menu)  (None (Context Menu))
+### 
+- ContextMenuDropCap [contextMenu]
+- ContextMenuEndnote [contextMenu]
+- ContextMenuField [contextMenu]
+- ContextMenuFieldDisplay [contextMenu]
+- ContextMenuFieldDisplayListNumbers [contextMenu]
+- ContextMenuFieldForm [contextMenu]
+- ContextMenuFootnote [contextMenu]
+- ContextMenuFrame [contextMenu]
+- ContextMenuHeading [contextMenu]
+- ContextMenuHeadingLinked [contextMenu]
+- ContextMenuScriptAnchor [contextMenu]
+- ContextMenuList [contextMenu]
+- ContextMenuInlinePicture [contextMenu]
+- ContextMenuTable [contextMenu]
+- ContextMenuTableCell [contextMenu]
+- ContextMenuHeadingTable [contextMenu]
+- ContextMenuListTable [contextMenu]
+- ContextMenuPictureTable [contextMenu]
+- ContextMenuTextTable [contextMenu]
+- ContextMenuTableWhole [contextMenu]
+- ContextMenuTableWholeLinked [contextMenu]
+- ContextMenuText [contextMenu]
+- ContextMenuOfficePreviewHandlerWord [contextMenu]
+- ContextMenuTextLinked [contextMenu]
+- ContextMenuRichTextFont [contextMenu]
+- ContextMenuRichTextFontParagraph [contextMenu]
+- ContextMenuSpell [contextMenu]
+- ContextMenuGrammar [contextMenu]
+- ContextMenuGrammarReading [contextMenu]
+- ContextMenuRevision [contextMenu]
+- ContextMenuFramesetBorder [contextMenu]
+- ContextMenuHyperlink [contextMenu]
+- ContextMenuFieldAutoSignatureList [contextMenu]
+- ContextMenuFieldAutoTextList [contextMenu]
+- ContextMenuNavigationPane [contextMenu]
+- ContextMenuDrawnObject [contextMenu]
+- ContextMenuCurve [contextMenu]
+- ContextMenuCurveNode [contextMenu]
+- ContextMenuCurveSegment [contextMenu]
+- ContextMenuFloatingPicture [contextMenu]
+- ContextMenuCanvasClassic [contextMenu]
+- ContextMenuOleObject [contextMenu]
+- ContextMenuActiveXControl [contextMenu]
+- ContextMenuTextEffect [contextMenu]
+- ContextMenuComment [contextMenu]
+- ContextMenuOrganizationChart [contextMenu]
+- ContextMenuDiagram [contextMenu]
+- ContextMenuConnectorClassic [contextMenu]
+- ContextMenuAddressBlock [contextMenu]
+- ContextMenuGreetingLine [contextMenu]
+- ContextMenuMailMergeBarcode [contextMenu]
+- ContextMenuInlineActiveXControl [contextMenu]
+- ContextMenuDocumentStructureNode [contextMenu]
+- ContextMenuXmlError [contextMenu]
+- ContextMenuCoAuthoringState [contextMenu]
+- ContextMenuInkComment [contextMenu]
+- ContextMenuInlineBusinessCard [contextMenu]
+- ContextMenuEquation [contextMenu]
+- ContextMenuHeaderArea [contextMenu]
+- ContextMenuFooterArea [contextMenu]
+- ContextMenuReadOnlyMailText [contextMenu]
+- ContextMenuReadOnlyMailTable [contextMenu]
+- ContextMenuReadOnlyMailTableCell [contextMenu]
+- ContextMenuReadOnlyMailListTable [contextMenu]
+- ContextMenuReadOnlyMailPictureTable [contextMenu]
+- ContextMenuReadOnlyMailTextTable [contextMenu]
+- ContextMenuReadOnlyMailTableWhole [contextMenu]
+- ContextMenuReadOnlyMailList [contextMenu]
+- ContextMenuReadOnlyMailHyperlink [contextMenu]
+- ContextMenuPageNumberingOptions [contextMenu]
+- ContextMenuBroadcast [contextMenu]
+- ContextMenuConflicts [contextMenu]
+- ContextMenuPicture [contextMenu]
+- ContextMenuGraphic [contextMenu]
+- ContextMenu3DModel [contextMenu]
+- ContextMenuShape [contextMenu]
+- ContextMenuInk [contextMenu]
+- ContextMenuObjectsGroup [contextMenu]
+- ContextMenuObjectEditPoint [contextMenu]
+- ContextMenuObjectEditSegment [contextMenu]
+- ContextMenuTextEdit [contextMenu]
+- ContextMenuShapeConnector [contextMenu]
+- ContextMenuShapeFreeform [contextMenu]
+- ContextMenuChartArea [contextMenu]
+- ContextMenuChartAxis [contextMenu]
+- ContextMenuChartAxisTitle [contextMenu]
+- ContextMenuChartBackWall [contextMenu]
+- ContextMenuChartTitle [contextMenu]
+- ContextMenuChartDataLabel [contextMenu]
+- ContextMenuChartDataLabels [contextMenu]
+- ContextMenuChartDataPoint [contextMenu]
+- ContextMenuChartDataSeries [contextMenu]
+- ContextMenuChartParetoLine [contextMenu]
+- ContextMenuChartDataTable [contextMenu]
+- ContextMenuChartDisplayUnit [contextMenu]
+- ContextMenuChartDownBars [contextMenu]
+- ContextMenuChartDropLines [contextMenu]
+- ContextMenuChartErrorBars [contextMenu]
+- ContextMenuChartFloor [contextMenu]
+- ContextMenuChartGridlines [contextMenu]
+- ContextMenuChartHighLowLine [contextMenu]
+- ContextMenuChartLeaderLines [contextMenu]
+- ContextMenuChartLegend [contextMenu]
+- ContextMenuChartLegendEntry [contextMenu]
+- ContextMenuChartPlotArea [contextMenu]
+- ContextMenuChartSeriesLine [contextMenu]
+- ContextMenuChartSideWall [contextMenu]
+- ContextMenuChartTrendline [contextMenu]
+- ContextMenuChartTrendlineLabel [contextMenu]
+- ContextMenuChartUpBars [contextMenu]
+- ContextMenuChartWalls [contextMenu]
+- None [contextMenu]
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- ContextMenuSmartArtContentPane [contextMenu]
+- ContextMenuSmartArtBackground [contextMenu]
+- ContextMenuSmartArtEditSmartArt [contextMenu]
+- ContextMenuSmartArtEdit1DShape [contextMenu]
+- ContextMenuSmartArtEditText [contextMenu]
+- ContextMenuSmartArtEdit1DShapeText [contextMenu]
+- ContextMenuCanvas [contextMenu]
+- ContextMenuLockedReadingMode [contextMenu]
+- CopilotMenu [contextMenu]
+- None [contextMenu]
+- None [gallery]
+- None [toggleButton]
+- None [toggleButton]
+- PasteSetDefault [button]
+- ReuseWebpageFromClipboard [button]
+- None [contextMenu]
+- InkEditorGallery [gallery]
+### ContextMenuBroadcast
+- PagePreviousWord [button]
+- PageNextWord [button]
+- GoTo [button]
+- NavigationPaneFind [button]
+- NavigationPaneShowHide [checkBox]
+### ContextMenuConflicts
+- ConflictsAccept [button]
+- ConflictsReject [button]
+### ContextMenuPicture
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- BuildingBlockProperties [button]
+- ContentControlRemove [button]
+- PlayVideo [button]
+- PlayVideoInBrowser [button]
+- PictureEditWord [button]
+- ObjectSaveAsPicture [button]
+- PictureChange [button]
+- PictureChangeMenu [menu]
+-   PictureChangeFromFile [button] < PictureChangeMenu
+-   PictureChangeFromMobile [button] < PictureChangeMenu
+-   PictureChangeFromM365 [button] < PictureChangeMenu
+-   PictureChangeFromOnline [button] < PictureChangeMenu
+-   ChangeIcon [button] < PictureChangeMenu
+-   PictureChangeFromClipboard [button] < PictureChangeMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- PictureAttributionNavigateToSource [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- LayoutOptionsDialogSize [button]
+- ObjectFormatDialog [button]
+### ContextMenuGraphic
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- BuildingBlockProperties [button]
+- ContentControlRemove [button]
+- SVGEdit [button]
+- GraphicChangeMenu [menu]
+-   PictureChangeFromFile [button] < GraphicChangeMenu
+-   PictureChangeFromMobile [button] < GraphicChangeMenu
+-   PictureChangeFromM365 [button] < GraphicChangeMenu
+-   PictureChangeFromOnline [button] < GraphicChangeMenu
+-   ChangeIcon [button] < GraphicChangeMenu
+-   PictureChangeFromClipboard [button] < GraphicChangeMenu
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- LayoutOptionsDialogSize [button]
+- GraphicsFormatDialog [button]
+### ContextMenu3DModel
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- PictureAttributionNavigateToSource [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- LayoutOptionsDialogSize [button]
+- FormatDialog3DModel [button]
+### ContextMenuShape
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ObjectAddText [button]
+- ObjectEditText [button]
+- ObjectEditPoints [toggleButton]
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- ObjectSetShapeDefaults [button]
+- LayoutOptionsDialog [button]
+- ObjectFormatDialog [button]
+- PictureAttributionNavigateToSource [button]
+### ContextMenuInk
+- Cut [button]
+- Copy [button]
+- InkCopyAsText [button]
+- PasteGalleryMini [gallery]
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- ObjectSetShapeDefaults [button]
+- LayoutOptionsDialog [button]
+- ObjectFormatDialog [button]
+- InkToTextAnalysis [button]
+### ContextMenuObjectsGroup
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- ObjectSetShapeDefaults [button]
+- LayoutOptionsDialog [button]
+- ObjectFormatDialog [button]
+- InkToTextAnalysis [button]
+### ContextMenuObjectEditPoint
+- AddNode [button]
+- DeleteNode [button]
+- OpenPath [toggleButton]
+- ClosePath [toggleButton]
+- SmoothVertex [toggleButton]
+- StraightVertex [toggleButton]
+- CornerVertex [toggleButton]
+- ExitEditCurve [button]
+### ContextMenuObjectEditSegment
+- AddNode [button]
+- DeleteSegment [button]
+- OpenPath [toggleButton]
+- ClosePath [toggleButton]
+- MakeSegmentStraight [button]
+- MakeSegmentCurved [button]
+- ExitEditCurve [button]
+### ContextMenuTextEdit
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- TextEditModeExit [button]
+- FontDialog [button]
+- ParagraphDialog [button]
+- BulletsGalleryWord [gallery]
+-   ListLevelGallery [gallery] < BulletsGalleryWord
+-   BulletDefineNew [button] < BulletsGalleryWord
+- NumberingGalleryWord [gallery]
+-   ListLevelGallery [gallery] < NumberingGalleryWord
+-   DefineNewNumberFormat [button] < NumberingGalleryWord
+-   ListSetNumberingValue [button] < NumberingGalleryWord
+- ImeReconvert [button]
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- WordArtFormatDialog [button]
+- ObjectFormatDialog [button]
+### ContextMenuShapeConnector
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ShapeConnectorStyleMenu [menu]
+-   ShapeConnectorStyleStraight [toggleButton] < ShapeConnectorStyleMenu
+-   ShapeConnectorStyleElbow [toggleButton] < ShapeConnectorStyleMenu
+-   ShapeConnectorStyleCurved [toggleButton] < ShapeConnectorStyleMenu
+- ShapeRerouteConnectors [toggleButton]
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- AutoAlternativeText [button]
+- ObjectSetShapeDefaults [button]
+- LayoutOptionsDialog [button]
+- ObjectFormatDialog [button]
+### ContextMenuShapeFreeform
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ObjectAddText [button]
+- ObjectEditText [button]
+- ObjectEditPoints [toggleButton]
+- ObjectsGroupMenu [menu]
+-   ObjectsGroup [button] < ObjectsGroupMenu
+-   ObjectsRegroup [button] < ObjectsGroupMenu
+-   ObjectsUngroup [button] < ObjectsGroupMenu
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- ObjectSetShapeDefaults [button]
+- LayoutOptionsDialogPosition [button]
+- ObjectFormatDialog [button]
+- PictureAttributionNavigateToSource [button]
+### ContextMenuChartArea
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ChartResetToMatchStyle [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSaveTemplates [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- ChartFormatChartArea [button]
+- PictureAttributionNavigateToSource [button]
+### ContextMenuChartAxis
+- ChartSortRightClickMenu [menu]
+-   ChartSortAscending [button] < ChartSortRightClickMenu
+-   ChartSortDescending [button] < ChartSortRightClickMenu
+-   ChartSortReset [button] < ChartSortRightClickMenu
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartMajorGridlinesAdd [button]
+- ChartMinorGridlinesAdd [button]
+- ChartFormatMajorGridlinesAndSelect [button]
+- ChartFormatMinorGridlinesAndSelect [button]
+- ChartFormatAxis [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartAxisTitle
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartEditText [button]
+- ChartExitEditText [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatAxisTitle [button]
+- None [button]
+### ContextMenuChartBackWall
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatBackWall [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartTitle
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartEditText [button]
+- ChartExitEditText [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatChartTitle [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartDataLabel
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartEditText [button]
+- ChartExitEditText [button]
+- FontDialog [button]
+- ChartInsertDataField [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatDataPointAndSelect [button]
+- ChartChangeDataLabelShapeGallery [gallery]
+- ChartFormatDataLabel [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartDataLabels
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatDataSeriesAndSelect [button]
+- ChartChangeDataLabelShapesGallery [gallery]
+- ChartFormatDataLabels [button]
+- None [button]
+### ContextMenuChartDataPoint
+- ChartDeleteSeries [button]
+- ChartResetToMatchStyle [button]
+- ChartSeriesTypeChange [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- AddDataLabelShapesMenu [splitButton]
+-   ChartDataLabelAdd [button] < AddDataLabelShapesMenu
+-   ChartCalloutDataLabelAdd [button] < AddDataLabelShapesMenu
+- ChartTrendlineAdd [button]
+- ChartFormatDataLabelAndSelect [button]
+- ChartWaterfallSetAsTotal [button]
+- ChartWaterfallUnsetTotal [button]
+- ChartFormatDataPoint [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartDataSeries
+- ChartSortRightClickMenu [menu]
+-   ChartSortAscending [button] < ChartSortRightClickMenu
+-   ChartSortDescending [button] < ChartSortRightClickMenu
+-   ChartSortReset [button] < ChartSortRightClickMenu
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartSeriesTypeChange [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- AddDataLabelsShapesMenu [splitButton]
+-   ChartDataLabelsAdd [button] < AddDataLabelsShapesMenu
+-   ChartCalloutDataLabelsAdd [button] < AddDataLabelsShapesMenu
+- ChartTrendlineAdd [button]
+- ChartFormatDataLabelsAndSelect [button]
+- ChartFormatDataSeries [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartParetoLine
+- ChartFormatParetoLine [button]
+- None [button]
+### ContextMenuChartDataTable
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatDataTable [button]
+- ChartFormatAxisAndSelect [button]
+- None [button]
+### ContextMenuChartDisplayUnit
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartEditText [button]
+- ChartExitEditText [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatDisplayUnit [button]
+- ChartFormatAxisAndSelect [button]
+- ChartAddAxis [button]
+- None [button]
+### ContextMenuChartDownBars
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatDownBars [button]
+- None [button]
+### ContextMenuChartDropLines
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatDropLines [button]
+- None [button]
+### ContextMenuChartErrorBars
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatErrorBars [button]
+- None [button]
+### ContextMenuChartFloor
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatFloor [button]
+- None [button]
+### ContextMenuChartGridlines
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatGridlines [button]
+- ChartFormatAxisAndSelect [button]
+- ChartAddAxis [button]
+- None [button]
+### ContextMenuChartHighLowLine
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatHighLowLine [button]
+- None [button]
+### ContextMenuChartLeaderLines
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatLeaderLines [button]
+- None [button]
+### ContextMenuChartLegend
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatLegend [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartLegendEntry
+- ChartDelete [button]
+- ChartDeleteSeries [button]
+- ChartResetToMatchStyle [button]
+- FontDialog [button]
+- ChartSeriesTypeChange [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatDataSeriesAndSelect [button]
+- ChartFormatLegendEntry [button]
+- None [button]
+### ContextMenuChartPlotArea
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSaveTemplates [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatPlotArea [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartSeriesLine
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatSeriesLine [button]
+- None [button]
+### ContextMenuChartSideWall
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatSideWall [button]
+- PictureAttributionNavigateToSource [button]
+- None [button]
+### ContextMenuChartTrendline
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatTrendline [button]
+- None [button]
+### ContextMenuChartTrendlineLabel
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartEditText [button]
+- ChartExitEditText [button]
+- FontDialog [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatTrendlineLabel [button]
+- ChartFormatTrendlineAndSelect [button]
+- ChartFormatDataSeriesAndSelect [button]
+- None [button]
+### ContextMenuChartUpBars
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatUpBars [button]
+- None [button]
+### ContextMenuChartWalls
+- ChartDelete [button]
+- ChartResetToMatchStyle [button]
+- ChartChangeType [button]
+- ChartSourceDataContextualMenu [button]
+- ChartEditDataMenu [splitButton]
+-   ChartShowDataGrid [button] < ChartEditDataMenu
+-   ChartShowDataContextualMenu [button] < ChartEditDataMenu
+- Chart3DView [button]
+- ChartFormatWalls [button]
+- None [button]
+### ContextMenuSmartArtContentPane
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- SmartArtPromote [button]
+- SmartArtDemote [button]
+- SmartArtReorderUp [button]
+- SmartArtReorderDown [button]
+- FontDialog [button]
+- ImeReconvert [button]
+### ContextMenuSmartArtBackground
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- SmartArtChangeLayout [button]
+- SmartArtTextPane [toggleButton]
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- SmartArtResetGraphic [button]
+- LayoutOptionsDialogPosition [button]
+- ObjectFormatDialog [button]
+- PictureAttributionNavigateToSource [button]
+### ContextMenuSmartArtEditSmartArt
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- ObjectAddText [button]
+- ObjectEditText [button]
+- FontDialog [button]
+- ShapeChangeShapeGallery [gallery]
+- SmartArtAddShapeMenu [menu]
+-   SmartArtAddShapeAfter [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBefore [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeAbove [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBelow [button] < SmartArtAddShapeMenu
+-   SmartArtAddAssistant [button] < SmartArtAddShapeMenu
+- GraphicChangeMenu [menu]
+-   PictureChangeFromFile [button] < GraphicChangeMenu
+-   PictureChangeFromMobile [button] < GraphicChangeMenu
+-   PictureChangeFromM365 [button] < GraphicChangeMenu
+-   PictureChangeFromOnline [button] < GraphicChangeMenu
+-   ChangeIcon [button] < GraphicChangeMenu
+-   PictureChangeFromClipboard [button] < GraphicChangeMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- SmartArtResetShape [button]
+- LayoutOptionsDialogPosition [button]
+- ObjectFormatDialog [button]
+- PictureAttributionNavigateToSource [button]
+### ContextMenuSmartArtEdit1DShape
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- FontDialog [button]
+- SmartArtAddShapeMenu [menu]
+-   SmartArtAddShapeAfter [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBefore [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeAbove [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBelow [button] < SmartArtAddShapeMenu
+-   SmartArtAddAssistant [button] < SmartArtAddShapeMenu
+- ObjectSaveAsPicture [button]
+- SmartArtResetShape [button]
+- LayoutOptionsDialogPosition [button]
+- ObjectFormatDialog [button]
+### ContextMenuSmartArtEditText
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- EquationOptionsGallery [gallery]
+- TextEditModeExit [button]
+- FontDialog [button]
+- ParagraphDialog [button]
+- ImeReconvert [button]
+- ShapeChangeShapeGallery [gallery]
+- SmartArtAddShapeMenu [menu]
+-   SmartArtAddShapeAfter [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBefore [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeAbove [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBelow [button] < SmartArtAddShapeMenu
+-   SmartArtAddAssistant [button] < SmartArtAddShapeMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- SmartArtResetShape [button]
+- WordArtFormatDialog [button]
+- LayoutOptionsDialogPosition [button]
+- ObjectFormatDialog [button]
+### ContextMenuSmartArtEdit1DShapeText
+- FirstCorrectionAlternative [button]
+- SecondCorrectionAlternative [button]
+- ThirdCorrectionAlternative [button]
+- FourthCorrectionAlternative [button]
+- FifthCorrectionAlternative [button]
+- MoreCorrectionAlternatives [button]
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- FontDialog [button]
+- ParagraphDialog [button]
+- ImeReconvert [button]
+- SmartArtAddShapeMenu [menu]
+-   SmartArtAddShapeAfter [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBefore [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeAbove [button] < SmartArtAddShapeMenu
+-   SmartArtAddShapeBelow [button] < SmartArtAddShapeMenu
+-   SmartArtAddAssistant [button] < SmartArtAddShapeMenu
+- SmartArtResetShape [button]
+- WordArtFormatDialog [button]
+- LayoutOptionsDialogPosition [button]
+- ObjectFormatDialog [button]
+### ContextMenuCanvas
+- Cut [button]
+- Copy [button]
+- PasteGalleryMini [gallery]
+- DrawingCanvasFit [button]
+- DrawingCanvasExpand [button]
+- ScaleDrawingCanvas [toggleButton]
+- ObjectBringToFrontMenu [splitButton]
+-   ObjectBringToFront [button] < ObjectBringToFrontMenu
+-   ObjectBringForward [button] < ObjectBringToFrontMenu
+-   ObjectBringInFrontOfText [button] < ObjectBringToFrontMenu
+- ObjectSendToBackMenu [splitButton]
+-   ObjectSendToBack [button] < ObjectSendToBackMenu
+-   ObjectSendBackward [button] < ObjectSendToBackMenu
+-   ObjectSendBehindText [button] < ObjectSendToBackMenu
+- InsertLinkGallery [gallery]
+-   ReuseFilesForLink [button] < InsertLinkGallery
+-   None [button] < InsertLinkGallery
+- HyperlinkOpenInMenu [menu]
+-   HyperlinkOpenInWeb [button] < HyperlinkOpenInMenu
+-   HyperlinkOpenInNative [button] < HyperlinkOpenInMenu
+- HyperlinkOpenDefaultSettingMenu [menu]
+-   OpenDefaultWeb [button] < HyperlinkOpenDefaultSettingMenu
+-   OpenDefaultNative [button] < HyperlinkOpenDefaultSettingMenu
+- HyperlinkInsert [button]
+- HyperlinkEdit [button]
+- HyperlinkOpen [button]
+- HyperlinkRemove [button]
+- ObjectSaveAsPicture [button]
+- CaptionInsert [button]
+- TextWrapGallery [gallery]
+-   MoveObjectWithText [checkBox] < TextWrapGallery
+-   FixObjectPositionOnPage [checkBox] < TextWrapGallery
+-   LayoutOptionsDialogWrapping [button] < TextWrapGallery
+-   SetDefaultObjectLayout [button] < TextWrapGallery
+- AutoAlternativeText [button]
+- LayoutOptionsDialogPosition [button]
+- ObjectFormatDialog [button]
+### ContextMenuLockedReadingMode
+- Copy [button]
+- ExpandCollapse [menu]
+-   ExpandHeading [button] < ExpandCollapse
+-   CollapseHeading [button] < ExpandCollapse
+-   ExpandAllHeadings [button] < ExpandCollapse
+-   CollapseAllHeadings [button] < ExpandCollapse
+- ImmersiveZoom [button]
+- PlayVideo [button]
+- PlayVideoInBrowser [button]
+- ObjectSaveAsPicture [button]
+- Definition [button]
+- Insights [button]
+- Translate [button]
+- ReviewNewComment [button]
+- ReviewInkCommentNew [button]
+- TextHighlightColorPicker [gallery]
+-   HighlightingStop [button] < TextHighlightColorPicker

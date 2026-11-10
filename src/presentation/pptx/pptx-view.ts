@@ -3,7 +3,7 @@ import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from ".
 import { addChart, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
 import { ChartKind, chartPalette, setChartFormat } from "../../domain/pptx/chart-format";
 import { chartDialog, NEW_CHART_TYPES, newChartFormat } from "../common/chart-form";
-import { App, Modal, FileView, Menu, Modifier, Notice, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { App, Modal, FileView, KeymapEventHandler, Menu, Modifier, Notice, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastructure/pptx/pptx-document";
 import { Align, Rect, RunProps, ShapeModel, SlideModel, parseSlide, plainText, resolveLevel, slideColors } from "../../domain/pptx/slide-model";
 import { JUMPS, linkLabel, linkTarget, setShapeLink } from "../../domain/pptx/links";
@@ -42,10 +42,10 @@ import { findSlideMatches, SlideSearchMatch, replaceAll, replaceMatch } from "..
 import { showFindPreview } from "../common/find-preview";
 import { findBar } from "../common/find-bar";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
-import { runEditCommand } from "../common/spelling";
+import { electronSpeller, runEditCommand, type Speller } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
-import { EDITING_KEYS, FONTS, menuItem, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
+import { EDITING_KEYS, editableFocused, FONTS, menuItem, pickColor, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { Autosave, reloadOnOutsideChange } from "../common/autosave";
 import { keepVersion, versions } from "../common/version-history";
@@ -59,6 +59,13 @@ import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../commo
 
 import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+import type { Commands } from "../common/commands";
+import { keyName, shortcutRows } from "../common/commands";
+import { caret, type Ribbon } from "../common/ribbon";
+import type { StatusBar } from "../common/status-bar";
+import { buildOfficeUi } from "../common/office-ui";
+import { showContextMenu, type CtxEntry, type CtxItem } from "../common/context-menu";
+import { PPT_FILE_MENU, PPT_QAT, PPT_SHORTCUTS, powerpointTabs, type PptCommandId } from "./powerpoint-ui";
 import { loadEmbeddedFonts } from "./embedded-fonts";
 import { eotToTtf } from "../../infrastructure/fonts/eot";
 import { nextVisible, Slideshow } from "./slideshow";
@@ -88,6 +95,8 @@ const EMU_PER_INCH = 914400;
 /** Snap distance for connector ends, in px. */
 const SNAP_PX = 10;
 const PROPS_KEY = "doc-works-format-panel";
+/** PowerPoint layout: speaker notes shown or hidden (the status bar's Notes button). */
+const NOTES_KEY = "doc-works-pptx-notes";
 /** CSS custom highlights (typed as a map; the DOM lib in use lacks its maplike methods). */
 const highlights = () => CSS.highlights as unknown as Map<string, Highlight>;
 /** Zoom steps; 1 = fit the slide to the stage. */
@@ -215,6 +224,12 @@ export class PptxView extends FileView {
   /** Slide index being dragged in the thumbnail pane. */
   private dragFrom: number | null = null;
   private toolbar: Toolbar | null = null;
+  /** The PowerPoint-style interface (beta setting), instead of `toolbar`. */
+  private ribbon: Ribbon | null = null;
+  private statusBar: StatusBar | null = null;
+  private cmds: Commands | null = null;
+  /** Font and size at the text cursor, for the format controls. */
+  private fmt: { font: string | null; size: string | null } = { font: null, size: null };
   private linked = new LinkedFrom(this, "pptx", () => this.markLinked());
   private narrowWatch: ReturnType<typeof watchNarrow> | null = null;
   private closeDrawer: (() => void) | null = null;
@@ -227,7 +242,7 @@ export class PptxView extends FileView {
     // Shape shortcuts go through a view scope so they win over app hotkeys (Ctrl+G opens the graph otherwise).
     // They only act while the slide stage has focus; in text they fall through to normal editing.
     this.scope = new Scope(this.app.scope);
-    focusRegions(this.scope, this.contentEl, () => [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.thumbsEl, this.stageEl, this.propsEl, this.notesEl, this.findEl]);
+    focusRegions(this.scope, this.contentEl, () => [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.contentEl.querySelector<HTMLElement>(".dw-rb-tabs"), this.contentEl.querySelector<HTMLElement>(".dw-rb-panel"), this.thumbsEl, this.stageEl, this.propsEl, this.notesEl, this.findEl, this.contentEl.querySelector<HTMLElement>(".dw-statusbar")]);
     const keys: [Modifier[], string, () => void][] = [
       [["Mod"], "c", () => void this.copySelection()],
       [["Mod"], "x", () => void this.cutSelection()],
@@ -252,19 +267,27 @@ export class PptxView extends FileView {
     ];
     for (const [mods, key, run] of google) {
       this.scope.register(mods, key, () => {
+        // PowerPoint mode: Google's list keys do nothing (link and comment keys are the same in both).
+        if (this.settings.officePptx && mods.includes("Shift")) return undefined;
         if (this.settings.readOnly) return true;
         run();
         return false;
       });
     }
-    registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS]));
+    registerShortcutsKey(this.scope, () => this.shortcutsHelp());
+    // Ctrl+E / Ctrl+L: PowerPoint's centre / left align in its layout; otherwise kept for the text boxes (as other
+    // editing keys). One handler each: the first handler for a key takes it.
+    for (const [key, id] of [["e", "AlignCenter"], ["l", "AlignLeft"]] as const) {
+      this.scope.register(["Mod"], key, () => (this.settings.officePptx && !this.settings.readOnly ? this.runPptKey(id) : editableFocused() ? true : undefined));
+    }
     reloadOnOutsideChange(this, this.autosave, async () => {
       const index = this.index;
       if (this.file) await this.onLoadFile(this.file);
       if (this.doc) this.goTo(Math.min(index, this.doc.slides().length - 1));
     });
-    // Google's grid view shortcut.
+    // Google's grid view shortcut (not in the PowerPoint layout).
     this.scope.register(["Mod", "Alt"], "1", () => {
+      if (this.settings.officePptx) return undefined;
       this.setGridView(!this.gridView);
       return false;
     });
@@ -283,7 +306,8 @@ export class PptxView extends FileView {
       });
     }
     // Text boxes and fields keep these keys (Mod+A, the stage's select-all, is registered above).
-    shieldEditingKeys(this.scope, EDITING_KEYS.filter(([, key]) => key !== "a"));
+    // (Ctrl+E / Ctrl+L are PowerPoint keys, registered with them above; Ctrl+K is the link key registered above.)
+    shieldEditingKeys(this.scope, EDITING_KEYS.filter(([mods, key]) => key !== "a" && !(mods.join() === "Mod" && ["e", "l", "k"].includes(key))));
     // Undo / redo also when focus is on the page (after a dialog or a toolbar button); the stage and text boxes
     // handle their own keys, and fields keep their own undo.
     const history: [Modifier[], string, () => void][] = [
@@ -351,7 +375,9 @@ export class PptxView extends FileView {
     }
     status.remove();
 
-    this.buildToolbar(this.contentEl.createDiv({ cls: "dw-toolbar pptx-toolbar" }));
+    this.dropInterface();
+    const top = this.contentEl.createDiv({ cls: this.settings.officePptx ? "dw-rb-host" : "dw-toolbar pptx-toolbar" });
+    if (!this.settings.officePptx) this.buildToolbar(top);
     const body = this.contentEl.createDiv({ cls: "pptx-body" });
     // Named through a hidden label rather than aria-label, which Obsidian would show as a hover tooltip.
     const thumbsName = body.createDiv({ cls: "dw-sr-only", text: "Slides", attr: { id: `pptx-thumbs-name-${Math.random().toString(36).slice(2)}` } });
@@ -461,12 +487,16 @@ export class PptxView extends FileView {
     this.resizeObserver.observe(this.stageEl);
     this.narrowWatch = watchNarrow(this.contentEl, (narrow) => {
       if (!narrow) this.closeDrawer?.();
-      this.toolbar?.fit();
+      (this.ribbon ?? this.toolbar)?.fit();
       this.fitThumbs?.();
     });
 
+    if (this.settings.officePptx) {
+      this.buildRibbon(top);
+      this.registerOfficeKeys();
+    }
     this.index = 0;
-    this.setPaperTheme(paperFor(this.settings, "dark"));
+    this.setPaperTheme(paperFor(this.settings, "pptx", "dark"));
     this.renderAll();
     void this.loadFonts();
     this.loaded = load;
@@ -509,6 +539,7 @@ export class PptxView extends FileView {
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
+    this.dropInterface();
     this.unloadFonts?.();
     this.unloadFonts = null;
     this.thumbObserver?.disconnect();
@@ -868,6 +899,7 @@ export class PptxView extends FileView {
     // The notes box lines up with the slide.
     this.stageEl.setCssProps({ "--pptx-slide-width": `${width}px` });
     this.rendered = renderSlide(this.slideHostEl, this.model, this.doc.slideSize, { width, editable: !this.settings.readOnly, imageUrl: this.imageUrl, slideNumber: this.index + 1 });
+    this.statusBar?.update();
     if (!this.settings.readOnly) this.rendered.forEach((rs) => this.wireShape(rs));
 
     this.notesEl.value = this.doc.notesText(this.index);
@@ -1097,7 +1129,12 @@ export class PptxView extends FileView {
     // Nothing on a read-only slide can be selected (moved, deleted, cut).
     if (this.settings.readOnly) [items, primaryEl] = [[], null];
     this.applySelection(items, primaryEl);
+    // Font and Size show the selected shape's text, as PowerPoint's (the text cursor refines them).
+    const text = this.selected?.shape.text;
+    const run = text?.paras.flatMap((p) => p.runs)[0] ?? text?.paras[0]?.defaults;
+    if (run) this.fmt = { font: run.font || null, size: run.sz ? String(Math.round(run.sz * 10) / 10) : null };
     this.toolbar?.sync();
+    this.ribbon?.sync();
   }
 
   private applySelection(items: Element[], primaryEl: Element | null): void {
@@ -1421,11 +1458,16 @@ export class PptxView extends FileView {
 
   private contextMenu(e: MouseEvent): void {
     const target = e.target as HTMLElement;
-    if (target.closest("textarea, .pptx-text[contenteditable='true']:focus")) return;
+    if (target.closest("textarea")) return;
+    const inText = !!target.closest(".pptx-text[contenteditable='true']:focus");
+    // In text: the Google layout leaves it to the native menu; the PowerPoint layout too when the word is misspelled
+    // (its spelling suggestions are there).
+    if (inText && (!this.cmds || this.misspelledAt(e.clientX, e.clientY))) return;
     const shapeEl = target.closest<HTMLElement>(".pptx-shape:not(.is-inherited)");
     const rs = shapeEl ? this.rendered.find((r) => r.el === shapeEl) : null;
-    if (rs && !this.items.includes(topLevel(rs.shape.el))) this.select(rs);
+    if (!inText && rs && !this.items.includes(topLevel(rs.shape.el))) this.select(rs);
     e.preventDefault();
+    if (this.cmds) return this.pptContextMenu(e, rs ?? null, target);
     const menu = new Menu();
     const item = (title: string, fn: () => void, enabled = true) => menu.addItem((i) => i.setTitle(title).setDisabled(!enabled).onClick(fn));
     const has = this.items.length > 0;
@@ -1815,7 +1857,7 @@ export class PptxView extends FileView {
   /** Font and Size show the run at the cursor (from the model: the DOM only carries what differs from defaults). */
   private updateFormatControls(rs: RenderedShape, range: Range): void {
     const text = rs.shape.text;
-    if (!text || !rs.textEl || !this.fontSelect || !this.sizeSelect) return;
+    if (!text || !rs.textEl) return;
     const ps = Array.from(rs.textEl.querySelectorAll(":scope > p"));
     const p = ps.find((el) => el.contains(range.startContainer));
     const para = p ? text.paras[ps.indexOf(p)] : undefined;
@@ -1824,8 +1866,10 @@ export class PptxView extends FileView {
     let seen = 0;
     const run = para.runs.find((r) => (seen += r.text.length) >= offset) ?? para.runs[para.runs.length - 1];
     const props = run ?? para.defaults;
-    showValue(this.fontSelect, props.font || null);
-    showValue(this.sizeSelect, props.sz ? String(Math.round(props.sz * 10) / 10) : null);
+    this.fmt = { font: props.font || null, size: props.sz ? String(Math.round(props.sz * 10) / 10) : null };
+    if (this.fontSelect) showValue(this.fontSelect, this.fmt.font);
+    if (this.sizeSelect) showValue(this.sizeSelect, this.fmt.size);
+    this.ribbon?.sync();
   }
 
   private scheduleCommit(rs: RenderedShape): void {
@@ -2822,7 +2866,7 @@ export class PptxView extends FileView {
       menuItem(mn, "Paint format", () => this.startPainting(false));
       menuItem(mn, "Find and replace", () => this.openFind());
     });
-    tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SLIDES_SHORTCUTS])));
+    tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => this.shortcutsHelp()));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
     tb.side("notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file));
     const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
@@ -2832,6 +2876,398 @@ export class PptxView extends FileView {
     this.autosave.status = end.status;
     end.el.prepend(present);
     tb.sync();
+  }
+
+  // ---------------------------------------------------------------------------
+  // PowerPoint-style interface (beta)
+  // ---------------------------------------------------------------------------
+
+  /** Scope keys of the PowerPoint layout, registered only while it's on (the first handler for a key takes it). */
+  private officeKeys: KeymapEventHandler[] = [];
+  /** The right-click menu this view opened, closed with the file. */
+  private ctxMenu: { close(): void } | null = null;
+  /** Ctrl+Shift+C's copied formatting, for Ctrl+Shift+V (not the Format Painter, which paints on the next click). */
+  private copiedFormat: ShapeFormat | null = null;
+
+  /** Run PowerPoint command `id` for a key: on the slide or in its text (not the speaker notes); Ctrl+M from the thumbnails too. */
+  private runPptKey(id: PptCommandId): boolean | undefined {
+    const a = document.activeElement;
+    const onSlide = !!a && a !== this.notesEl && (a === this.stageEl || !!this.stageEl?.contains(a));
+    const onThumbs = !!a && !!this.thumbsEl && (a === this.thumbsEl || this.thumbsEl.contains(a));
+    if (!onSlide && !(id === "SlideNew" && onThumbs)) return undefined;
+    const c = (this.cmds ??= this.pptCommands())[id];
+    if (c.enabled && !c.enabled()) return undefined;
+    c.run?.();
+    return false;
+  }
+
+  private registerOfficeKeys(): void {
+    // Registered elsewhere with the same action: text formatting (the text box's own keys), link, comment, find, and
+    // Ctrl+E / Ctrl+L (constructor).
+    const handled = new Set(["Mod-b", "Mod-i", "Mod-u", "Mod-k", "Mod-Alt-m", "Mod-f", "Mod-e", "Mod-l"]);
+    for (const [key, id] of PPT_SHORTCUTS) {
+      if (handled.has(key) || this.settings.readOnly) continue;
+      const parts = key.split("-");
+      const name = parts.pop()!;
+      this.officeKeys.push(this.scope!.register(parts as Modifier[], name === "Space" ? " " : name, () => this.runPptKey(id)));
+    }
+  }
+
+  /** Paste Ctrl+Shift+C's formatting onto the selected shape. */
+  private applyCopiedFormat(): void {
+    const format = this.copiedFormat, rs = this.selectedShape();
+    if (!format || !rs) return;
+    const el = rs.shape.el;
+    this.mutate((doc) => {
+      const part = this.editPart ?? doc.slides()[this.index].path;
+      const model = parseSlide(doc, part).shapes.find((x) => x.el === el);
+      if (model) applyFormat(model, format);
+      doc.touch(part);
+    }, "slide");
+  }
+
+  /** Forget the toolbar or ribbon of the file shown before (its elements go with contentEl). */
+  private dropInterface(): void {
+    for (const k of this.officeKeys) this.scope?.unregister(k);
+    this.officeKeys = [];
+    this.ctxMenu?.close();
+    this.ctxMenu = null;
+    this.ribbon?.destroy();
+    this.ribbon = null;
+    this.statusBar = null;
+    this.cmds = null;
+    this.toolbar = null;
+    this.fontSelect = this.sizeSelect = this.zoomSelect = null;
+    this.brushBtn = null;
+  }
+
+  /** Help › Keyboard shortcuts: PowerPoint's keys with its interface, Google Slides' otherwise. */
+  private shortcutsHelp(): void {
+    const c = this.cmds;
+    shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...(this.settings.officePptx && c ? [["PowerPoint shortcuts", shortcutRows(PPT_SHORTCUTS, (id) => c[id].label)] as [string, [string, string][]]] : SLIDES_SHORTCUTS)]);
+  }
+
+  private buildRibbon(host: HTMLElement): void {
+    const cmds = (this.cmds ??= this.pptCommands());
+    // Speaker notes as last left with the status bar's Notes button.
+    const notesBox = this.notesEl?.parentElement;
+    if (notesBox) notesBox.hidden = this.app.loadLocalStorage(NOTES_KEY) === "hidden";
+    const shape = (fn: (spPr: Element) => void) => {
+      const rs = this.selectedShape();
+      if (rs) this.editShape(rs.shape.el, (el) => fn(spPrOf(el)), true);
+    };
+    const tabs = powerpointTabs({
+      fonts: FONTS,
+      sizes: FONT_SIZES,
+      font: { value: () => this.fmt.font, set: (font) => this.setRunStyle({ font }) },
+      size: { value: () => this.fmt.size, set: (sz) => this.setRunStyle({ sz: Number(sz) }) },
+      color: (color) => this.setRunStyle({ color }),
+      highlight: (highlight) => this.setRunStyle({ highlight }),
+      shapeFill: (color) => shape((spPr) => writeFill(spPr, { type: "solid", color })),
+      shapeOutline: (color) => shape((spPr) => writeLine(spPr, { color })),
+      onShape: () => this.selectedShape()?.shape.el.localName === "sp",
+      onPicture: () => this.selectedShape()?.shape.kind === "pic" && !this.selectedShape()?.shape.media,
+    });
+    const ui = buildOfficeUi({
+      view: this, app: this.app, host, root: this.contentEl, cmds, tabs, key: "doc-works-rb-pptx", readOnly: this.settings.readOnly,
+      qat: PPT_QAT, fileIds: PPT_FILE_MENU,
+      sides: [
+        ...(versions ? [["history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly)] as [string, string, () => void]] : []),
+        ["notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file)],
+        ["links-coming-in", "Linked from", (b) => this.linked.toggle(b)],
+        ...(this.settings.readOnly ? [] : [["messages-square", "Comments", () => this.commentsDialog()] as [string, string, () => void]]),
+      ],
+      status: [
+        { id: "slide", label: "Slide Number", side: "left", render: (el) => {
+          const n = this.doc?.slides().length ?? 0;
+          if (n) el.setText(`Slide ${Math.min(this.index + 1, n)} of ${n}`);
+        } },
+        { id: "notes", label: "Notes", side: "right", render: (el) => {
+          const box = this.notesEl?.parentElement;
+          if (!box) return;
+          const b = el.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Notes" } });
+          setIcon(b, "notepad-text");
+          b.toggleClass("is-active", !box.hidden);
+          b.addEventListener("click", () => {
+            box.hidden = !box.hidden;
+            this.app.saveLocalStorage(NOTES_KEY, box.hidden ? "hidden" : "shown");
+            this.statusBar?.update();
+            this.refit();
+          });
+        } },
+        { id: "comments", label: "Comments", side: "right", render: (el) => {
+          if (this.settings.readOnly) return;
+          const b = el.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Comments" } });
+          setIcon(b, "messages-square");
+          b.addEventListener("click", () => this.commentsDialog());
+        } },
+        { id: "views", label: "View Shortcuts", side: "right", render: (el) => {
+          for (const id of ["ViewNormal", "ViewSlideSorter", "SlideShowFromCurrent"] as const) {
+            const c = cmds[id];
+            const b = el.createEl("button", { cls: "clickable-icon", attr: { "aria-label": c.label } });
+            setIcon(b, c.icon);
+            b.toggleClass("is-active", !!c.active?.());
+            b.addEventListener("click", () => c.run?.());
+          }
+        } },
+      ],
+      zoom: { get: () => this.zoom, set: (z) => this.setZoom(z), levels: ZOOMS },
+    });
+    this.ribbon = ui.ribbon;
+    this.statusBar = ui.statusBar;
+    if (ui.save) this.autosave.status = ui.save;
+    this.ribbon.sync();
+  }
+
+  private speller: Speller | null | undefined;
+
+  /** Whether the word under x / y in a text box is misspelled (the native menu then offers its corrections). */
+  private misspelledAt(x: number, y: number): boolean {
+    this.speller ??= electronSpeller();
+    const pos = (this.contentEl.ownerDocument as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null }).caretRangeFromPoint?.(x, y);
+    const text = pos?.startContainer.textContent;
+    if (!this.speller || !pos || !text) return false;
+    let a = pos.startOffset, b = pos.startOffset;
+    while (a > 0 && /[\p{L}']/u.test(text[a - 1])) a--;
+    while (b < text.length && /[\p{L}']/u.test(text[b])) b++;
+    const word = text.slice(a, b);
+    return word.length > 1 && this.speller.misspelled(word);
+  }
+
+  /** The slide panel (layout, background, slide size), as the format panel shows it with nothing selected. */
+  private openSlidePanel(): void {
+    this.showMotion = false;
+    this.showTheme = false;
+    this.setSelection([]);
+    if (!this.showProps || this.contentEl.hasClass("is-narrow")) this.toggleProps();
+  }
+
+  /** PowerPoint's Increase / Decrease Font Size: the next size in the list. */
+  private growFont(dir: 1 | -1): void {
+    const current = Number(this.fmt.size ?? 18);
+    const next = dir > 0 ? FONT_SIZES.find((sz) => sz > current) ?? FONT_SIZES[FONT_SIZES.length - 1] : [...FONT_SIZES].reverse().find((sz) => sz < current) ?? FONT_SIZES[0];
+    this.setRunStyle({ sz: next });
+    this.fmt = { ...this.fmt, size: String(next) };
+  }
+
+  /** Every command PowerPoint's layout names (powerpoint-ui.ts), running the same code as the Google layout's controls. */
+  private pptCommands(): Commands {
+    const menu = (items: [string, () => void][]) => (mn: Menu) => {
+      for (const [title, fn] of items) menuItem(mn, title, fn);
+    };
+    const shape = (fn: (spPr: Element) => void) => () => {
+      const rs = this.selectedShape();
+      if (rs) this.editShape(rs.shape.el, (el) => fn(spPrOf(el)), true);
+    };
+    const picture = (fn: (el: Element) => void) => () => {
+      const rs = this.selectedShape();
+      if (rs?.shape.kind === "pic") fn(rs.shape.el);
+    };
+    const onPicture = () => this.selectedShape()?.shape.kind === "pic";
+    const has = () => this.items.length > 0;
+    const order = (z: "front" | "forward" | "backward" | "back") => () => this.arrangeControl().order(z);
+    const alignMenu = (mn: Menu) => {
+      for (const [label, z] of [["Align Left", "left"], ["Align Center", "center"], ["Align Right", "right"], ["Align Top", "top"], ["Align Middle", "middle"], ["Align Bottom", "bottom"]] as const) menuItem(mn, label, () => this.arrangeControl().align(z));
+      mn.addSeparator();
+      menuItem(mn, "Distribute Horizontally", () => this.arrangeControl().distribute("horizontal"));
+      menuItem(mn, "Distribute Vertically", () => this.arrangeControl().distribute("vertical"));
+    };
+    const align = (a: Align) => () => this.updateParas((p) => ({ ...p, align: a }));
+    const slides = () => this.doc?.slides().length ?? 0;
+    const c: Record<PptCommandId, Commands[string]> = {
+      FileSave: { label: "Save", icon: "save", run: () => void this.autosave.flush() },
+      Undo: { label: "Undo", icon: "undo-2", run: () => this.undo() },
+      Redo: { label: "Redo", icon: "redo-2", run: () => this.redo() },
+      FilePrint: { label: "Print", icon: "printer", run: () => void this.exportAs("pdf"), view: true },
+      ExportFile: { label: "Export", icon: "file-output", run: () => void this.exportAs(), view: true },
+      VersionHistory: { label: "Version History", icon: "history", run: () => void versionHistoryDialog(this.app, this, this.settings.readOnly), view: true },
+      Paste: { label: "Paste", icon: "clipboard-paste", run: () => this.paste(), menu: menu([["Keep Text Only", () => (activeDocument.activeElement?.closest(".pptx-text") ? void runEditCommand("pasteAndMatchStyle") : this.paste())]]) },
+      PasteTextOnly: { label: "Keep Text Only", icon: "clipboard-type", run: () => (activeDocument.activeElement?.closest(".pptx-text") ? void runEditCommand("pasteAndMatchStyle") : this.paste()) },
+      Cut: { label: "Cut", icon: "scissors", run: () => void this.cutSelection(), enabled: has },
+      Copy: { label: "Copy", icon: "copy", run: () => void this.copySelection(), enabled: has, view: true },
+      FormatPainter: { label: "Format Painter", icon: "paintbrush", run: () => this.startPainting(false), dblclick: () => this.startPainting(true), active: () => !!this.painter, menu: menu([["Keep Painting", () => this.startPainting(true)]]) },
+      SlideNew: { label: "New Slide", icon: "square-plus", run: () => this.mutate((d) => (this.index = d.addSlide(this.index))) },
+      SlideDuplicate: { label: "Duplicate Slide", icon: "copy", run: () => this.mutate((d) => (this.index = d.duplicateSlide(this.index))) },
+      SlideDelete: { label: "Delete Slide", icon: "trash-2", run: () => this.mutate((d) => d.deleteSlide(this.index)), enabled: () => slides() > 1 },
+      SlideHide: { label: "Hide Slide", icon: "eye-off", run: () => this.mutate((d) => d.setHidden(this.index, !d.isHidden(this.index))), active: () => !!this.doc?.isHidden(this.index) },
+      SlideLayout: { label: "Layout", icon: "layout-template", run: () => this.openSlidePanel() },
+      SectionAdd: { label: "Add Section", icon: "list-plus", run: () => void this.addSection(this.index) },
+      Font: { label: "Font", icon: "type" },
+      FontSize: { label: "Font Size", icon: "a-large-small" },
+      FontSizeIncrease: { label: "Increase Font Size", icon: "a-arrow-up", run: () => this.growFont(1) },
+      FontSizeDecrease: { label: "Decrease Font Size", icon: "a-arrow-down", run: () => this.growFont(-1) },
+      ClearFormatting: { label: "Clear All Formatting", icon: "remove-formatting", run: () => this.clearFormatting() },
+      Bold: { label: "Bold", icon: "bold", run: () => this.toggle("b") },
+      Italic: { label: "Italic", icon: "italic", run: () => this.toggle("i") },
+      Underline: { label: "Underline", icon: "underline", run: () => this.toggle("u") },
+      Strikethrough: { label: "Strikethrough", icon: "strikethrough", run: () => this.toggle("strike") },
+      Subscript: { label: "Subscript", icon: "subscript", run: () => this.toggleBaseline(-25) },
+      Superscript: { label: "Superscript", icon: "superscript", run: () => this.toggleBaseline(30) },
+      CharacterSpacing: { label: "Character Spacing", icon: "move-horizontal", menu: menu(CHAR_SPACINGS.map(([label, v]) => [label, () => this.setRunStyle({ spc: Number(v) })])) },
+      FontColorPicker: { label: "Font Color", icon: "baseline" },
+      TextHighlightColorPicker: { label: "Text Highlight Color", icon: "highlighter", menu: menu([["No Color", () => this.setRunStyle({ highlight: null })]]) },
+      Bullets: { label: "Bullets", icon: "list", run: () => this.toggleList(false) },
+      Numbering: { label: "Numbering", icon: "list-ordered", run: () => this.toggleList(true) },
+      IndentDecrease: { label: "Decrease List Level", icon: "outdent", run: () => this.updateParas((p) => ({ ...p, lvl: p.lvl - 1 })) },
+      IndentIncrease: { label: "Increase List Level", icon: "indent", run: () => this.updateParas((p) => ({ ...p, lvl: p.lvl + 1 })) },
+      AlignLeft: { label: "Align Left", icon: "align-left", run: align("l") },
+      AlignCenter: { label: "Center", icon: "align-center", run: align("ctr") },
+      AlignRight: { label: "Align Right", icon: "align-right", run: align("r") },
+      AlignJustify: { label: "Justify", icon: "align-justify", run: align("just") },
+      LineSpacing: { label: "Line Spacing", icon: "unfold-vertical", menu: menu(LINE_SPACINGS.map((v) => [v, () => this.updateParas((p) => ({ ...p, lnSpc: { pct: Number(v) } }))])) },
+      ShapesInsertGallery: { label: "Shapes", icon: "shapes", run: () => this.toggleGallery(this.contentEl.querySelector<HTMLElement>('[data-cmd="ShapesInsertGallery"]') ?? this.stageEl) },
+      ArrangeMenu: { label: "Arrange", icon: "layers", menu: (mn) => {
+        menuItem(mn, "Bring to Front", order("front"));
+        menuItem(mn, "Bring Forward", order("forward"));
+        menuItem(mn, "Send Backward", order("backward"));
+        menuItem(mn, "Send to Back", order("back"));
+        mn.addSeparator();
+        subMenu(mn, "Align", alignMenu);
+        mn.addSeparator();
+        menuItem(mn, "Group", () => this.groupSelection(), { disabled: this.items.length < 2 });
+        menuItem(mn, "Ungroup", () => this.ungroupSelection(), { disabled: !this.items.some((i) => i.localName === "grpSp") });
+      } },
+      ShapeFillColorPicker: { label: "Shape Fill", icon: "paint-bucket", menu: menu([["No Fill", shape((spPr) => writeFill(spPr, null))]]) },
+      ShapeOutlineColorPicker: { label: "Shape Outline", icon: "square", menu: menu([["No Outline", shape((spPr) => writeLine(spPr, null))]]) },
+      ShapeOutlineWeight: { label: "Weight", icon: "minus", menu: menu(["0.5", "1", "2", "3", "4.5", "6"].map((v) => [`${v} pt`, shape((spPr) => writeLine(spPr, { width: Number(v) * EMU_PER_PT }))])) },
+      ShapeOutlineDashes: { label: "Dashes", icon: "more-horizontal", menu: menu(DASHES.map(([label, dash]) => [label, shape((spPr) => writeLine(spPr, { dash }))])) },
+      ObjectBringToFront: { label: "Bring to Front", icon: "bring-to-front", run: order("front"), enabled: has },
+      ObjectBringForward: { label: "Bring Forward", icon: "arrow-up", run: order("forward"), enabled: has },
+      ObjectSendBackward: { label: "Send Backward", icon: "arrow-down", run: order("backward"), enabled: has },
+      ObjectSendToBack: { label: "Send to Back", icon: "send-to-back", run: order("back"), enabled: has },
+      ObjectsAlignMenu: { label: "Align", icon: "align-horizontal-space-around", menu: alignMenu },
+      ObjectsGroup: { label: "Group", icon: "group", run: () => this.groupSelection(), enabled: () => this.items.length > 1 },
+      ObjectsUngroup: { label: "Ungroup", icon: "ungroup", run: () => this.ungroupSelection(), enabled: () => this.items.some((i) => i.localName === "grpSp") },
+      FindDialog: { label: "Find", icon: "search", run: () => this.openFind(), view: true },
+      ReplaceDialog: { label: "Replace", icon: "replace", run: () => this.openFind() },
+      SelectMenu: { label: "Select", icon: "text-select", menu: menu([["Select All", () => this.setSelection(this.slideItems())], ["Delete", () => this.deleteSelected()]]) },
+      SelectAll: { label: "Select All", icon: "text-select", run: () => this.setSelection(this.slideItems()) },
+      Delete: { label: "Delete", icon: "trash-2", run: () => this.deleteSelected(), enabled: has },
+      TableInsert: { label: "Table", icon: "table", run: () => void this.insertTable() },
+      PictureInsertFromFile: { label: "Pictures", icon: "image", run: () => pickImage((file) => void this.insertImageFile(file)) },
+      ChartInsert: { label: "Chart", icon: "chart-column", menu: menu(NEW_CHART_TYPES.map(([label, kind]) => [label, () => this.editChart(undefined, kind)])) },
+      HyperlinkInsert: { label: "Link", icon: "link", run: () => void this.editLink() },
+      ReviewNewComment: { label: "New Comment", icon: "message-square-plus", run: () => this.commentsDialog() },
+      TextBoxInsert: { label: "Text Box", icon: "square-dashed-text", run: () => this.addTextBox() },
+      FieldInsert: { label: "Header & Footer", icon: "braces", menu: (mn) => this.fillFieldMenu(mn) },
+      SymbolInsert: { label: "Symbol", icon: "omega", run: () => specialCharacters(this.app, (ch) => {
+        this.caretOrEnd();
+        this.withText(() => insertPlainText(ch), false);
+      }) },
+      MediaInsert: { label: "Video or Audio", icon: "film", run: () => this.pickMedia() },
+      ThemesGallery: { label: "Themes", icon: "palette", run: () => this.openTheme() },
+      SlideSize: { label: "Slide Size", icon: "ratio", run: () => this.openSlidePanel() },
+      FormatBackground: { label: "Format Background", icon: "paint-bucket", run: () => this.openSlidePanel() },
+      TransitionsPane: { label: "Transition to This Slide", icon: "sparkles", run: () => this.openMotion() },
+      AnimationPane: { label: "Animation Pane", icon: "sparkles", run: () => this.openMotion() },
+      SlideShowFromBeginning: { label: "From Beginning", icon: "presentation", run: () => this.startPresentation(true), view: true },
+      SlideShowFromCurrent: { label: "From Current Slide", icon: "play", run: () => this.startPresentation(false), view: true },
+      ShowComments: { label: "Show Comments", icon: "messages-square", run: () => this.commentsDialog() },
+      CopyAsMarkdownOutline: { label: "Copy as Markdown Outline", icon: "list-tree", view: true, run: () => {
+        if (!this.doc) return;
+        this.flushCommit();
+        void navigator.clipboard.writeText(deckToMarkdown(this.doc)).then(() => new Notice("Copied the slides as a Markdown outline."));
+      } },
+      CopyLinkToSlide: { label: "Copy Link to Slide", icon: "link", run: () => copyLink(this.app, this.file, `#${this.index + 1}`, "slide"), view: true },
+      CreateNoteFromSelection: { label: "Create Note from Selection", icon: "file-plus", run: () => this.extractNote(), view: true },
+      CompanionNote: { label: "Companion Note", icon: "notebook-pen", run: () => void openCompanionNote(this.app, this.file), view: true },
+      LinkedFrom: { label: "Linked From", icon: "links-coming-in", run: () => this.linked.toggle(), view: true },
+      ViewNormal: { label: "Normal", icon: "presentation", run: () => this.setGridView(false), active: () => !this.gridView, view: true },
+      ViewSlideSorter: { label: "Slide Sorter", icon: "layout-grid", run: () => this.setGridView(true), active: () => this.gridView, view: true },
+      FormatPane: { label: "Format Pane", icon: "panel-right", run: () => this.toggleProps(), active: () => this.showProps },
+      DarkModeOn: { label: "Dark Mode", icon: "moon", run: () => this.setPaperTheme(this.paperTheme === "dark" ? "light" : "dark"), active: () => this.paperTheme === "dark", view: true },
+      ZoomDialog: { label: "Zoom", icon: "zoom-in", view: true, menu: (mn) => {
+        for (const z of ZOOMS) menuItem(mn, zoomLabel(z), () => this.setZoom(z), { checked: this.zoom === z });
+      } },
+      ZoomFitToWindow: { label: "Fit to Window", icon: "maximize", run: () => this.setZoom("fit"), view: true },
+      KeyboardShortcuts: { label: "Keyboard Shortcuts", icon: "keyboard", run: () => this.shortcutsHelp(), view: true },
+      PictureCrop: { label: "Crop", icon: "crop", run: () => this.showCrop(), enabled: onPicture },
+      PictureChange: { label: "Change Picture", icon: "image-plus", run: picture((el) => this.replaceImage(el)), enabled: onPicture },
+      PictureReset: { label: "Reset Picture", icon: "rotate-ccw", menu: menu([
+        ["Reset Crop", picture((el) => this.editShape(el, (p) => setCrop(p, { l: 0, t: 0, r: 0, b: 0 })))],
+        ["Reset Colour Adjustments", picture((el) => this.editShape(el, (p) => setPictureAdjust(p, NO_ADJUST)))],
+      ]) },
+      CopyFormat: { label: "Copy Formatting", icon: "paintbrush", run: () => {
+        const source = this.selected?.shape;
+        if (source) this.copiedFormat = copyFormat(source);
+      } },
+      PasteFormat: { label: "Paste Formatting", icon: "paintbrush", enabled: () => !!this.copiedFormat, run: () => this.applyCopiedFormat() },
+    };
+    for (const [key, id] of PPT_SHORTCUTS) c[id].shortcut ??= keyName(key);
+    return c;
+  }
+
+  /** PowerPoint's right-click on the slide: its items (those Doc Works has) under the mini toolbar. */
+  private pptContextMenu(e: MouseEvent, rs: RenderedShape | null, target: HTMLElement): void {
+    const c = this.cmds;
+    if (!c) return;
+    const item = (id: PptCommandId, label = c[id].label): CtxItem => ({ label, icon: c[id].icon, run: c[id].run, disabled: c[id].enabled ? !c[id].enabled() : false });
+    const entries: CtxEntry[] = [item("Cut"), item("Copy"), { ...item("Paste"), disabled: !clipboard && !target.closest(".pptx-text[contenteditable='true']") }, item("PasteTextOnly"), "---"];
+    const has = this.items.length > 0;
+    if (has) {
+      entries.push(
+        { label: "Group", icon: "group", sub: [item("ObjectsGroup"), item("ObjectsUngroup")] },
+        { label: "Bring to Front", icon: "bring-to-front", sub: [item("ObjectBringToFront"), item("ObjectBringForward")] },
+        { label: "Send to Back", icon: "send-to-back", sub: [item("ObjectSendToBack"), item("ObjectSendBackward")] },
+        "---",
+      );
+    }
+    if (rs?.shape.kind === "pic" && !rs.shape.media) entries.push(item("PictureChange", "Change Picture…"), item("PictureCrop"), { label: "Reset Picture", icon: "rotate-ccw", sub: [
+      { label: "Reset Crop", disabled: !rs.shape.crop, run: () => this.editShape(rs.shape.el, (p) => setCrop(p, { l: 0, t: 0, r: 0, b: 0 })) },
+      { label: "Reset Colour Adjustments", disabled: JSON.stringify(rs.shape.adjust) === JSON.stringify(NO_ADJUST), run: () => this.editShape(rs.shape.el, (p) => setPictureAdjust(p, NO_ADJUST)) },
+    ] }, "---");
+    // A table cell: the table's row / column / merge actions (on the cells selected with Shift+click, else this one).
+    const cellRs = this.rendered.find((r) => r.shape.kind === "cell" && r.el.contains(target));
+    if (cellRs?.shape.cell) {
+      const frame = topLevel(cellRs.shape.el);
+      const table = this.rendered.find((r) => r.shape.el === frame)?.shape.table;
+      const here = cellRs.shape.cell;
+      const sel = this.tableCell?.frame === frame ? this.tableCell.range : null;
+      const inSel = sel && here.r >= Math.min(sel[0], sel[2]) && here.r <= Math.max(sel[0], sel[2]) && here.c >= Math.min(sel[1], sel[3]) && here.c <= Math.max(sel[1], sel[3]);
+      const range: CellRange = inSel ? sel : [here.r, here.c, here.r, here.c];
+      if (table) entries.push({ label: "Table", icon: "table", sub: tableActions(table, range).map(([title, fn]) => ({ label: title, run: () => this.editShape(frame, (f) => fn(f.getElementsByTagNameNS(NS.a, "tbl")[0])) })) }, "---");
+    }
+    entries.push(item("HyperlinkInsert", "Link…"), item("ReviewNewComment"), "---");
+    if (has) entries.push({ label: "Duplicate", icon: "copy", run: () => void this.duplicateSelection() }, item("Delete"));
+    entries.push({ label: has ? "Format Shape…" : "Format Background…", icon: "panel-right", run: () => (has ? (this.showProps ? undefined : this.toggleProps()) : this.openSlidePanel()) }, item("CreateNoteFromSelection"), "---", item("SelectAll"));
+    this.ctxMenu = showContextMenu({ x: e.clientX, y: e.clientY, doc: (e.target as Node).ownerDocument ?? undefined }, entries, { mini: (el) => this.miniToolbar(el) });
+  }
+
+  /** PowerPoint's mini toolbar above the right-click menu. */
+  private miniToolbar(el: HTMLElement): void {
+    const c = this.cmds;
+    if (!c) return;
+    const button = (id: PptCommandId, onClick?: () => void) => {
+      const b = el.createEl("button", { cls: "dw-rb-btn is-icon", attr: { "aria-label": c[id].shortcut ? `${c[id].label} (${c[id].shortcut})` : c[id].label } });
+      setIcon(b.createSpan({ cls: "dw-rb-icon" }), c[id].icon);
+      b.addEventListener("click", () => (onClick ?? c[id].run)?.());
+    };
+    const select = (id: PptCommandId, text: () => string, options: [string, string][], set: (v: string) => void) => {
+      const b = el.createEl("button", { cls: "dw-rb-select", attr: { "aria-label": c[id].label } });
+      b.createSpan({ cls: "dw-rb-select-label", text: text() });
+      caret(b);
+      b.addEventListener("click", () => {
+        const m = new Menu();
+        for (const [label, v] of options) m.addItem((i) => i.setTitle(label).onClick(() => set(v)));
+        const r = b.getBoundingClientRect();
+        m.showAtPosition({ x: r.left, y: r.bottom });
+      });
+    };
+    select("Font", () => this.fmt.font ?? "", FONTS.map((f) => [f, f]), (font) => this.setRunStyle({ font }));
+    select("FontSize", () => this.fmt.size ?? "", FONT_SIZES.map((sz) => [String(sz), String(sz)]), (sz) => this.setRunStyle({ sz: Number(sz) }));
+    button("FontSizeIncrease");
+    button("FontSizeDecrease");
+    el.createDiv({ cls: "dw-ctx-mini-break" });
+    for (const id of ["Bold", "Italic", "Underline", "AlignCenter", "Bullets"] as const) button(id);
+    button("ShapeFillColorPicker", () => pickColor("#4472C4", (color) => {
+      const rs = this.selectedShape();
+      if (rs) this.editShape(rs.shape.el, (x) => writeFill(spPrOf(x), { type: "solid", color }), true);
+    }));
+    button("ShapeOutlineColorPicker", () => pickColor("#000000", (color) => {
+      const rs = this.selectedShape();
+      if (rs) this.editShape(rs.shape.el, (x) => writeLine(spPrOf(x), { color }), true);
+    }));
+    button("FontColorPicker", () => pickColor("#FF0000", (color) => this.setRunStyle({ color })));
   }
 
   /** The selected shape the user can edit (not one drawn from the layout), if exactly one is selected. */

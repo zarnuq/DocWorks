@@ -67,9 +67,11 @@ export class Autosave {
       this.dirty = false;
       try {
         this.lastWrite = Date.now();
+        this.writing = true;
         try {
           await this.opts.write();
         } finally {
+          this.writing = false;
           this.lastWrite = Date.now();
         }
         if (this.dirty || this.opts.pending?.()) this.status?.saving();
@@ -83,9 +85,12 @@ export class Autosave {
     return this.queue;
   }
 
-  /** Whether a vault `modify` now is likely this editor's own save. */
+  /** A write is under way (however long a big file takes). */
+  private writing = false;
+
+  /** Whether a vault `modify` now is likely this editor's own save: during a write, or within 2 s of one. */
   wroteRecently(): boolean {
-    return Date.now() - this.lastWrite < 2000;
+    return this.writing || Date.now() - this.lastWrite < 2000;
   }
 
   private cancelTimer(): void {

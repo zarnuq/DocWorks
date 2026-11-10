@@ -8,6 +8,7 @@ import { IndexedDbVersionStore, setVersionHistory, VersionHistory, versions } fr
 import { App, FileView, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
 import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
+import { migrateSettings, type PaperSetting } from "./presentation/common/settings";
 import { PptxView, VIEW_TYPE_PPTX } from "./presentation/pptx/pptx-view";
 import { XlsxView, VIEW_TYPE_XLSX } from "./presentation/xlsx/xlsx-view";
 
@@ -47,7 +48,7 @@ export default class DocWorksPlugin extends Plugin {
   }
 
   async onload() {
-    this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<DocWorksSettings> | null) };
+    this.settings = migrateSettings((await this.loadData()) as Record<string, unknown> | null);
     this.addSettingTab(new DocWorksSettingTab(this.app, this));
     // Earlier versions of files, kept in the app's storage (not the vault) before Doc Works saves over them.
     setVersionHistory(new VersionHistory(new IndexedDbVersionStore(`doc-works-history/${this.app.vault.getName()}`), () => ({ enabled: this.settings.history, days: this.settings.historyDays })));
@@ -177,8 +178,8 @@ export default class DocWorksPlugin extends Plugin {
   }
 
   /** Open files again with the current settings (read-only on or off); pending edits are saved first. */
-  async reopenViews(): Promise<void> {
-    for (const type of [VIEW_TYPE_DOCX, VIEW_TYPE_PPTX, VIEW_TYPE_XLSX]) {
+  async reopenViews(types = [VIEW_TYPE_DOCX, VIEW_TYPE_PPTX, VIEW_TYPE_XLSX]): Promise<void> {
+    for (const type of types) {
       for (const leaf of this.app.workspace.getLeavesOfType(type)) {
         const view = leaf.view;
         if (!(view instanceof FileView) || !view.file) continue;
@@ -216,10 +217,27 @@ const HISTORY_DAYS = { name: "Keep versions for", desc: "Older versions are dele
 
 const AUTHOR = { name: "Comment author", desc: "Your name on comments you add to Word documents." };
 
-const PAPER = {
+const PAPER_DESC = "How these files open: light or dark. Each file's toolbar can still switch.";
+const PAPER_OPTIONS = { default: "", light: "Light", dark: "Dark", obsidian: "Match Obsidian's theme" };
+const PAPER_KEYS = ["paperDocx", "paperPptx", "paperXlsx"] as const;
+const paper = (key: (typeof PAPER_KEYS)[number], fallback: "Light" | "Dark"): Def => ({
   name: "Paper colour",
-  desc: "How files open: light or dark pages, slides' surroundings and sheets. Each file's toolbar can still switch.",
-  options: { default: "Light documents, dark slides and sheets", light: "Light", dark: "Dark", obsidian: "Match Obsidian's theme" },
+  desc: PAPER_DESC,
+  control: { type: "dropdown", key, options: { ...PAPER_OPTIONS, default: `Default (${fallback.toLowerCase()})` }, defaultValue: "default" },
+});
+
+const OFFICE_PPTX = {
+  name: "PowerPoint-style interface (beta)",
+  desc: "Desktop PowerPoint's ribbon, Quick Access Toolbar, status bar, right-click menu and shortcuts instead of the Google Slides layout.",
+};
+const OFFICE_XLSX = {
+  name: "Excel-style interface (beta)",
+  desc: "Desktop Excel's ribbon, Quick Access Toolbar, status bar, right-click menu and shortcuts instead of the Google Sheets layout.",
+};
+
+const OFFICE_DOCX = {
+  name: "Word-style interface (beta)",
+  desc: "Desktop Word's ribbon, Quick Access Toolbar, status bar, right-click menu and shortcuts instead of the Google Docs layout.",
 };
 
 const OPEN = [
@@ -228,6 +246,7 @@ const OPEN = [
   ["openXlsx", "Open Excel spreadsheets (.xlsx)"],
 ] as const;
 const OPEN_DESC = "Turn off to leave this file type to Obsidian or another plugin. Applies after reloading Obsidian.";
+const open = (i: 0 | 1 | 2): Def => ({ name: OPEN[i][1], desc: OPEN_DESC, control: { type: "toggle", key: OPEN[i][0], defaultValue: true } });
 
 const PAGE_SIZE = {
   name: "Word page size",
@@ -243,17 +262,10 @@ class DocWorksSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  // Obsidian 1.13+: rendered declaratively and searchable.
+  // Obsidian 1.13+: rendered declaratively and searchable, in a section per file type.
   getSettingDefinitions(): SettingDefinitionItem[] {
-    return [
-      { name: READ_ONLY.name, desc: READ_ONLY.desc, control: { type: "toggle", key: "readOnly", defaultValue: false } },
-      { name: HISTORY.name, desc: HISTORY.desc, control: { type: "toggle", key: "history", defaultValue: true } },
-      { name: HISTORY_DAYS.name, desc: HISTORY_DAYS.desc, control: { type: "dropdown", key: "historyDays", options: HISTORY_DAYS.options, defaultValue: "14" } },
-      { name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } },
-      { name: AUTHOR.name, desc: AUTHOR.desc, control: { type: "text", key: "author", defaultValue: "" } },
-      { name: PAPER.name, desc: PAPER.desc, control: { type: "dropdown", key: "paper", options: PAPER.options, defaultValue: "default" } },
-      ...OPEN.map(([key, name]) => ({ name, desc: OPEN_DESC, control: { type: "toggle" as const, key, defaultValue: true } })),
-    ];
+    const def = (d: Def): SettingDefinitionItem => ({ name: d.name, desc: d.desc, control: d.control });
+    return SECTIONS.map(([heading, defs]) => ({ type: "group" as const, heading, items: defs.map(def) }) as SettingDefinitionItem);
   }
 
   // The days dropdown's options are text.
@@ -263,55 +275,61 @@ class DocWorksSettingTab extends PluginSettingTab {
   }
 
   async setControlValue(key: string, value: unknown): Promise<void> {
-    if (key === "pageSize") this.plugin.settings.pageSize = value === "letter" ? "letter" : "document";
-    if (key === "author") this.plugin.settings.author = typeof value === "string" ? value.trim() : "";
-    if (key === "paper" && typeof value === "string" && value in PAPER.options) this.plugin.settings.paper = value as keyof typeof PAPER.options;
-    for (const [open] of OPEN) if (key === open) this.plugin.settings[open] = value !== false;
-    const reopen = key === "readOnly" && this.plugin.settings.readOnly !== (value === true);
-    if (key === "readOnly") this.plugin.settings.readOnly = value === true;
-    if (key === "history") this.plugin.settings.history = value !== false;
-    if (key === "historyDays") this.plugin.settings.historyDays = Number(value) || 14;
+    const s = this.plugin.settings;
+    if (key === "pageSize") s.pageSize = value === "letter" ? "letter" : "document";
+    if (key === "author") s.author = typeof value === "string" ? value.trim() : "";
+    for (const paper of PAPER_KEYS) if (key === paper && typeof value === "string" && value in PAPER_OPTIONS) s[paper] = value as PaperSetting;
+    for (const [open] of OPEN) if (key === open) s[open] = value !== false;
+    const toggles = ["readOnly", "officeDocx", "officePptx", "officeXlsx"] as const;
+    const toggle = toggles.find((k) => k === key);
+    const reopen = !!toggle && s[toggle] !== (value === true);
+    if (toggle) s[toggle] = value === true;
+    if (key === "history") s.history = value !== false;
+    if (key === "historyDays") s.historyDays = Number(value) || 14;
     await this.plugin.saveSettings();
-    if (reopen) await this.plugin.reopenViews();
+    // Only the views the setting is about: the Word toggle doesn't reload decks and sheets (losing their undo).
+    const types = { officeDocx: [VIEW_TYPE_DOCX], officePptx: [VIEW_TYPE_PPTX], officeXlsx: [VIEW_TYPE_XLSX] } as Record<string, string[]>;
+    if (reopen) await this.plugin.reopenViews(types[key]);
   }
 
   // Older Obsidian versions.
   display(): void {
-    this.containerEl.empty();
-    new Setting(this.containerEl)
-      .setName(READ_ONLY.name)
-      .setDesc(READ_ONLY.desc)
-      .addToggle((t) => t.setValue(this.plugin.settings.readOnly).onChange((v) => void this.setControlValue("readOnly", v)));
-    new Setting(this.containerEl)
-      .setName(HISTORY.name)
-      .setDesc(HISTORY.desc)
-      .addToggle((t) => t.setValue(this.plugin.settings.history).onChange((v) => void this.setControlValue("history", v)));
-    new Setting(this.containerEl)
-      .setName(HISTORY_DAYS.name)
-      .setDesc(HISTORY_DAYS.desc)
-      .addDropdown((d) => d.addOptions(HISTORY_DAYS.options).setValue(String(this.plugin.settings.historyDays)).onChange((v) => void this.setControlValue("historyDays", v)));
-    new Setting(this.containerEl)
-      .setName(PAGE_SIZE.name)
-      .setDesc(PAGE_SIZE.desc)
-      .addDropdown((d) =>
-        d
-          .addOptions(PAGE_SIZE.options)
-          .setValue(this.plugin.settings.pageSize)
-          .onChange((v) => void this.setControlValue("pageSize", v))
-      );
-    new Setting(this.containerEl)
-      .setName(AUTHOR.name)
-      .setDesc(AUTHOR.desc)
-      .addText((t) => t.setValue(this.plugin.settings.author).onChange((v) => void this.setControlValue("author", v)));
-    new Setting(this.containerEl)
-      .setName(PAPER.name)
-      .setDesc(PAPER.desc)
-      .addDropdown((d) => d.addOptions(PAPER.options).setValue(this.plugin.settings.paper).onChange((v) => void this.setControlValue("paper", v)));
-    for (const [key, name] of OPEN) {
-      new Setting(this.containerEl)
-        .setName(name)
-        .setDesc(OPEN_DESC)
-        .addToggle((t) => t.setValue(this.plugin.settings[key]).onChange((v) => void this.setControlValue(key, v)));
+    const el = this.containerEl;
+    el.empty();
+    const s = this.plugin.settings as unknown as Record<string, unknown>;
+    for (const [heading, defs] of SECTIONS) {
+      new Setting(el).setName(heading).setHeading();
+      for (const d of defs) {
+        const row = new Setting(el).setName(d.name).setDesc(d.desc);
+        const c = d.control;
+        if (c.type === "toggle") row.addToggle((t) => t.setValue(s[c.key] === true).onChange((v) => void this.setControlValue(c.key, v)));
+        else if (c.type === "dropdown") row.addDropdown((dd) => dd.addOptions(c.options).setValue(String(this.getControlValue(c.key))).onChange((v) => void this.setControlValue(c.key, v)));
+        else row.addText((t) => t.setValue(typeof s[c.key] === "string" ? (s[c.key] as string) : "").onChange((v) => void this.setControlValue(c.key, v)));
+      }
     }
   }
 }
+
+type Def = {
+  name: string;
+  desc: string;
+  control: { type: "toggle"; key: string; defaultValue: boolean } | { type: "dropdown"; key: string; options: Record<string, string>; defaultValue: string } | { type: "text"; key: string; defaultValue: string };
+};
+
+/** The settings tab: general settings, then one section per file type. */
+const SECTIONS: [heading: string, defs: Def[]][] = [
+  ["General", [
+    { ...READ_ONLY, control: { type: "toggle", key: "readOnly", defaultValue: false } },
+    { ...HISTORY, control: { type: "toggle", key: "history", defaultValue: true } },
+    { name: HISTORY_DAYS.name, desc: HISTORY_DAYS.desc, control: { type: "dropdown", key: "historyDays", options: HISTORY_DAYS.options, defaultValue: "14" } },
+    { ...AUTHOR, control: { type: "text", key: "author", defaultValue: "" } },
+  ]],
+  ["Word documents", [
+    open(0),
+    paper("paperDocx", "Light"),
+    { ...OFFICE_DOCX, control: { type: "toggle", key: "officeDocx", defaultValue: false } },
+    { name: PAGE_SIZE.name, desc: PAGE_SIZE.desc, control: { type: "dropdown", key: "pageSize", options: PAGE_SIZE.options, defaultValue: "document" } },
+  ]],
+  ["PowerPoint presentations", [open(1), paper("paperPptx", "Dark"), { ...OFFICE_PPTX, control: { type: "toggle", key: "officePptx", defaultValue: false } }]],
+  ["Excel spreadsheets", [open(2), paper("paperXlsx", "Dark"), { ...OFFICE_XLSX, control: { type: "toggle", key: "officeXlsx", defaultValue: false } }]],
+];

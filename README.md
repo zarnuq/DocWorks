@@ -63,8 +63,8 @@ If it saves you a trip to Office, please ⭐ the repo.
 ### Everywhere
 
 - Saves only what you change; the rest of the file is kept byte for byte
-- Google Docs / Slides / Sheets-style menus and toolbars
-- Undo / redo, autosave with retry, light and dark page themes
+- Google Docs / Slides / Sheets-style menus and toolbars, or (beta, per file type in settings) desktop Word / PowerPoint / Excel-style ribbons with a customizable Quick Access Toolbar, a status bar, the apps' right-click menus with their mini toolbars, and their keyboard shortcuts
+- Undo / redo, autosave with retry, light and dark page themes (set per file type in settings)
 - Find and replace with whole words, regular expressions and ignore accents, including speaker notes, comments and cell notes
 - Search inside every document, deck and sheet in the vault from a side panel
 - Read-only mode in settings: view files without any chance of changing them

@@ -114,3 +114,29 @@ describe("Autosave", () => {
     expect(autosave.dirty).toBe(false);
   });
 });
+
+describe("Autosave's own writes", () => {
+  it("count as its own while a slow save is still writing (the vault reports the change before the write returns)", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let during: boolean | null = null;
+    const autosave = new Autosave({
+      delay: 0,
+      readOnly: () => false,
+      canSave: () => true,
+      name: () => "big.docx",
+      write: async () => {
+        // A big file: building and writing it takes 5 s; the vault's modify event comes at the end of the write.
+        now += 5000;
+        during = autosave.wroteRecently();
+      },
+    });
+    autosave.markDirty();
+    await autosave.flush();
+    expect(during).toBe(true);
+    now += 1000;
+    expect(autosave.wroteRecently()).toBe(true);
+    now += 2000;
+    expect(autosave.wroteRecently()).toBe(false);
+  });
+});

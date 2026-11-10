@@ -3209,3 +3209,477 @@ textarea.pptx-notes {
   background: rgba(var(--color-green-rgb), 0.12);
   text-decoration: none;
 }
+
+/* ---------------------------------------------------------------------------
+ * Office-style interface (beta): ribbon. Layout copies the desktop apps; colours come from the Obsidian theme.
+ * ------------------------------------------------------------------------- */
+.dw-rb {
+  position: relative;
+  background: var(--background-secondary);
+  border-bottom: var(--border-width) solid var(--background-modifier-border);
+  user-select: none;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--size-2-1);
+  min-height: 30px;
+  padding: var(--size-2-1) var(--size-4-2) 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-file,
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-tab {
+  flex: none;
+  height: 28px;
+  padding: 0 var(--size-4-3);
+  background: none;
+  box-shadow: none;
+  border-radius: var(--radius-s) var(--radius-s) 0 0;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-file {
+  font-weight: var(--font-semibold);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-tab[hidden] {
+  display: none;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-tab.is-active {
+  color: var(--text-accent);
+  box-shadow: inset 0 -2px 0 var(--interactive-accent);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-tab.is-contextual {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-file:hover,
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-tab:hover {
+  background: var(--background-modifier-hover);
+}
+
+.dw-rb-side {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  margin-left: auto;
+  padding-bottom: var(--size-2-1);
+}
+
+.dw-rb-panel {
+  display: flex;
+  align-items: stretch;
+  height: 96px;
+  padding: var(--size-2-2) var(--size-4-2) var(--size-2-1);
+  overflow: hidden;
+  background: var(--background-primary);
+  border-top: var(--border-width) solid var(--background-modifier-border);
+}
+
+.dw-rb.is-collapsed .dw-rb-panel {
+  display: none;
+}
+
+.dw-rb.is-collapsed.is-peek .dw-rb-panel {
+  display: flex;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: var(--layer-popover);
+  box-shadow: var(--shadow-s);
+}
+
+.dw-rb-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--size-4-2);
+  border-right: var(--border-width) solid var(--background-modifier-border);
+}
+
+.dw-rb-controls {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-2-1);
+}
+
+.dw-rb-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+}
+
+.dw-rb-row {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.dw-rb-caption {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 16px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-launcher {
+  position: absolute;
+  right: calc(-1 * var(--size-4-1));
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  --icon-size: 10px;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-btn,
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  height: 24px;
+  padding: 0 var(--size-2-2);
+  background: none;
+  box-shadow: none;
+  border-radius: var(--radius-s);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  --icon-size: var(--icon-s);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-btn:hover,
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-arrow:hover,
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-launcher:hover,
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-gallery-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-btn.is-active {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-accent);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-btn:disabled {
+  opacity: 0.4;
+}
+
+.dw-rb-icon {
+  display: inline-flex;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-btn.is-large {
+  flex-direction: column;
+  justify-content: flex-start;
+  height: 70px;
+  min-width: 44px;
+  max-width: 72px;
+  padding: var(--size-2-2) var(--size-2-2) 0;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  --icon-size: 26px;
+}
+
+.dw-rb-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.dw-rb-split.is-large {
+  flex-direction: column;
+}
+
+.dw-rb-split.is-large .dw-rb-btn.is-large {
+  height: 52px;
+}
+
+.dw-rb-split.is-large .dw-rb-arrow {
+  justify-content: center;
+  height: 18px;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-arrow {
+  min-width: 14px;
+  padding: 0 2px;
+}
+
+.dw-rb-caret {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  --icon-size: 12px;
+  --icon-stroke: 2px;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+  width: var(--dw-rb-select-w, 8em);
+  height: 24px;
+  padding: 0 var(--size-2-3);
+  font-size: var(--font-ui-smaller);
+  background: var(--background-modifier-form-field);
+  border: var(--border-width) solid var(--background-modifier-border);
+  box-shadow: none;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-rb-color {
+  position: relative;
+}
+
+.dw-rb-swatch {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 2px;
+  height: 3px;
+  background: var(--dw-swatch);
+}
+
+.dw-rb-check {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  height: 22px;
+  font-size: var(--font-ui-smaller);
+}
+
+.dw-rb-gallery {
+  display: flex;
+  height: 66px;
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-gallery-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  max-width: 344px;
+  overflow: hidden;
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-gallery-item {
+  width: 84px;
+  height: 32px;
+  padding: 0 var(--size-2-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: none;
+  box-shadow: none;
+  font-size: var(--font-ui-smaller);
+}
+
+:is(.dw-rb, .dw-ctx-mini) .dw-rb-gallery-item.is-active {
+  outline: 1px solid var(--interactive-accent);
+  outline-offset: -1px;
+}
+
+.dw-rb-gallery .dw-rb-arrow {
+  height: auto;
+  border-left: var(--border-width) solid var(--background-modifier-border);
+  border-radius: 0;
+}
+
+/* Folding: compact groups drop small buttons' captions and shrink large buttons; folded groups are one button. */
+.dw-rb-compact .dw-rb-btn.is-small .dw-rb-label {
+  display: none;
+}
+
+.dw-rb-compact .dw-rb-btn.is-large:not(.dw-rb-group-btn) {
+  height: 24px;
+  max-width: none;
+  flex-direction: row;
+  padding: 0 var(--size-2-2);
+  --icon-size: var(--icon-s);
+}
+
+.dw-rb-compact .dw-rb-btn.is-large:not(.dw-rb-group-btn) .dw-rb-label,
+.dw-rb-compact .dw-rb-gallery-items {
+  display: none;
+}
+
+.dw-rb-group[data-size="collapsed"] .dw-rb-caption {
+  display: none;
+}
+
+.dw-rb-group-btn {
+  height: 84px;
+}
+
+.dw-rb-flyout {
+  position: absolute;
+  top: 100%;
+  left: var(--dw-rb-flyout-x, 0);
+  z-index: var(--layer-popover);
+  display: flex;
+  padding: var(--size-4-1);
+  background: var(--background-primary);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+}
+
+.dw-rb-qat {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  align-self: center;
+  margin-right: var(--size-4-2);
+  padding-right: var(--size-4-2);
+  border-right: var(--border-width) solid var(--background-modifier-border);
+}
+
+/* Office-style right-click menu (own DOM menu, Obsidian's menu look) and Word's mini toolbar above it. */
+.dw-ctx .menu {
+  position: fixed;
+  z-index: var(--layer-menu);
+}
+
+.dw-ctx .menu:focus {
+  outline: none;
+}
+
+.dw-ctx-mini {
+  position: fixed;
+  z-index: var(--layer-menu);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1px;
+  max-width: 300px;
+  padding: var(--size-2-2);
+  background: var(--background-primary);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+}
+
+/* Office-style status bar. */
+.dw-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-3);
+  min-height: 24px;
+  padding: 0 var(--size-4-3);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border-top: var(--border-width) solid var(--background-modifier-border);
+  user-select: none;
+}
+
+.dw-sb-left,
+.dw-sb-right,
+.dw-sb-zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-3);
+  min-width: 0;
+}
+
+.dw-sb-zoom {
+  gap: var(--size-2-1);
+}
+
+.dw-sb-item {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+}
+
+.dw-sb-item[hidden] {
+  display: none;
+}
+
+.dw-sb-item button,
+.dw-statusbar .dw-sb-zoom-pct {
+  height: 20px;
+  padding: 0 var(--size-2-3);
+  background: none;
+  box-shadow: none;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.dw-sb-item button:hover,
+.dw-statusbar .dw-sb-zoom-pct:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.dw-sb-item button.is-active {
+  color: var(--text-accent);
+}
+
+.dw-sb-zoom input[type="range"] {
+  width: 100px;
+}
+
+.dw-sb-zoom .clickable-icon {
+  padding: 2px;
+  --icon-size: var(--icon-xs);
+}
+
+.dw-ctx-mini-break {
+  flex-basis: 100%;
+  height: 0;
+}
+
+.dw-ctx-mini .dw-rb-select {
+  width: 7em;
+}
+
+.dw-ctx-mini .dw-rb-select[aria-label="Font Size"] {
+  width: 3.5em;
+}
+
+.dw-rb-controls[hidden] {
+  display: none;
+}
+
+/* Narrow panes: the zoom slider goes (− / + and the percentage stay). */
+.is-narrow .dw-sb-zoom input[type="range"] {
+  display: none;
+}
+
+.dw-statusbar {
+  overflow: hidden;
+}
+
+/* A phone: fully folded groups that still don't fit scroll sideways. */
+.dw-rb-panel.is-scroll {
+  overflow-x: auto;
+}
+
+/* Gallery tiles drawn in their style's look (font, weight, colour). */
+.dw-rb-gallery-item.has-preview {
+  white-space: nowrap;
+  line-height: 1.1;
+}

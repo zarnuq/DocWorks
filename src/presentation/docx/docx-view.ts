@@ -6,7 +6,7 @@ import { chartPalette } from "../../domain/pptx/chart-format";
 import { chartDialog, NEW_CHART_TYPES, newChartFormat } from "../common/chart-form";
 import type { ChartKind } from "../../domain/pptx/chart-format";
 import { drawingEditor } from "./drawing-editor";
-import { App, FileView, Menu, Modal, Notice, Scope, Setting, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, KeymapEventHandler, Menu, Modal, Modifier, Notice, Scope, Setting, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { Command, EditorState, NodeSelection, Plugin, TextSelection } from "prosemirror-state";
 import { DOMSerializer, Node as PMNode } from "prosemirror-model";
 import { EditorView } from "prosemirror-view";
@@ -26,7 +26,7 @@ import { copyLink } from "../common/copy-link";
 import { createSelectionNote, noteText, openCompanionNote } from "../common/office-notes";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
-import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
+import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems, ZOOMS, zoomLabel, editableFocused, EDITING_KEYS } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { pickImage } from "../common/images";
 import { electronSpeller, runEditCommand, Speller } from "../common/spelling";
@@ -39,7 +39,7 @@ import { fontStack } from "../../core/utils/fonts";
 import { IMAGE_MIME } from "../../core/utils/images";
 import { cmd, commentRanges, docxPlugins, EditorContext, PaintFormat, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
-import { pageAt, pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
+import { pageAt, pagesKey, pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
 import { latexToOmml, mathSpec } from "../../domain/docx/math";
 import { canExportPdf, renderPdf } from "../common/pdf";
@@ -57,6 +57,12 @@ import { retainOrigins, suggestTransaction } from "../../domain/docx/suggestions
 import { DocxRuler, outlineEntries } from "./docx-ruler";
 
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+import { caret, Ribbon } from "../common/ribbon";
+import { StatusBar } from "../common/status-bar";
+import { SaveStatus } from "../common/save-status";
+import type { Commands } from "../common/commands";
+import { showContextMenu, type CtxEntry } from "../common/context-menu";
+import { keyName, WORD_FILE_MENU, WORD_QAT, WORD_SHORTCUTS, wordShortcutSections, wordTabs, type WordCommandId } from "./word-ui";
 import { parseElement } from "../../core/utils/xml";
 export { DEFAULT_SETTINGS };
 export type { DocWorksSettings };
@@ -135,6 +141,18 @@ export class DocxView extends FileView {
     },
   });
   private toolbar: Toolbar | null = null;
+  /** The Word-style interface (beta setting), instead of `toolbar`. */
+  private ribbon: Ribbon | null = null;
+  private statusBar: StatusBar | null = null;
+  private modeSelect: HTMLSelectElement | null = null;
+  /** The Word interface's commands (right-click menu, mini toolbar). */
+  private cmds: Commands | null = null;
+  /** The right-click menu this view opened, closed with the file. */
+  private ctxMenu: { close(): void } | null = null;
+  /** Font, size and paragraph style at the cursor, for the format controls. */
+  private fmt: { font: string | null; size: string | null; style: string } = { font: null, size: null, style: "Normal" };
+  /** Word's Ctrl+Shift+C: formatting copied for Ctrl+Shift+V. */
+  private copiedFormat: PaintFormat | null = null;
   private wrapSelect: HTMLSelectElement | null = null;
   /** The last cell colour picked, where the custom picker starts. */
   private lastShade = SHADES[0][1];
@@ -182,12 +200,18 @@ export class DocxView extends FileView {
   ) {
     super(leaf);
     this.scope = new Scope(this.app.scope);
-    focusRegions(this.scope, this.contentEl, () => [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.editor?.dom, this.outlineEl, this.reviewEl, this.findEl]);
+    focusRegions(this.scope, this.contentEl, () => [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.contentEl.querySelector<HTMLElement>(".dw-rb-tabs"), this.contentEl.querySelector<HTMLElement>(".dw-rb-panel"), this.editor?.dom, this.outlineEl, this.reviewEl, this.findEl, this.contentEl.querySelector<HTMLElement>(".dw-statusbar")]);
+    // Word's Ctrl+F1: show or hide the ribbon's groups.
+    this.scope.register(["Mod"], "F1", () => {
+      if (!this.ribbon) return;
+      this.ribbon.toggleCollapsed();
+      return false;
+    });
     this.scope.register(["Mod"], "f", () => {
       this.openFind();
       return false;
     });
-    registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...DOCS_SHORTCUTS]));
+    registerShortcutsKey(this.scope, () => this.shortcutsHelp());
     this.scope.register(["Mod"], "h", () => {
       this.openFind();
       return false;
@@ -242,6 +266,8 @@ export class DocxView extends FileView {
 
   async onLoadFile(file: TFile): Promise<void> {
     const load = ++this.loads;
+    // A reload (an outside change) comes without onUnloadFile: the old interface and its commands go.
+    this.dropInterface();
     this.stopFocusReturn?.();
     this.stopFocusReturn = returnFocusAfterOverlays(() => this.app.workspace.getActiveViewOfType(DocxView) === this, () => this.editor?.focus());
     this.contentEl.empty();
@@ -288,7 +314,7 @@ export class DocxView extends FileView {
       },
     };
 
-    const toolbar = this.contentEl.createDiv({ cls: "dw-toolbar" });
+    const toolbar = this.contentEl.createDiv({ cls: this.settings.officeDocx ? "dw-rb-host" : "dw-toolbar" });
     const body = this.contentEl.createDiv({ cls: "docx-body" });
     // Regions are named through hidden labels: Obsidian shows aria-label as a hover tooltip.
     const outlineName = body.createDiv({ cls: "dw-sr-only", text: "Document outline", attr: { id: `docx-outline-name-${Math.random().toString(36).slice(2)}` } });
@@ -319,9 +345,24 @@ export class DocxView extends FileView {
       const pos = [at, at - 1].find((p) => p >= 0 && cmd.equationAt(editor.state, p) !== null);
       if (pos !== undefined) this.equationDialog(pos);
     });
+    // Google Docs' keys, or Word's with the Word interface.
+    const keys: Record<string, Command> = this.settings.officeDocx
+      ? Object.fromEntries(WORD_SHORTCUTS.flatMap(([key, id]) => {
+        const command: Command = () => {
+          const c = (this.cmds ??= this.wordCommands())[id];
+          // A command with nothing to do leaves the key to the app (Ctrl+Shift+V with nothing copied pastes plain text).
+          if (c.enabled && !c.enabled()) return false;
+          c.run?.();
+          return true;
+        };
+        // Shift+letter arrives as the capital letter ("L"); without a keyCode fallback the lower-case name won't match.
+        const upper = /Shift-[a-z]$/.test(key) ? [[key.slice(0, -1) + key.slice(-1).toUpperCase(), command] as const] : [];
+        return [[key, command] as const, ...upper];
+      }))
+      : { "Mod-k": () => (void this.editLink(), true), "Mod-Alt-m": () => (void this.addComment(), true), "Mod-Shift-8": cmd.toggleList(ctx, "bullet"), "Mod-Shift-7": cmd.toggleList(ctx, "ordered") };
     this.editor = new EditorView(host, {
       attributes: { role: "textbox", "aria-labelledby": host.createDiv({ cls: "dw-sr-only", text: "Document content", attr: { id: `docx-content-name-${Math.random().toString(36).slice(2)}` } }).id, "aria-multiline": "true" },
-      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, { "Mod-k": () => (void this.editLink(), true), "Mod-Alt-m": () => (void this.addComment(), true), "Mod-Shift-8": cmd.toggleList(ctx, "bullet"), "Mod-Shift-7": cmd.toggleList(ctx, "ordered") }), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize), readOnlyPlugin(() => this.settings.readOnly)] }),
+      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, keys), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize), readOnlyPlugin(() => this.settings.readOnly)] }),
       editable: () => !this.settings.readOnly,
       nodeViews: {
         image: (node, view, getPos) =>
@@ -357,6 +398,8 @@ export class DocxView extends FileView {
           this.renderOutline();
         }
         if (changed) this.scheduleReview();
+        // The page layout was measured: Page N of M.
+        else if (tr.getMeta(pagesKey)) this.statusBar?.update();
       },
       handleKeyDown: (_view, event) => {
         this.lastKey = event.key;
@@ -398,8 +441,12 @@ export class DocxView extends FileView {
     // On the editor's element (not a ProseMirror handler): picture node views would stop the event from reaching one.
     this.editor.dom.addEventListener("contextmenu", (e) => !this.settings.readOnly && this.contextMenu(e));
 
-    this.buildToolbar(toolbar, ctx);
-    this.setPaperTheme(paperFor(this.settings, "light"));
+    if (this.settings.officeDocx) {
+      this.buildRibbon(toolbar);
+      this.registerOfficeKeys();
+    }
+    else this.buildToolbar(toolbar, ctx);
+    this.setPaperTheme(paperFor(this.settings, "docx", "light"));
     window.addEventListener("blur", this.onWindowBlur);
     this.resizeObserver = new ResizeObserver(() => {
       this.fitDocument();
@@ -407,7 +454,7 @@ export class DocxView extends FileView {
     this.resizeObserver.observe(host);
     this.narrowWatch = watchNarrow(this.contentEl, (narrow) => {
       if (!narrow) this.closeDrawer?.();
-      this.toolbar?.fit();
+      (this.ribbon ?? this.toolbar)?.fit();
       this.fitDocument();
     });
     this.updateWordCount();
@@ -499,6 +546,7 @@ export class DocxView extends FileView {
     await this.autosave.close();
     this.stopFocusReturn?.();
     this.stopFocusReturn = null;
+    this.dropInterface();
     this.editor?.destroy();
     this.ruler?.destroy();
     this.ruler = null;
@@ -538,6 +586,8 @@ export class DocxView extends FileView {
     this.app.saveLocalStorage(ZOOM_KEY, this.zoom);
     if (this.zoomSelect) this.zoomSelect.value = this.zoom;
     this.fitDocument();
+    this.statusBar?.update();
+    this.ribbon?.sync();
   }
 
   private fitDocument(): void {
@@ -685,15 +735,8 @@ export class DocxView extends FileView {
     tb.iconSelect("square-dashed", "Table borders", [["All borders", "all"], ["Outside only", "outer"], ["No borders", "none"]], (v) => run(cmd.setTableBorders(v as "all" | "outer" | "none")));
     tb.context(() => this.selectedImage() === null && this.inTable());
     sep();
-    const setMode = (value: string) => void (async () => {
-      if (value === "suggesting" && !await this.author()) { mode.value = "editing"; return; }
-      this.suggesting = value === "suggesting";
-      mode.value = value;
-      this.contentEl.toggleClass("is-suggesting", this.suggesting);
-      if (this.suggesting) this.setReview(true);
-      this.editor?.focus();
-    })();
-    const mode = tb.select("Editing mode", "Mode", [["Editing", "editing"], ["Suggesting", "suggesting"]], setMode);
+    const setMode = (value: string) => void this.setSuggesting(value === "suggesting");
+    const mode = (this.modeSelect = tb.select("Editing mode", "Mode", [["Editing", "editing"], ["Suggesting", "suggesting"]], setMode));
     mode.value = this.suggesting ? "suggesting" : "editing";
     const showRuler = this.app.loadLocalStorage("doc-works-ruler") !== "off";
     this.rulerViewport?.toggle(showRuler && !this.settings.readOnly);
@@ -795,7 +838,7 @@ export class DocxView extends FileView {
       menuItem(mn, "Word count", () => this.wordCountDialog());
       menuItem(mn, "Find and replace", () => this.openFind());
     });
-    tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...DOCS_SHORTCUTS])));
+    tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => this.shortcutsHelp()));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
     tb.side("notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file));
     const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
@@ -808,6 +851,386 @@ export class DocxView extends FileView {
     this.wordsEl.hidden = this.app.loadLocalStorage(WORD_COUNT_KEY) === "off";
     end.el.prepend(this.wordsEl);
     tb.sync();
+  }
+
+  /** Scope keys of the Word interface, registered only while it's on (the first handler for a key takes it, even doing nothing). */
+  private officeKeys: KeymapEventHandler[] = [];
+
+  /** Word's shortcuts belong to the document (its keymap runs them) rather than Obsidian's hotkeys. */
+  private registerOfficeKeys(): void {
+    for (const [key] of WORD_SHORTCUTS) {
+      const parts = key.split("-");
+      const name = parts.pop()!;
+      const mods = parts as Modifier[];
+      // Already the document's (shielded) or registered with the same action (Ctrl+F / Ctrl+H find).
+      if (EDITING_KEYS.some(([m, k]) => k === name && m.join() === mods.join()) || ["Mod-f", "Mod-h"].includes(key)) continue;
+      this.officeKeys.push(this.scope!.register(mods, name === "Space" ? " " : name, () => (editableFocused() ? true : undefined)));
+    }
+  }
+
+  /** Forget the toolbar or ribbon of the file shown before (its elements are gone with contentEl). */
+  private dropInterface(): void {
+    for (const k of this.officeKeys) this.scope?.unregister(k);
+    this.officeKeys = [];
+    this.ctxMenu?.close();
+    this.ctxMenu = null;
+    this.ribbon?.destroy();
+    this.ribbon = null;
+    this.cmds = null;
+    this.statusBar = null;
+    this.modeSelect = null;
+    this.toolbar = null;
+    this.fontSelect = this.sizeSelect = this.styleSelect = this.zoomSelect = this.wrapSelect = null;
+    this.pageViewBtn = null;
+    this.brushBtn = null;
+    this.wordsEl = null;
+  }
+
+  /** Editing / Suggesting (Google) or Track Changes (Word): suggesting needs an author name first. */
+  private async setSuggesting(on: boolean): Promise<void> {
+    if (on && !(await this.author())) on = false;
+    this.suggesting = on;
+    if (this.modeSelect) this.modeSelect.value = on ? "suggesting" : "editing";
+    this.contentEl.toggleClass("is-suggesting", on);
+    if (on) this.setReview(true);
+    this.ribbon?.sync();
+    this.statusBar?.update();
+    this.editor?.focus();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Word-style interface (beta)
+  // ---------------------------------------------------------------------------
+
+  /** Desktop Word's ribbon, Quick Access Toolbar and status bar over the same commands as the Google layout. */
+  private buildRibbon(host: HTMLElement): void {
+    const cmds = (this.cmds ??= this.wordCommands());
+    const m = schema.marks;
+    const run = (command: Command) => {
+      if (!this.editor) return;
+      command(this.editor.state, this.editor.dispatch);
+      this.editor.focus();
+    };
+    const tabs = wordTabs({
+      fonts: FONTS,
+      sizes: FONT_SIZES,
+      styles: STYLES,
+      font: { value: () => this.fmt.font, set: (font) => run(cmd.setMark(m.font, { font })) },
+      size: { value: () => this.fmt.size, set: (v) => run(cmd.setMark(m.size, { pt: Number(v) })) },
+      style: {
+        value: () => this.fmt.style,
+        set: (v) => run(cmd.setStyle(v === "Normal" ? null : v)),
+        preview: (id) => {
+          const st = this.ctx?.styles;
+          const flags = st?.runFlags(id);
+          return { font: st?.fontFor(id), size: st?.sizeFor(id), bold: flags?.b, italic: flags?.i, color: st?.colorFor(id) };
+        },
+      },
+      highlight: (color) => run(cmd.setMark(m.highlight, { color })),
+      color: (color) => run(cmd.setMark(m.color, { color })),
+      shading: (color) => run(cmd.setCellBackground((this.lastShade = color))),
+      inTable: () => this.selectedImage() === null && this.inTable(),
+      onPicture: () => this.selectedImage() !== null,
+      onDrawing: () => this.selectedDrawing() !== null,
+    });
+    const rb = (this.ribbon = new Ribbon(host, cmds, tabs, {
+      readOnly: this.settings.readOnly,
+      app: this.app,
+      key: "doc-works-rb-docx",
+      qat: WORD_QAT,
+      fileMenu: (mn) => {
+        const ids = WORD_FILE_MENU.filter((id) => !this.settings.readOnly || cmds[id].view);
+        for (const id of ids) menuItem(mn, `${cmds[id].label}…`.replace(/……$/, "…"), () => cmds[id].run?.(), { icon: cmds[id].icon });
+        // Obsidian's own file items (Rename, Delete, Move…), as the Google layout's File menu shows them.
+        mn.addSeparator();
+        addFileItems(this, mn, "more-options", this.settings.readOnly, null);
+      },
+    }));
+    if (versions) rb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
+    rb.side("notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file));
+    const linkedBtn = rb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
+    if (!this.settings.readOnly) rb.side("messages-square", "Comments", () => this.toggleReview());
+
+    const doc = () => this.editor?.state;
+    const bar = (this.statusBar = new StatusBar(this.contentEl, [
+      { id: "page", label: "Page Number", side: "left", render: (el) => {
+        const state = doc();
+        // Web Layout has no pages (Word leaves the count out there too).
+        if (!state || !this.pageView) return;
+        const total = pageAt(state, state.doc.content.size) ?? 1;
+        el.createEl("button", { text: `Page ${Math.min(pageAt(state, state.selection.from) ?? 1, total)} of ${total}`, attr: { "aria-label": "Navigation pane" } }).addEventListener("click", () => this.toggleOutline());
+      } },
+      { id: "words", label: "Word Count", side: "left", render: (el) => {
+        el.createEl("button", { text: this.wordCountText() ?? "", attr: { "aria-label": "Word count" } }).addEventListener("click", () => this.wordCountDialog());
+      } },
+      { id: "track", label: "Track Changes", side: "left", render: (el) => {
+        if (this.suggesting) el.setText("Track Changes: On");
+      } },
+      { id: "views", label: "View Shortcuts", side: "right", render: (el) => {
+        for (const id of ["ViewPrintLayoutView", "ViewWebLayoutView"] as const) {
+          const c = cmds[id];
+          const b = el.createEl("button", { cls: "clickable-icon", attr: { "aria-label": c.label } });
+          setIcon(b, c.icon);
+          b.toggleClass("is-active", !!c.active?.());
+          b.addEventListener("click", () => c.run?.());
+        }
+      } },
+    ], this.app, "doc-works-sb-docx"));
+    bar.zoom({ get: () => this.zoom, set: (z) => this.setZoom(z), levels: ZOOMS });
+    const status = new SaveStatus(bar.save);
+    if (this.settings.readOnly) bar.save.hide();
+    else this.autosave.status = status;
+    const showRuler = this.app.loadLocalStorage("doc-works-ruler") !== "off";
+    this.rulerViewport?.toggle(showRuler && !this.settings.readOnly);
+    // Font, size and style boxes show the cursor's formatting from the start.
+    this.updateFormatControls();
+  }
+
+  /** Every command the Word interface names (word-ui.ts), running the same code as the Google layout's controls. */
+  private wordCommands(): Commands {
+    const m = schema.marks;
+    const run = (command: Command) => () => {
+      if (!this.editor) return;
+      command(this.editor.state, this.editor.dispatch);
+      this.editor.focus();
+    };
+    const table = (command: Command) => () => {
+      if (!this.editor) return;
+      if (!command(this.editor.state, this.editor.dispatch)) new Notice("Click inside a table first.");
+      this.editor.focus();
+    };
+    const edit = (command: "cut" | "copy" | "paste" | "pasteAndMatchStyle") => () => {
+      this.editor?.focus();
+      if (!runEditCommand(command)) new Notice("Paste with your keyboard.");
+    };
+    const marked = (type: (typeof m)[keyof typeof m]) => () => {
+      const state = this.editor?.state;
+      if (!state) return false;
+      const { from, to, empty, $from } = state.selection;
+      return empty ? !!type.isInSet(state.storedMarks ?? $from.marks()) : state.doc.rangeHasMark(from, to, type);
+    };
+    const para = () => {
+      const p = this.editor?.state.selection.$from.parent;
+      return p?.type === schema.nodes.paragraph ? attrsOf<ParagraphAttrs>(p) : null;
+    };
+    const image = (fn: (pos: number) => void) => () => {
+      const pos = this.selectedImage();
+      if (pos !== null) fn(pos);
+    };
+    const onImage = () => this.selectedImage() !== null;
+    const list = (kind: "bullet" | "ordered") => () => this.ctx && run(cmd.toggleList(this.ctx, kind))();
+    const menu = (items: [string, () => void][]) => (mn: Menu) => {
+      for (const [title, fn] of items) menuItem(mn, title, fn);
+    };
+    const c: Record<WordCommandId, Commands[string]> = {
+      FileSave: { label: "Save", icon: "save", run: () => void this.autosave.flush() },
+      Undo: { label: "Undo", icon: "undo-2", run: run(undo) },
+      Redo: { label: "Redo", icon: "redo-2", run: run(redo) },
+      FilePrint: { label: "Print", icon: "printer", run: () => void this.exportAs("pdf"), view: true },
+      ExportFile: { label: "Export", icon: "file-output", run: () => void this.exportAs(), view: true },
+      Paste: { label: "Paste", icon: "clipboard-paste", run: edit("paste"), menu: menu([["Keep Text Only", edit("pasteAndMatchStyle")]]) },
+      PasteTextOnly: { label: "Keep Text Only", icon: "clipboard-type", run: edit("pasteAndMatchStyle") },
+      Cut: { label: "Cut", icon: "scissors", run: edit("cut") },
+      Copy: { label: "Copy", icon: "copy", run: edit("copy"), view: true },
+      FormatPainter: { label: "Format Painter", icon: "paintbrush", run: () => this.startPainting(false), dblclick: () => this.startPainting(true), active: () => !!this.painter, menu: menu([["Keep Painting", () => this.startPainting(true)]]) },
+      Font: { label: "Font", icon: "type" },
+      FontSize: { label: "Font Size", icon: "a-large-small" },
+      FontSizeIncreaseWord: { label: "Increase Font Size", icon: "a-arrow-up", run: () => this.growFont(1) },
+      FontSizeDecreaseWord: { label: "Decrease Font Size", icon: "a-arrow-down", run: () => this.growFont(-1) },
+      ClearFormatting: { label: "Clear All Formatting", icon: "remove-formatting", run: run(cmd.clearFormatting) },
+      Bold: { label: "Bold", icon: "bold", run: run(toggleMark(m.bold)), active: marked(m.bold) },
+      Italic: { label: "Italic", icon: "italic", run: run(toggleMark(m.italic)), active: marked(m.italic) },
+      Underline: { label: "Underline", icon: "underline", run: run(toggleMark(m.underline)), active: marked(m.underline) },
+      Strikethrough: { label: "Strikethrough", icon: "strikethrough", run: run(toggleMark(m.strike)), active: marked(m.strike) },
+      Subscript: { label: "Subscript", icon: "subscript", run: run(toggleMark(m.subscript)), active: marked(m.subscript) },
+      Superscript: { label: "Superscript", icon: "superscript", run: run(toggleMark(m.superscript)), active: marked(m.superscript) },
+      InlineCode: { label: "Code", icon: "code", run: run(cmd.toggleCode) },
+      TextHighlightColorPicker: { label: "Text Highlight Color", icon: "highlighter", menu: menu([["No Color", run(cmd.setMark(m.highlight, null))]]) },
+      FontColorPicker: { label: "Font Color", icon: "baseline", menu: menu([["Automatic", run(cmd.setMark(m.color, null))]]) },
+      BulletsGalleryWord: { label: "Bullets", icon: "list", run: list("bullet") },
+      NumberingGalleryWord: { label: "Numbering", icon: "list-ordered", run: list("ordered") },
+      IndentDecreaseWord: { label: "Decrease Indent", icon: "outdent", run: run(cmd.shiftLevel(-1)) },
+      IndentIncreaseWord: { label: "Increase Indent", icon: "indent", run: run(cmd.shiftLevel(1)) },
+      AlignLeft: { label: "Align Left", icon: "align-left", run: run(cmd.setAlign("left")), active: () => (para()?.align ?? "left") === "left" },
+      AlignCenter: { label: "Center", icon: "align-center", run: run(cmd.setAlign("center")), active: () => para()?.align === "center" },
+      AlignRight: { label: "Align Right", icon: "align-right", run: run(cmd.setAlign("right")), active: () => para()?.align === "right" },
+      AlignJustify: { label: "Justify", icon: "align-justify", run: run(cmd.setAlign("justify")), active: () => para()?.align === "justify" },
+      LineSpacingGallery: { label: "Line and Paragraph Spacing", icon: "unfold-vertical", menu: (mn) => {
+        for (const [label, v] of LINE_SPACINGS) menuItem(mn, label, run(cmd.setLineSpacing(v)), { checked: (para()?.lineSpacing ?? "1") === v });
+        mn.addSeparator();
+        menuItem(mn, "Line Spacing Options…", () => this.paragraphDialog());
+      } },
+      LineSpacingSingle: { label: "Single Line Spacing", icon: "unfold-vertical", run: run(cmd.setLineSpacing("1")) },
+      LineSpacingDouble: { label: "Double Line Spacing", icon: "unfold-vertical", run: run(cmd.setLineSpacing("2")) },
+      LineSpacingOneHalf: { label: "1.5 Line Spacing", icon: "unfold-vertical", run: run(cmd.setLineSpacing("1.5")) },
+      ParagraphDialog: { label: "Paragraph Settings", icon: "pilcrow", run: () => this.paragraphDialog() },
+      QuickStylesGallery: { label: "Styles", icon: "heading", menu: (mn) => menuItem(mn, `Update ${STYLES.find(([, id]) => id === this.fmt.style)?.[0] ?? this.fmt.style} to Match Selection`, () => this.updateStyle()) },
+      UpdateStyle: { label: "Update Style to Match Selection", icon: "refresh-cw", run: () => this.updateStyle() },
+      StyleHeading1: { label: "Heading 1", icon: "heading-1", run: run(cmd.setStyle("Heading1")) },
+      StyleHeading2: { label: "Heading 2", icon: "heading-2", run: run(cmd.setStyle("Heading2")) },
+      StyleHeading3: { label: "Heading 3", icon: "heading-3", run: run(cmd.setStyle("Heading3")) },
+      StyleNormal: { label: "Normal", icon: "pilcrow", run: run(cmd.setStyle(null)) },
+      FindDialog: { label: "Find", icon: "search", run: () => this.openFind(), view: true },
+      ReplaceDialog: { label: "Replace", icon: "replace", run: () => this.openFind() },
+      SelectMenu: { label: "Select", icon: "text-select", view: true, menu: (mn) => {
+        menuItem(mn, "Select All", run(selectAll));
+        if (!this.settings.readOnly) menuItem(mn, "Delete", run(deleteSelection));
+      } },
+      SelectAll: { label: "Select All", icon: "text-select", run: run(selectAll), view: true },
+      Delete: { label: "Delete", icon: "trash-2", run: run(deleteSelection) },
+      PageBreakInsertWord: { label: "Page Break", icon: "separator-horizontal", run: run(cmd.insertPageBreak) },
+      ColumnBreakInsert: { label: "Column Break", icon: "columns-2", run: run(cmd.insertColumnBreak) },
+      SectionBreakNextPage: { label: "Next Page", icon: "file-plus", run: run(cmd.insertSectionBreak("nextPage")) },
+      SectionBreakContinuous: { label: "Continuous", icon: "between-horizontal-start", run: run(cmd.insertSectionBreak("continuous")) },
+      TableInsertGallery: { label: "Table", icon: "table", menu: (mn) => this.fillTableMenu(mn) },
+      PictureInsertFromFile: { label: "Pictures", icon: "image", run: () => pickImage((f) => void this.insertImage(f)) },
+      ShapesInsertGallery: { label: "Shapes", icon: "shapes", run: () => this.drawingDialog(null) },
+      ChartInsert: { label: "Chart", icon: "chart-column", menu: menu(NEW_CHART_TYPES.map(([label, kind]) => [label, () => this.editChart(null, kind)])) },
+      HyperlinkInsert: { label: "Link", icon: "link", run: () => void this.editLink() },
+      ReviewNewComment: { label: "New Comment", icon: "message-square-plus", run: () => void this.addComment() },
+      HeaderInsertGallery: { label: "Header", icon: "panel-top", run: () => this.headerFooterDialog() },
+      FooterInsertGallery: { label: "Footer", icon: "panel-bottom", run: () => this.headerFooterDialog() },
+      TextBoxInsert: { label: "Text Box", icon: "square-dashed-text", run: () => this.drawingDialog(null) },
+      HorizontalLineInsert: { label: "Horizontal Line", icon: "minus", run: run(cmd.insertRule) },
+      EquationInsert: { label: "Equation", icon: "sigma", run: () => this.equationDialog(null) },
+      SymbolInsert: { label: "Symbol", icon: "omega", run: () => specialCharacters(this.app, (ch) => this.editor?.dispatch(this.editor.state.tr.insertText(ch).scrollIntoView())) },
+      WatermarkGallery: { label: "Watermark", icon: "droplet", run: () => this.watermarkDialog() },
+      TableColumnsGallery: { label: "Columns", icon: "columns-2", run: () => this.columnsDialog() },
+      BreaksGallery: { label: "Breaks", icon: "separator-horizontal", menu: menu([
+        ["Page", run(cmd.insertPageBreak)], ["Column", run(cmd.insertColumnBreak)],
+        ["Next Page", run(cmd.insertSectionBreak("nextPage"))], ["Continuous", run(cmd.insertSectionBreak("continuous"))],
+      ]) },
+      TextWrapGallery: { label: "Wrap Text", icon: "wrap-text", enabled: onImage, menu: (mn) => {
+        const pos = this.selectedImage();
+        const now = pos === null ? null : attrsOf<ImageAttrs>(this.editor!.state.doc.nodeAt(pos)!).wrap;
+        for (const [w, label] of WRAPS) menuItem(mn, label, image((p) => this.setWrap(p, w)), { checked: now === w });
+      } },
+      TableOfContentsInsert: { label: "Table of Contents", icon: "book-open-text", run: () => {
+        this.docx?.prepareToc();
+        run(cmd.insertToc)();
+      } },
+      TableOfContentsUpdate: { label: "Update Table", icon: "refresh-cw", run: () => {
+        if (this.editor && !cmd.updateToc(this.editor.state, this.editor.dispatch)) new Notice("This document has no table of contents.");
+      } },
+      FootnoteInsert: { label: "Insert Footnote", icon: "superscript", run: () => void this.addFootnote() },
+      CreateNoteFromSelection: { label: "Create Note from Selection", icon: "file-plus", run: () => this.extractNote(), enabled: () => !(this.editor?.state.selection.empty ?? true), view: true },
+      CopyLinkToHeading: { label: "Copy Link to Heading", icon: "link", run: () => this.copyHeadingLink(), view: true },
+      CompanionNote: { label: "Companion Note", icon: "notebook-pen", run: () => void openCompanionNote(this.app, this.file), view: true },
+      LinkedFrom: { label: "Linked From", icon: "links-coming-in", run: () => this.linked.toggle(), view: true },
+      WordCount: { label: "Word Count", icon: "whole-word", run: () => this.wordCountDialog(), view: true },
+      ReviewDeleteComment: { label: "Delete Comment", icon: "message-square-x", run: () => this.deleteCommentAtCursor() },
+      ShowComments: { label: "Show Comments", icon: "messages-square", run: () => this.toggleReview(), active: () => this.reviewOpen },
+      ReviewTrackChanges: { label: "Track Changes", icon: "file-pen", run: () => void this.setSuggesting(!this.suggesting), active: () => this.suggesting },
+      ReviewingPane: { label: "Reviewing Pane", icon: "panel-right", run: () => this.toggleReview(), active: () => this.reviewOpen },
+      ReviewAcceptAll: { label: "Accept All", icon: "check-check", run: () => this.decideAll(true) },
+      ReviewRejectAll: { label: "Reject All", icon: "x", run: () => this.decideAll(false) },
+      ReviewCompareMenu: { label: "Compare", icon: "git-compare", view: true, menu: menu([["Version History…", () => void versionHistoryDialog(this.app, this, this.settings.readOnly)]]) },
+      VersionHistory: { label: "Version History", icon: "history", run: () => void versionHistoryDialog(this.app, this, this.settings.readOnly), view: true },
+      ViewPrintLayoutView: { label: "Print Layout", icon: "file-text", run: () => this.pageView || this.togglePageView(), active: () => this.pageView, view: true },
+      ViewWebLayoutView: { label: "Web Layout", icon: "globe", run: () => this.pageView && this.togglePageView(), active: () => !this.pageView, view: true },
+      DarkModeOn: { label: "Dark Mode", icon: "moon", run: () => this.setPaperTheme(this.paperTheme === "dark" ? "light" : "dark"), active: () => this.paperTheme === "dark", view: true },
+      ViewRulerWord: { label: "Ruler", icon: "ruler", run: () => this.toggleRuler(), active: () => this.rulerViewport?.style.display !== "none" },
+      NavigationPaneShowHide: { label: "Navigation Pane", icon: "list-tree", run: () => this.toggleOutline(), active: () => this.outlineOpen, view: true },
+      ZoomDialog: { label: "Zoom", icon: "zoom-in", view: true, menu: (mn) => {
+        for (const z of ZOOMS) menuItem(mn, zoomLabel(z), () => this.setZoom(z), { checked: this.zoom === z });
+      } },
+      ZoomCurrent100: { label: "100%", icon: "scan", run: () => this.setZoom("1"), view: true },
+      ZoomPageWidth: { label: "Page Width", icon: "move-horizontal", run: () => this.setZoom("fit"), view: true },
+      KeyboardShortcuts: { label: "Keyboard Shortcuts", icon: "keyboard", run: () => this.shortcutsHelp(), view: true },
+      TableShading: { label: "Shading", icon: "paint-bucket", menu: (mn) => this.fillShadingMenu(mn) },
+      TableBorders: { label: "Borders", icon: "square-dashed", menu: menu([
+        ["All Borders", table(cmd.setTableBorders("all"))], ["Outside Borders", table(cmd.setTableBorders("outer"))], ["No Border", table(cmd.setTableBorders("none"))],
+      ]) },
+      TableDeleteMenu: { label: "Delete", icon: "trash-2", menu: menu([
+        ["Delete Rows", table(cmd.deleteRow)], ["Delete Columns", table(cmd.deleteColumn)], ["Delete Table", table(cmd.deleteTable)],
+      ]) },
+      TableDeleteRows: { label: "Delete Rows", icon: "trash-2", run: table(cmd.deleteRow) },
+      TableDeleteColumns: { label: "Delete Columns", icon: "trash-2", run: table(cmd.deleteColumn) },
+      TableDelete: { label: "Delete Table", icon: "trash-2", run: table(cmd.deleteTable) },
+      TableRowsInsertAboveWord: { label: "Insert Above", icon: "between-horizontal-end", run: table(cmd.addRow(false)) },
+      TableRowsInsertBelowWord: { label: "Insert Below", icon: "between-horizontal-start", run: table(cmd.addRow(true)) },
+      TableColumnsInsertLeft: { label: "Insert Left", icon: "between-vertical-end", run: table(cmd.addColumn(false)) },
+      TableColumnsInsertRight: { label: "Insert Right", icon: "between-vertical-start", run: table(cmd.addColumn(true)) },
+      MergeCellsRight: { label: "Merge Right", icon: "table-cells-merge", run: table(cmd.mergeRight) },
+      MergeCellsDown: { label: "Merge Down", icon: "table-cells-merge", run: table(cmd.mergeDown) },
+      SplitCells: { label: "Split Cells", icon: "table-cells-split", run: table(cmd.splitCell) },
+      TableColumnWidth: { label: "Width…", icon: "move-horizontal", run: () => {
+        const editor = this.editor;
+        if (!editor) return;
+        void promptText(this.app, "Column width (inches)", "1.5").then((v) => {
+          const inches = Number(v);
+          if (v === null || !(inches > 0)) return;
+          if (!cmd.setColumnWidth(inches * 1440)(editor.state, editor.dispatch)) new Notice("Click inside a table first.");
+          editor.focus();
+        });
+      } },
+      TableAllowRowBreak: { label: "Allow Row to Break Across Pages", icon: "split-square-vertical", run: () => {
+        const state = this.editor?.state;
+        if (state) table(cmd.setRowsCanBreak(!cmd.rowsCanBreak(state)))();
+      }, active: () => !!this.editor && cmd.rowsCanBreak(this.editor.state) },
+      TableRepeatHeaderRows: { label: "Repeat Header Rows", icon: "rows-3", run: table(cmd.toggleHeaderRow) },
+      PictureChange: { label: "Change Picture", icon: "image-plus", run: image((pos) => pickImage((f) => void this.replaceImage(pos, f))), enabled: onImage },
+      AltText: { label: "Alt Text", icon: "text", run: image((pos) => this.altText(pos)), enabled: onImage },
+      PictureCrop: { label: "Crop", icon: "crop", run: image((pos) => this.cropImage(pos)), enabled: onImage },
+      EditShape: { label: "Edit Shape", icon: "shapes", run: () => {
+        const pos = this.selectedDrawing();
+        if (pos !== null) this.drawingDialog(pos);
+      } },
+      CopyFormat: { label: "Copy Formatting", icon: "paintbrush", run: () => {
+        if (this.editor) this.copiedFormat = cmd.copyFormat(this.editor.state);
+      } },
+      PasteFormat: { label: "Paste Formatting", icon: "paintbrush", enabled: () => !!this.copiedFormat, run: () => {
+        if (this.editor && this.copiedFormat) run(cmd.paintFormat(this.copiedFormat))();
+      } },
+    };
+    for (const [key, id] of WORD_SHORTCUTS) c[id].shortcut ??= keyName(key);
+    return c;
+  }
+
+  /** Help › Keyboard shortcuts: Word's keys with the Word interface, Google Docs' otherwise. */
+  private shortcutsHelp(): void {
+    const c = this.cmds;
+    shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...(this.settings.officeDocx && c ? wordShortcutSections((id) => c[id].label) : DOCS_SHORTCUTS)]);
+  }
+
+  /** Word's Increase / Decrease Font Size: the next size in the list from the size at the cursor. */
+  private growFont(dir: 1 | -1): void {
+    const current = Number(this.fmt.size ?? 11);
+    const next = dir > 0 ? FONT_SIZES.find((s) => s > current) ?? FONT_SIZES[FONT_SIZES.length - 1] : [...FONT_SIZES].reverse().find((s) => s < current) ?? FONT_SIZES[0];
+    if (!this.editor) return;
+    cmd.setMark(schema.marks.size, { pt: next })(this.editor.state, this.editor.dispatch);
+    this.editor.focus();
+  }
+
+  /** Review › Delete: the comment around the cursor. */
+  private deleteCommentAtCursor(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const { from } = editor.state.selection;
+    const id = [...commentRanges(editor.state.doc)].find(([, r]) => r.from <= from && from <= r.to)?.[0];
+    const del = id ? this.commentActions(id).find(([label]) => label === "Delete") : undefined;
+    if (del) del[1]();
+    else new Notice("Put the cursor in a comment's text first.");
+  }
+
+  /** Accept or reject every tracked change, in the body and in every header and footer. */
+  private decideAll(accept: boolean): void {
+    const docx = this.docx;
+    if (!docx) return;
+    const parts = HF_PARTS.flatMap((part) => {
+      const root = docx.headerFooter(...splitPart(part));
+      return root ? [root] : [];
+    });
+    for (const root of parts) (accept ? acceptRevisions : rejectRevisions)(root);
+    if (parts.length) this.readAllHF();
+    this.rewriteBody((b) => (accept ? acceptRevisions(b) : rejectRevisions(b)));
+  }
+
+  /** The selected Word drawing (shapes, text boxes) the drawing editor can edit, else null. */
+  private selectedDrawing(): number | null {
+    const sel = this.editor?.state.selection;
+    if (!(sel instanceof NodeSelection) || sel.node.type !== schema.nodes.opaque) return null;
+    return readDrawing(sel.node.attrs.xml as string)?.editable ? sel.from : null;
   }
 
   /** The selected picture's position (a node selection on an image), else null. */
@@ -927,7 +1350,7 @@ export class DocxView extends FileView {
 
   private updateFormatControls(): void {
     const editor = this.editor;
-    if (!editor || !this.ctx || !this.fontSelect || !this.sizeSelect) return;
+    if (!editor || !this.ctx) return;
     const { $from } = editor.state.selection;
     const marks = editor.state.storedMarks ?? $from.marks();
     const m = schema.marks;
@@ -936,17 +1359,19 @@ export class DocxView extends FileView {
     const paraStyle = ($from.parent.attrs.style as string | null) ?? null;
     const font = (marks.find((x) => x.type === m.font)?.attrs.font as string | undefined) ?? this.ctx.styles.fontFor(paraStyle, tableStyle);
     const size = (marks.find((x) => x.type === m.size)?.attrs.pt as number | undefined) ?? this.ctx.styles.sizeFor(paraStyle, tableStyle);
+    this.fmt = { font, size: size === null ? null : String(size), style: paraStyle ?? "Normal" };
     if (this.styleSelect) {
       showValue(this.styleSelect, paraStyle ?? "Normal");
       const update = Array.from(this.styleSelect.options).find((o) => o.value === "update");
       const name = STYLES.find(([, id]) => id === (paraStyle ?? "Normal"))?.[0] ?? paraStyle ?? "Normal";
       if (update) update.text = `Update '${name}' to match`;
     }
-    showValue(this.fontSelect, font);
-    showValue(this.sizeSelect, size === null ? null : String(size));
+    if (this.fontSelect) showValue(this.fontSelect, font);
+    if (this.sizeSelect) showValue(this.sizeSelect, size === null ? null : String(size));
     const image = this.selectedImage();
     if (image !== null && this.wrapSelect) showValue(this.wrapSelect, attrsOf<ImageAttrs>(editor.state.doc.nodeAt(image)!).wrap);
     this.toolbar?.sync();
+    this.ribbon?.sync();
   }
 
   /** The ruler reads layout: once per frame, after typing, not on every keystroke (which forced a layout each time). */
@@ -989,17 +1414,24 @@ export class DocxView extends FileView {
       if (this.wordsEl) this.wordsEl.hidden = !box.checked;
       this.app.saveLocalStorage(WORD_COUNT_KEY, box.checked ? "on" : "off");
       this.toolbar?.fit();
+      this.statusBar?.update();
       modal.close();
     });
     modal.open();
   }
 
   private updateWordCount(): void {
-    if (!this.editor || !this.wordsEl) return;
+    this.statusBar?.update();
+    if (this.wordsEl) this.wordsEl.setText(this.wordCountText() ?? "");
+  }
+
+  /** "120 words", or "5 of 120 words" for a selection. */
+  private wordCountText(): string | null {
+    if (!this.editor) return null;
     const { doc, selection } = this.editor.state;
     const all = countWords(doc).words;
     const label = (n: number) => `${n.toLocaleString()} ${n === 1 ? "word" : "words"}`;
-    this.wordsEl.setText(selection.empty ? label(all) : `${countWords(doc, selection.from, selection.to).words.toLocaleString()} of ${label(all)}`);
+    return selection.empty ? label(all) : `${countWords(doc, selection.from, selection.to).words.toLocaleString()} of ${label(all)}`;
   }
 
   private async editLink(): Promise<void> {
@@ -1177,6 +1609,7 @@ export class DocxView extends FileView {
     for (let d = $pos.depth; d > 0; d--) if ($pos.node(d).type === schema.nodes.table_cell) inTable = true;
     const link = [...$pos.marks(), ...($pos.nodeAfter?.marks ?? [])].find((m) => m.type === schema.marks.link)?.attrs.href as string | undefined;
     const commentId = target.closest<HTMLElement>("[data-comment]")?.dataset.comment ?? null;
+    if (this.cmds) return this.wordContextMenu(e, { pos, imagePos, inTable, link, commentId });
     if (imagePos === null && !inTable && !link && !commentId && state.selection.empty) return;
     e.preventDefault();
 
@@ -1247,6 +1680,119 @@ export class DocxView extends FileView {
       item("Delete picture", () => editor.dispatch(editor.state.tr.delete(imagePos, imagePos + 1)));
     }
     menu.showAtMouseEvent(e);
+  }
+
+  /** Word's right-click: its menu items (those Doc Works has) under Word's mini formatting toolbar. */
+  private wordContextMenu(e: MouseEvent, at: { pos: number; imagePos: number | null; inTable: boolean; link: string | undefined; commentId: string | null }): void {
+    const editor = this.editor, c = this.cmds;
+    if (!editor || !c) return;
+    e.preventDefault();
+    const state = editor.state;
+    if (at.imagePos !== null) editor.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, at.imagePos)));
+    else if (!state.selection.ranges.some((r) => r.$from.pos <= at.pos && at.pos <= r.$to.pos)) editor.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve(at.pos))));
+    const run = (command: Command) => () => {
+      command(editor.state, editor.dispatch);
+      editor.focus();
+    };
+    const item = (id: string, label = c[id].label): CtxEntry => ({ label, icon: c[id].icon, run: c[id].run, disabled: c[id].enabled ? !c[id].enabled() : false });
+    const entries: CtxEntry[] = [];
+    const word = at.imagePos === null ? wordAt(editor.state, editor.state.selection.empty ? editor.state.selection.head : at.pos) : null;
+    if (word && this.speller?.misspelled(word.text)) {
+      editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, word.from, word.to)));
+      const fixes = this.speller.suggestions(word.text).slice(0, 5);
+      for (const fix of fixes) entries.push({ label: fix, run: () => {
+        editor.dispatch(editor.state.tr.insertText(fix, word.from, word.to));
+        editor.focus();
+      } });
+      if (!fixes.length) entries.push({ label: "No Suggestions", disabled: true });
+      entries.push({ label: "Add to Dictionary", run: () => this.speller?.addToDictionary(word.text) }, "---");
+    }
+    if (at.imagePos !== null) {
+      const pos = at.imagePos;
+      const wrap = attrsOf<ImageAttrs>(editor.state.doc.nodeAt(pos)!).wrap;
+      entries.push(item("Cut"), item("Copy"), item("PictureChange", "Change Picture…"),
+        { label: "Wrap Text", icon: "wrap-text", sub: WRAPS.map(([w, label]) => ({ label, checked: wrap === w, run: () => this.setWrap(pos, w) })) },
+        item("PictureCrop"), item("AltText", "Edit Alt Text…"),
+        { label: "Delete", icon: "trash-2", run: () => editor.dispatch(editor.state.tr.delete(pos, pos + 1)) });
+      this.ctxMenu = showContextMenu({ x: e.clientX, y: e.clientY, doc: (e.target as Node).ownerDocument ?? undefined }, entries);
+      return;
+    }
+    entries.push(item("Cut"), item("Copy"), item("Paste"), item("PasteTextOnly"), "---");
+    if (at.link) {
+      const href = at.link;
+      entries.push({ label: "Open Hyperlink", icon: "external-link", run: () => window.open(href) }, { label: "Edit Hyperlink…", icon: "link", run: () => void this.editLink() },
+        { label: "Remove Hyperlink", icon: "unlink", run: run(cmd.setLink(null)) });
+    } else entries.push(item("HyperlinkInsert", "Link…"));
+    entries.push(item("ReviewNewComment"));
+    if (at.commentId) for (const [label, fn] of this.commentActions(at.commentId)) entries.push({ label: label === "Delete" ? "Delete Comment" : label === "Reply" ? "Reply to Comment…" : `${label} Comment`, run: fn });
+    if (at.inTable) {
+      entries.push("---",
+        { label: "Insert", icon: "between-horizontal-start", sub: [
+          { label: "Insert Rows Above", run: c.TableRowsInsertAboveWord.run }, { label: "Insert Rows Below", run: c.TableRowsInsertBelowWord.run },
+          { label: "Insert Columns to the Left", run: c.TableColumnsInsertLeft.run }, { label: "Insert Columns to the Right", run: c.TableColumnsInsertRight.run },
+        ] },
+        { label: "Delete Cells", icon: "trash-2", sub: [{ label: "Delete Entire Row", run: c.TableDeleteRows.run }, { label: "Delete Entire Column", run: c.TableDeleteColumns.run }, { label: "Delete Table", run: c.TableDelete.run }] },
+        { label: "Merge Cells", icon: "table-cells-merge", sub: [{ label: "Merge Right", run: c.MergeCellsRight.run }, { label: "Merge Down", run: c.MergeCellsDown.run }] },
+        item("SplitCells"),
+        { label: "Cell Shading", icon: "paint-bucket", sub: [
+          { label: "No Color", run: run(cmd.setCellBackground(null)) },
+          ...SHADES.map(([name, color]) => ({ label: name, run: run(cmd.setCellBackground(color)) })),
+          { label: "More Colors…", run: () => pickColor(this.lastShade, (hex) => run(cmd.setCellBackground((this.lastShade = hex))) ()) },
+        ] });
+    }
+    entries.push("---", item("ParagraphDialog", "Paragraph…"), item("CreateNoteFromSelection"));
+    this.ctxMenu = showContextMenu({ x: e.clientX, y: e.clientY, doc: (e.target as Node).ownerDocument ?? undefined }, entries, { mini: (el) => this.miniToolbar(el) });
+  }
+
+  /** Word's mini toolbar: the everyday formatting buttons above the right-click menu. */
+  private miniToolbar(el: HTMLElement): void {
+    const c = this.cmds;
+    if (!c) return;
+    const states: (() => void)[] = [];
+    const refresh = () => states.forEach((f) => f());
+    const button = (id: string, onClick?: (b: HTMLButtonElement) => void) => {
+      const cmdOf = c[id];
+      const b = el.createEl("button", { cls: "dw-rb-btn is-icon", attr: { "aria-label": cmdOf.shortcut ? `${cmdOf.label} (${cmdOf.shortcut})` : cmdOf.label } });
+      setIcon(b.createSpan({ cls: "dw-rb-icon" }), cmdOf.icon);
+      b.addEventListener("click", () => {
+        if (onClick) onClick(b);
+        else cmdOf.run?.();
+        refresh();
+      });
+      if (cmdOf.active) states.push(() => b.toggleClass("is-active", cmdOf.active!()));
+      return b;
+    };
+    const pick = (b: HTMLElement, options: [string, string][], value: string | null, set: (v: string) => void) => {
+      const menu = new Menu();
+      for (const [label, v] of options) menu.addItem((i) => i.setTitle(label).setChecked(v === value).onClick(() => set(v)));
+      const r = b.getBoundingClientRect();
+      menu.showAtPosition({ x: r.left, y: r.bottom });
+    };
+    const select = (id: string, text: () => string, options: [string, string][], value: () => string | null, set: (v: string) => void) => {
+      const b = el.createEl("button", { cls: "dw-rb-select", attr: { "aria-label": c[id].label } });
+      const label = b.createSpan({ cls: "dw-rb-select-label", text: text() });
+      caret(b);
+      b.addEventListener("click", () => pick(b, options, value(), set));
+      states.push(() => label.setText(text()));
+    };
+    const m = schema.marks;
+    const apply = (command: Command) => {
+      if (this.editor) command(this.editor.state, this.editor.dispatch);
+      refresh();
+    };
+    select("Font", () => this.fmt.font ?? "", FONTS.map((f) => [f, f]), () => this.fmt.font, (font) => apply(cmd.setMark(m.font, { font })));
+    select("FontSize", () => this.fmt.size ?? "", FONT_SIZES.map((s) => [String(s), String(s)]), () => this.fmt.size, (v) => apply(cmd.setMark(m.size, { pt: Number(v) })));
+    button("FontSizeIncreaseWord");
+    button("FontSizeDecreaseWord");
+    button("QuickStylesGallery", (b) => pick(b, STYLES, this.fmt.style, (v) => apply(cmd.setStyle(v === "Normal" ? null : v))));
+    el.createDiv({ cls: "dw-ctx-mini-break" });
+    for (const id of ["Bold", "Italic", "Underline"]) button(id);
+    button("TextHighlightColorPicker", () => apply(cmd.setMark(m.highlight, { color: "#FFFF00" })));
+    button("FontColorPicker", () => pickColor("#FF0000", (color) => apply(cmd.setMark(m.color, { color }))));
+    button("BulletsGalleryWord");
+    button("NumberingGalleryWord");
+    button("ReviewNewComment");
+    refresh();
   }
 
   private setReview(open: boolean): void {
@@ -1919,6 +2465,8 @@ export class DocxView extends FileView {
   private setPageView(on: boolean): void {
     this.pageView = on;
     this.pageViewBtn?.toggleClass("is-active", on);
+    this.statusBar?.update();
+    this.ribbon?.sync();
     this.hostEl?.toggleClass("is-paged", on);
     if (this.editor) {
       refreshSectionWidths(this.editor);

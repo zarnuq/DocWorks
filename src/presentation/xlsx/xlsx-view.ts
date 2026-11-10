@@ -2,7 +2,7 @@ import { insertPivot, Pivot, pivotAt, readPivots, refreshPivot } from "../../dom
 import { formulaSparklines, readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
 import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
-import { App, FileView, FuzzySuggestModal, Menu, Modal, Notice, Scope, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, FuzzySuggestModal, KeymapEventHandler, Menu, Modal, Modifier, Notice, Scope, Setting, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { detectSeparator, removeDuplicates, splitSources, splitText } from "../../domain/xlsx/cleanup";
 import { importCsv, parseCsv, rangeToMarkdown, sheetToCsv } from "../../domain/xlsx/csv";
 import { addName, deleteName, listNames, renameName, setNameRange } from "../../domain/xlsx/names";
@@ -13,7 +13,7 @@ import { Edits } from "../../domain/xlsx/commands";
 import { FormulaSyntaxError } from "../../domain/xlsx/formula";
 import { Rect, cellName, colName, parseCellRef, parseRange, quoteSheet as quoteSheetName, rangeName } from "../../domain/xlsx/references";
 import { linksOf, setLink } from "../../domain/xlsx/links";
-import { adjustDecimals, formatGeneral, parseInput } from "../../domain/xlsx/number-format";
+import { adjustDecimals, formatGeneral, formatValue, parseInput } from "../../domain/xlsx/number-format";
 import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
 import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboard";
 import { SheetSearchMatch, findSheetMatches, replaceCells } from "../../domain/xlsx/find";
@@ -34,10 +34,17 @@ import { insertCheckboxes, toggleCheckboxes } from "../../domain/xlsx/checkbox";
 import { COMMON_SHORTCUTS, registerShortcutsKey, SHEETS_SHORTCUTS, shortcutsDialog } from "../common/shortcuts";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
-import { FONTS, menuItem, PaperTheme, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
+import { FONTS, menuItem, PaperTheme, pickColor, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
 import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
 import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
 import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+import type { Commands } from "../common/commands";
+import { keyName, shortcutRows } from "../common/commands";
+import { caret, type Ribbon } from "../common/ribbon";
+import type { StatusBar } from "../common/status-bar";
+import { buildOfficeUi } from "../common/office-ui";
+import { showContextMenu, type CtxEntry } from "../common/context-menu";
+import { XL_FILE_MENU, XL_QAT, XL_SHORTCUTS, excelTabs, type XlCommandId } from "./excel-ui";
 import { canExportPdf, renderPdf } from "../common/pdf";
 import { ExportFormat, exportDialog, writeExport } from "../common/export-dialog";
 import { Grid, Hit } from "./grid";
@@ -93,6 +100,12 @@ export class XlsxView extends FileView {
   private formulaInput!: HTMLTextAreaElement;
   private tabsEl!: HTMLElement;
   private statusEl!: HTMLElement;
+  /** The Excel-style interface (beta setting), instead of the Google toolbar. */
+  private ribbon: Ribbon | null = null;
+  private statusBar: StatusBar | null = null;
+  private cmds: Commands | null = null;
+  private zoomSelect: HTMLSelectElement | null = null;
+  private wasEditing = false;
   private fontSelect: HTMLSelectElement | null = null;
   private sizeSelect: HTMLSelectElement | null = null;
   private formatSelect: HTMLSelectElement | null = null;
@@ -131,7 +144,7 @@ export class XlsxView extends FileView {
   constructor(leaf: WorkspaceLeaf, private settings: DocWorksSettings = { ...DEFAULT_SETTINGS }) {
     super(leaf);
     // The setting, or (by default) the theme last picked here.
-    this.theme = paperFor(settings, this.app.loadLocalStorage(THEME_KEY) === "light" ? "light" : "dark");
+    this.theme = paperFor(settings, "xlsx", this.app.loadLocalStorage(THEME_KEY) === "light" ? "light" : "dark");
     // Spreadsheet shortcuts win over app hotkeys while the grid has focus; in the editor they're normal text keys.
     this.scope = new Scope(this.app.scope);
     const keys: [("Mod" | "Shift" | "Alt")[], string, () => void][] = [
@@ -141,7 +154,8 @@ export class XlsxView extends FileView {
       [["Mod"], "b", () => this.toggle("bold")],
       [["Mod"], "i", () => this.toggle("italic")],
       [["Mod"], "u", () => this.toggle("underline")],
-      [["Mod", "Shift"], "x", () => this.toggle("strike")],
+      // Google Sheets' strikethrough (Excel's is Ctrl+5).
+      [["Mod", "Shift"], "x", () => this.settings.officeXlsx || this.toggle("strike")],
       [["Mod"], "a", () => this.grid?.select({ row: 0, col: 0 }, { row: 1048575, col: 16383 })],
       [["Mod"], "d", () => this.fillFrom("down")],
       [["Mod"], "r", () => this.fillFrom("right")],
@@ -162,9 +176,9 @@ export class XlsxView extends FileView {
     focusRegions(this.scope, this.contentEl, () => {
       // Leaving the grid commits what is being typed, as Sheets does.
       if (this.grid?.edit) this.grid.commitEdit();
-      return [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.nameBox?.parentElement, this.grid?.input, this.tabsEl, this.findEl];
+      return [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.contentEl.querySelector<HTMLElement>(".dw-rb-tabs"), this.contentEl.querySelector<HTMLElement>(".dw-rb-panel"), this.nameBox?.parentElement, this.grid?.input, this.tabsEl, this.findEl, this.contentEl.querySelector<HTMLElement>(".dw-statusbar")];
     });
-    registerShortcutsKey(this.scope, () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS]));
+    registerShortcutsKey(this.scope, () => this.shortcutsHelp());
     this.scope.register(["Mod"], "f", () => {
       this.openFind();
       return false;
@@ -233,7 +247,9 @@ export class XlsxView extends FileView {
     this.sheetIndex = Number(view?.getAttribute("activeTab") ?? 0) || 0;
     if (this.sheet.ref.state !== "visible") this.sheetIndex = Math.max(0, this.wb.sheets.findIndex((s) => s.ref.state === "visible"));
 
-    this.buildToolbar(this.contentEl.createDiv({ cls: "dw-toolbar xlsx-toolbar" }));
+    this.dropInterface();
+    const top = this.contentEl.createDiv({ cls: this.settings.officeXlsx ? "dw-rb-host" : "dw-toolbar xlsx-toolbar" });
+    if (!this.settings.officeXlsx) this.buildToolbar(top);
     this.buildFormulaBar(this.contentEl.createDiv({ cls: "xlsx-formula-bar" }));
     this.grid = new Grid(this.contentEl.createDiv({ cls: "xlsx-body" }), {
       sheet: () => this.sheet,
@@ -244,6 +260,12 @@ export class XlsxView extends FileView {
       editing: (text) => {
         if (text !== null && document.activeElement !== this.formulaInput) this.formulaInput.value = text;
         if (text === null) this.syncSelection();
+        // Excel's Ready / Edit: redrawn when editing starts or ends, not on every key typed.
+        const editing = text !== null;
+        if (editing !== this.wasEditing) {
+          this.wasEditing = editing;
+          this.statusBar?.update();
+        }
       },
       clear: (r) => this.change(() => this.edits!.clear(this.sheet, r)),
       fill: (src, target) => this.change(() => this.edits!.fill(this.sheet, src, target)),
@@ -278,6 +300,12 @@ export class XlsxView extends FileView {
     this.tabsEl = bottom.createDiv({ cls: "xlsx-tabs" });
     escapeToEditor(this.tabsEl, () => this.grid?.focusGrid());
     this.statusEl = bottom.createDiv({ cls: "xlsx-status" });
+    if (this.settings.officeXlsx) {
+      // Excel's status bar takes over the sum / average / count.
+      this.statusEl.hide();
+      this.buildRibbon(top);
+      this.registerOfficeKeys();
+    }
     const input = this.grid.input;
     input.addEventListener("copy", (e) => this.onCopy(e, false));
     input.addEventListener("cut", (e) => this.onCopy(e, true));
@@ -328,6 +356,7 @@ export class XlsxView extends FileView {
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
+    this.dropInterface();
     if (this.grid?.edit) this.grid.commitEdit();
     await this.autosave.close();
     this.stopFocusReturn?.();
@@ -1210,18 +1239,14 @@ export class XlsxView extends FileView {
       if ((e.target as HTMLElement).closest("button")) e.preventDefault();
     });
     const tb = new Toolbar(bar, this.settings.readOnly);
-    const zoomTo = (z: string) => {
-      zoom.value = z;
-      this.grid?.setZoom(Number(z));
-      this.app.saveLocalStorage(ZOOM_KEY, z);
-    };
+    const zoomTo = (z: string) => this.setZoom(z);
 
     // --- The row: everyday controls, as Google Sheets' toolbar ---
     tb.icon("undo-2", "Undo (Ctrl+Z)", () => this.undo());
     tb.icon("redo-2", "Redo (Ctrl+Y)", () => this.redo());
     tb.pin();
     tb.gap();
-    const zoom = tb.select("Zoom", "Zoom", SHEET_ZOOMS.map((z) => [zoomLabel(z), z]), zoomTo);
+    const zoom = (this.zoomSelect = tb.select("Zoom", "Zoom", SHEET_ZOOMS.map((z) => [zoomLabel(z), z]), zoomTo));
     zoom.value = this.savedZoom();
     tb.keep();
     tb.gap();
@@ -1359,13 +1384,410 @@ export class XlsxView extends FileView {
       menuItem(m, "Paint format", () => this.startPainting(false));
       menuItem(m, "Find and replace", () => this.openFind());
     });
-    menu("Help", (m) => menuItem(m, "Keyboard shortcuts", () => shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...SHEETS_SHORTCUTS])));
+    menu("Help", (m) => menuItem(m, "Keyboard shortcuts", () => this.shortcutsHelp()));
     if (versions) tb.side("history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly));
     tb.side("notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file));
     const linkedBtn = tb.side("links-coming-in", "Linked from", () => this.linked.toggle(linkedBtn));
     if (!this.settings.readOnly) tb.side("messages-square", "Comments", () => this.allCommentsDialog());
 
     this.autosave.status = tb.end().status;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Excel-style interface (beta)
+  // ---------------------------------------------------------------------------
+
+  /** Scope keys of the Excel layout, registered only while it's on (the first handler for a key takes it). */
+  private officeKeys: KeymapEventHandler[] = [];
+  /** The right-click menu this view opened, closed with the file. */
+  private ctxMenu: { close(): void } | null = null;
+
+  private registerOfficeKeys(): void {
+    // Registered with the same action already (bold, italic, underline, comment, note, find).
+    const handled = new Set(["Mod-b", "Mod-i", "Mod-u", "Mod-Alt-m", "Shift-F2", "Mod-f"]);
+    for (const [key, id] of XL_SHORTCUTS) {
+      if (handled.has(key) || this.settings.readOnly) continue;
+      const parts = key.split("-");
+      const name = parts.pop()!;
+      this.officeKeys.push(this.scope!.register(parts as Modifier[], name, () => {
+        // On the grid only, not while typing in a cell, the formula bar or a field.
+        if (!this.grid || document.activeElement !== this.grid.input || this.grid.edit) return undefined;
+        (this.cmds ??= this.xlCommands())[id].run?.();
+        return false;
+      }));
+    }
+  }
+
+  /** Forget the toolbar or ribbon of the file shown before (its elements go with contentEl). */
+  private dropInterface(): void {
+    for (const k of this.officeKeys) this.scope?.unregister(k);
+    this.officeKeys = [];
+    this.ctxMenu?.close();
+    this.ctxMenu = null;
+    this.stats = undefined;
+    this.ribbon?.destroy();
+    this.ribbon = null;
+    this.statusBar = null;
+    this.cmds = null;
+    this.toggles.clear();
+    this.fontSelect = this.sizeSelect = this.formatSelect = this.zoomSelect = null;
+    this.brushBtn = null;
+  }
+
+  private setZoom(z: string): void {
+    if (this.zoomSelect) this.zoomSelect.value = z;
+    this.grid?.setZoom(Number(z));
+    this.app.saveLocalStorage(ZOOM_KEY, z);
+    this.statusBar?.update();
+  }
+
+  /** Help › Keyboard shortcuts: Excel's keys with its interface, Google Sheets' otherwise. */
+  private shortcutsHelp(): void {
+    const c = this.cmds;
+    shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...(this.settings.officeXlsx && c ? [["Excel shortcuts", shortcutRows(XL_SHORTCUTS, (id) => c[id].label)] as [string, [string, string][]]] : SHEETS_SHORTCUTS)]);
+  }
+
+  /** The cell format at the active cell. */
+  private activeFormat() {
+    const g = this.grid;
+    return this.wb.styles.format((g ? this.sheet.at(g.active.row, g.active.col)?.style : 0) ?? 0);
+  }
+
+  /** Numbers in the selection, for the status bar (only cells that exist are read). */
+  /** The selection's numbers, worked out once per selection change (each status item reads them). */
+  private stats: { sum: number; count: number; nums: number; code: string } | null | undefined;
+
+  private selectionStats(): { sum: number; count: number; nums: number; code: string } | null {
+    if (this.stats === undefined) this.stats = this.computeStats();
+    return this.stats;
+  }
+
+  private computeStats(): { sum: number; count: number; nums: number; code: string } | null {
+    const g = this.grid;
+    if (!g) return null;
+    const r = g.selection();
+    if ((r.r2 - r.r1 + 1) * (r.c2 - r.c1 + 1) < 2) return null;
+    const cells = this.sheet.cellsIn(r);
+    const numeric = cells.filter((c) => typeof c.value === "number");
+    const nums = numeric.map((c) => c.value as number);
+    const count = cells.filter((c) => c.value !== null && c.value !== "").length;
+    // Average and Sum use the first number's format, as Excel's status bar does.
+    const code = numeric.length ? this.wb.styles.format(numeric[0].style).numFmt : "General";
+    return count ? { sum: nums.reduce((a, b) => a + b, 0), count, nums: nums.length, code } : null;
+  }
+
+  private buildRibbon(host: HTMLElement): void {
+    const cmds = (this.cmds ??= this.xlCommands());
+    const tabs = excelTabs({
+      fonts: FONTS,
+      sizes: FONT_SIZES,
+      // Excel calls the automatic format General.
+      formats: NUMBER_FORMATS.map(([label, code]) => [code === "General" ? "General" : label, code]),
+      font: { value: () => this.activeFormat().fontName, set: (fontName) => this.format({ fontName }) },
+      size: { value: () => String(this.activeFormat().fontSize), set: (v) => this.format({ fontSize: Number(v) }) },
+      format: { value: () => this.activeFormat().numFmt, set: (numFmt) => this.format({ numFmt }) },
+      fill: (fill) => this.format({ fill }),
+      color: (color) => this.format({ color }),
+      inPivot: () => !!this.grid && !!pivotAt(this.sheet, this.grid.active.row, this.grid.active.col),
+    });
+    const stat = (label: string, value: (s: { sum: number; count: number; nums: number; code: string }) => string | null) => (el: HTMLElement) => {
+      const s = this.selectionStats();
+      const v = s ? value(s) : null;
+      if (v !== null) el.setText(`${label}: ${v}`);
+    };
+    const ui = buildOfficeUi({
+      view: this, app: this.app, host, root: this.contentEl, cmds, tabs, key: "doc-works-rb-xlsx", readOnly: this.settings.readOnly,
+      qat: XL_QAT, fileIds: XL_FILE_MENU,
+      sides: [
+        ...(versions ? [["history", "Version history", () => void versionHistoryDialog(this.app, this, this.settings.readOnly)] as [string, string, () => void]] : []),
+        ["notebook-pen", "Companion note", () => void openCompanionNote(this.app, this.file)],
+        ["links-coming-in", "Linked from", (b) => this.linked.toggle(b)],
+        ...(this.settings.readOnly ? [] : [["messages-square", "Comments", () => this.allCommentsDialog()] as [string, string, () => void]]),
+      ],
+      status: [
+        { id: "mode", label: "Cell Mode", side: "left", render: (el) => el.setText(this.grid?.edit != null ? "Edit" : "Ready") },
+        { id: "average", label: "Average", side: "right", render: stat("Average", (s) => (s.nums ? formatValue(s.sum / s.nums, s.code).text : null)) },
+        { id: "count", label: "Count", side: "right", render: stat("Count", (s) => String(s.count)) },
+        { id: "sum", label: "Sum", side: "right", render: stat("Sum", (s) => (s.nums ? formatValue(s.sum, s.code).text : null)) },
+      ],
+      zoom: { get: () => this.savedZoom(), set: (z) => this.setZoom(z), levels: SHEET_ZOOMS },
+    });
+    this.ribbon = ui.ribbon;
+    this.statusBar = ui.statusBar;
+    if (ui.save) this.autosave.status = ui.save;
+    this.ribbon.sync();
+  }
+
+  /** Excel's Increase / Decrease Font Size: the next size in the list. */
+  private growFont(dir: 1 | -1): void {
+    const current = this.activeFormat().fontSize;
+    const next = dir > 0 ? FONT_SIZES.find((sz) => sz > current) ?? FONT_SIZES[FONT_SIZES.length - 1] : [...FONT_SIZES].reverse().find((sz) => sz < current) ?? FONT_SIZES[0];
+    this.format({ fontSize: next });
+  }
+
+  /** Data › Group / Ungroup: whole columns selected group columns, anything else rows (Excel asks; this picks). */
+  private outline(group: boolean): void {
+    const r = this.sel;
+    const axis = r.r1 === 0 && r.r2 === 1048575 ? "col" : "row";
+    const [a, b] = axis === "col" ? [r.c1, r.c2] : [r.r1, r.r2];
+    this.change(() => (group ? groupRange : ungroupRange)(this.edits!, this.sheet, axis, a, b));
+  }
+
+  private hide(axis: "row" | "col"): void {
+    const r = this.sel;
+    this.change(() => ops.setHidden(this.edits!, this.sheet, axis, axis === "row" ? r.r1 : r.c1, axis === "row" ? r.r2 : r.c2, true));
+  }
+
+  private unhide(axis: "row" | "col"): void {
+    const r = this.sel;
+    this.change(() => ops.setHidden(this.edits!, this.sheet, axis, Math.max(0, (axis === "row" ? r.r1 : r.c1) - 1), (axis === "row" ? r.r2 : r.c2) + 1, false));
+  }
+
+  private toggleProtect(): void {
+    const s = this.sheet;
+    if (isProtected(s) && hasPassword(s)) void this.unprotect(s);
+    else this.change(() => setProtected(this.edits!, s, !isProtected(s)));
+  }
+
+  /** Every command Excel's layout names (excel-ui.ts), running the same code as the Google layout's controls. */
+  private xlCommands(): Commands {
+    const menu = (items: [string, () => void][]) => (mn: Menu) => {
+      for (const [title, fn] of items) menuItem(mn, title, fn);
+    };
+    const f = () => this.activeFormat();
+    const ed = () => this.edits!;
+    const r = () => this.sel;
+    const insertRows = () => this.change(() => ops.insertRows(ed(), this.sheet, r().r1, r().r2 - r().r1 + 1));
+    const insertCols = () => this.change(() => ops.insertCols(ed(), this.sheet, r().c1, r().c2 - r().c1 + 1));
+    const deleteRows = () => this.change(() => ops.deleteRows(ed(), this.sheet, r().r1, r().r2 - r().r1 + 1));
+    const deleteCols = () => this.change(() => ops.deleteCols(ed(), this.sheet, r().c1, r().c2 - r().c1 + 1));
+    const addSheet = () => {
+      this.change(() => ops.addSheet(ed(), this.sheetIndex));
+      this.showSheet(this.sheetIndex + 1);
+    };
+    const pivot = () => (this.grid ? pivotAt(this.sheet, this.grid.active.row, this.grid.active.col) : null);
+    const merged = () => this.sheet.merges.some((m) => m.r1 <= r().r2 && r().r1 <= m.r2 && m.c1 <= r().c2 && r().c1 <= m.c2);
+    const c: Record<XlCommandId, Commands[string]> = {
+      FileSave: { label: "Save", icon: "save", run: () => void this.autosave.flush() },
+      Undo: { label: "Undo", icon: "undo-2", run: () => this.undo() },
+      Redo: { label: "Redo", icon: "redo-2", run: () => this.redo() },
+      FilePrint: { label: "Print", icon: "printer", run: () => void this.exportAs("pdf"), view: true },
+      ExportFile: { label: "Export", icon: "file-output", run: () => void this.exportAs(), view: true },
+      VersionHistory: { label: "Version History", icon: "history", run: () => void versionHistoryDialog(this.app, this, this.settings.readOnly), view: true },
+      Paste: { label: "Paste", icon: "clipboard-paste", run: () => this.editCommand("paste"), menu: menu([["Paste Values", () => this.editCommand("paste", true)]]) },
+      PasteValues: { label: "Paste Values", icon: "clipboard-type", run: () => this.editCommand("paste", true) },
+      Cut: { label: "Cut", icon: "scissors", run: () => this.editCommand("cut") },
+      Copy: { label: "Copy", icon: "copy", run: () => this.editCommand("copy"), view: true },
+      FormatPainter: { label: "Format Painter", icon: "paintbrush", run: () => this.startPainting(false), dblclick: () => this.startPainting(true), active: () => !!this.painter, menu: menu([["Keep Painting", () => this.startPainting(true)]]) },
+      Font: { label: "Font", icon: "type" },
+      FontSize: { label: "Font Size", icon: "a-large-small" },
+      FontSizeIncrease: { label: "Increase Font Size", icon: "a-arrow-up", run: () => this.growFont(1) },
+      FontSizeDecrease: { label: "Decrease Font Size", icon: "a-arrow-down", run: () => this.growFont(-1) },
+      Bold: { label: "Bold", icon: "bold", run: () => this.toggle("bold"), active: () => !!f().bold },
+      Italic: { label: "Italic", icon: "italic", run: () => this.toggle("italic"), active: () => !!f().italic },
+      Underline: { label: "Underline", icon: "underline", run: () => this.toggle("underline"), active: () => !!f().underline },
+      Strikethrough: { label: "Strikethrough", icon: "strikethrough", run: () => this.toggle("strike"), active: () => !!f().strike },
+      BordersMenu: { label: "Borders", icon: "square-dashed", menu: menu([
+        ["Bottom Border", () => this.borders("bottom")], ["Top Border", () => this.borders("top")], ["Left Border", () => this.borders("left")], ["Right Border", () => this.borders("right")],
+        ["No Border", () => this.borders("none")], ["All Borders", () => this.borders("all")], ["Outside Borders", () => this.borders("outer")],
+      ]) },
+      FillColorPicker: { label: "Fill Color", icon: "paint-bucket", menu: menu([["No Fill", () => this.format({ fill: null })]]) },
+      FontColorPicker: { label: "Font Color", icon: "baseline" },
+      AlignTop: { label: "Top Align", icon: "align-vertical-justify-start", run: () => this.format({ vAlign: "top" }), active: () => f().vAlign === "top" },
+      AlignMiddle: { label: "Middle Align", icon: "align-vertical-justify-center", run: () => this.format({ vAlign: "center" }), active: () => f().vAlign === "center" },
+      AlignBottom: { label: "Bottom Align", icon: "align-vertical-justify-end", run: () => this.format({ vAlign: "bottom" }), active: () => f().vAlign === "bottom" },
+      WrapText: { label: "Wrap Text", icon: "wrap-text", run: () => this.toggle("wrap"), active: () => !!f().wrap },
+      AlignLeft: { label: "Align Left", icon: "align-left", run: () => this.format({ hAlign: "left" }), active: () => f().hAlign === "left" },
+      AlignCenter: { label: "Center", icon: "align-center", run: () => this.format({ hAlign: "center" }), active: () => f().hAlign === "center" },
+      AlignRight: { label: "Align Right", icon: "align-right", run: () => this.format({ hAlign: "right" }), active: () => f().hAlign === "right" },
+      MergeCenter: { label: "Merge & Center", icon: "merge", run: () => this.mergeToggle(), active: merged },
+      NumberFormatGallery: { label: "Number Format", icon: "hash" },
+      AccountingFormat: { label: "Accounting Number Format", icon: "dollar-sign", run: () => this.format({ numFmt: '"$"#,##0.00' }) },
+      PercentStyle: { label: "Percent Style", icon: "percent", run: () => this.format({ numFmt: "0%" }) },
+      DecimalsIncrease: { label: "Increase Decimal", icon: "decimals-arrow-right", run: () => this.decimals(1) },
+      DecimalsDecrease: { label: "Decrease Decimal", icon: "decimals-arrow-left", run: () => this.decimals(-1) },
+      GeneralFormat: { label: "General Format", icon: "hash", run: () => this.format({ numFmt: "General" }) },
+      ConditionalFormatting: { label: "Conditional Formatting", icon: "palette", run: () => this.conditionalDialog() },
+      CellsInsertMenu: { label: "Insert", icon: "between-horizontal-start", menu: menu([["Insert Sheet Rows", insertRows], ["Insert Sheet Columns", insertCols], ["Insert Sheet", addSheet]]) },
+      CellsDeleteMenu: { label: "Delete", icon: "trash-2", menu: menu([["Delete Sheet Rows", deleteRows], ["Delete Sheet Columns", deleteCols]]) },
+      CellsFormatMenu: { label: "Format", icon: "table-properties", menu: (mn) => {
+        menuItem(mn, "Row Height…", () => void this.askSize("row", r().r1, r().r2));
+        menuItem(mn, "Column Width…", () => void this.askSize("col", r().c1, r().c2));
+        subMenu(mn, "Hide & Unhide", (s) => {
+          menuItem(s, "Hide Rows", () => this.hide("row"));
+          menuItem(s, "Hide Columns", () => this.hide("col"));
+          menuItem(s, "Unhide Rows", () => this.unhide("row"));
+          menuItem(s, "Unhide Columns", () => this.unhide("col"));
+        });
+        mn.addSeparator();
+        menuItem(mn, "Rename Sheet", () => void this.renameSheet(this.sheetIndex));
+        menuItem(mn, isProtected(this.sheet) ? "Unprotect Sheet…" : "Protect Sheet…", () => this.toggleProtect());
+        if (!isProtected(this.sheet)) {
+          menuItem(mn, "Lock Cells", () => this.format({ locked: true }));
+          menuItem(mn, "Unlock Cells", () => this.format({ locked: false }));
+        }
+      } },
+      AutoSum: { label: "AutoSum", icon: "sigma", run: () => this.insertFunction("SUM"), menu: menu(FUNCTIONS.map((fn) => [fn === "SUM" ? "Sum" : fn, () => this.insertFunction(fn)])) },
+      ClearMenu: { label: "Clear", icon: "eraser", menu: menu([["Clear Formats", () => this.clearFormatting()], ["Clear Contents", () => this.change(() => ed().clear(this.sheet, r()))]]) },
+      ClearFormats: { label: "Clear Formats", icon: "remove-formatting", run: () => this.clearFormatting() },
+      ClearContents: { label: "Clear Contents", icon: "eraser", run: () => this.change(() => ed().clear(this.sheet, r())) },
+      SortFilterMenu: { label: "Sort & Filter", icon: "arrow-down-up", menu: (mn) => {
+        menuItem(mn, "Sort A to Z", () => this.sort(false));
+        menuItem(mn, "Sort Z to A", () => this.sort(true));
+        mn.addSeparator();
+        menuItem(mn, "Filter", () => this.toggleFilter(), { checked: !!this.sheet.filter });
+      } },
+      FindSelectMenu: { label: "Find & Select", icon: "search", view: true, menu: (mn) => {
+        menuItem(mn, "Find…", () => this.openFind());
+        if (!this.settings.readOnly) menuItem(mn, "Replace…", () => this.openFind());
+        menuItem(mn, "Go To…", () => this.nameBox.focus());
+        menuItem(mn, "Select All", () => this.grid?.selectAll());
+      } },
+      FindDialog: { label: "Find", icon: "search", run: () => this.openFind(), view: true },
+      ReplaceDialog: { label: "Replace", icon: "replace", run: () => this.openFind() },
+      SelectAll: { label: "Select All", icon: "text-select", run: () => this.grid?.selectAll(), view: true },
+      PivotTableInsert: { label: "PivotTable", icon: "table-2", run: () => this.insertPivotTable() },
+      PictureInsertFromFile: { label: "Pictures", icon: "image", run: () => pickImage((file) => void this.insertImageFile(file)) },
+      ChartInsert: { label: "Chart", icon: "chart-column", run: () => this.insertChart() },
+      HyperlinkInsert: { label: "Link", icon: "link", run: () => void this.editLink() },
+      ReviewNewComment: { label: "New Comment", icon: "message-square-plus", run: () => this.commentDialog(this.sel.r1, this.sel.c1) },
+      CheckboxInsert: { label: "Checkbox", icon: "square-check", run: () => this.grid && this.change(() => insertCheckboxes(ed(), this.sheet, this.grid!.selection())) },
+      DropdownInsert: { label: "Dropdown", icon: "circle-chevron-down", run: () => this.validationDialog() },
+      SymbolInsert: { label: "Symbol", icon: "omega", run: () => specialCharacters(this.app, (ch) => this.typeChar(ch)) },
+      SheetInsert: { label: "Insert Sheet", icon: "sheet", run: addSheet },
+      PageSetup: { label: "Page Setup", icon: "file-cog", run: () => void this.exportAs("pdf"), view: true },
+      InsertFunctionMenu: { label: "Insert Function", icon: "function-square", menu: menu(FUNCTIONS.map((fn) => [fn, () => this.insertFunction(fn)])) },
+      NameManager: { label: "Name Manager", icon: "tag", run: () => this.namedRangesDialog() },
+      ImportCsv: { label: "From Text/CSV", icon: "file-input", run: () => this.pickCsv() },
+      SortAscending: { label: "Sort A to Z", icon: "arrow-down-az", run: () => this.sort(false) },
+      SortDescending: { label: "Sort Z to A", icon: "arrow-down-za", run: () => this.sort(true) },
+      FilterToggle: { label: "Filter", icon: "filter", run: () => this.toggleFilter(), active: () => !!this.sheet.filter },
+      TextToColumns: { label: "Text to Columns", icon: "columns-2", run: () => this.splitTextDialog() },
+      RemoveDuplicates: { label: "Remove Duplicates", icon: "list-x", run: () => this.removeDuplicatesDialog() },
+      DataValidation: { label: "Data Validation", icon: "list-checks", run: () => this.validationDialog() },
+      OutlineGroup: { label: "Group", icon: "list-tree", run: () => this.outline(true) },
+      OutlineUngroup: { label: "Ungroup", icon: "list-x", run: () => this.outline(false) },
+      ShowComments: { label: "Show Comments", icon: "messages-square", run: () => this.allCommentsDialog() },
+      NewNote: { label: "New Note", icon: "sticky-note", run: () => void this.editNote(this.sel.r1, this.sel.c1) },
+      ProtectSheet: { label: "Protect Sheet", icon: "lock", run: () => this.toggleProtect(), active: () => isProtected(this.sheet) },
+      CopyAsMarkdownTable: { label: "Copy as Markdown Table", icon: "table", run: () => this.copyMarkdown(), view: true },
+      CopyLinkToCells: { label: "Copy Link to Cells", icon: "link", run: () => this.copyCellLink(), view: true },
+      CreateNoteFromSelection: { label: "Create Note from Selection", icon: "file-plus", run: () => this.extractNote(), view: true },
+      CompanionNote: { label: "Companion Note", icon: "notebook-pen", run: () => void openCompanionNote(this.app, this.file), view: true },
+      LinkedFrom: { label: "Linked From", icon: "links-coming-in", run: () => this.linked.toggle(), view: true },
+      DarkModeOn: { label: "Dark Mode", icon: "moon", run: () => this.setTheme(this.theme === "dark" ? "light" : "dark"), active: () => this.theme === "dark", view: true },
+      ZoomDialog: { label: "Zoom", icon: "zoom-in", view: true, menu: (mn) => {
+        for (const z of SHEET_ZOOMS) menuItem(mn, zoomLabel(z), () => this.setZoom(z), { checked: this.savedZoom() === z });
+      } },
+      Zoom100: { label: "100%", icon: "scan", run: () => this.setZoom("1"), view: true },
+      FreezePanesMenu: { label: "Freeze Panes", icon: "snowflake", menu: menu(FREEZES.map(([label, v]) => [label, () => this.freeze(v)])) },
+      KeyboardShortcuts: { label: "Keyboard Shortcuts", icon: "keyboard", run: () => this.shortcutsHelp(), view: true },
+      PivotRefresh: { label: "Refresh", icon: "refresh-cw", run: () => {
+        const p = pivot();
+        if (p) this.change(() => refreshPivot(ed(), this.sheet, p));
+      } },
+      PivotEdit: { label: "Field List", icon: "table-properties", run: () => {
+        const p = pivot();
+        if (p) this.pivotDialog(p);
+      } },
+      BorderOutside: { label: "Outside Border", icon: "square", run: () => this.borders("outer") },
+      BorderNone: { label: "No Border", icon: "square-dashed", run: () => this.borders("none") },
+      HideRows: { label: "Hide Rows", icon: "eye-off", run: () => this.hide("row") },
+      HideColumns: { label: "Hide Columns", icon: "eye-off", run: () => this.hide("col") },
+      CopyFormat: { label: "Copy Formatting", icon: "paintbrush", run: () => this.startPainting(true) },
+    };
+    for (const [key, id] of XL_SHORTCUTS) c[id].shortcut ??= keyName(key);
+    return c;
+  }
+
+  /** Excel's right-click on cells or headers: today's items in Excel's order and words, under its mini toolbar. */
+  private xlContextMenu(e: MouseEvent, hit: Hit): void {
+    const c = this.cmds;
+    if (!c) return;
+    const ed = this.edits!;
+    const r = this.sel;
+    const item = (id: XlCommandId, label = c[id].label): CtxEntry => ({ label, icon: c[id].icon, run: c[id].run });
+    const run = (fn: () => void) => fn;
+    const entries: CtxEntry[] = [item("Cut"), item("Copy"), item("Paste"), item("PasteValues"), "---"];
+    const insert: CtxEntry[] = [], del: CtxEntry[] = [];
+    if (hit.area !== "colHeader") {
+      insert.push({ label: "Insert Rows Above", run: run(() => this.change(() => ops.insertRows(ed, this.sheet, r.r1, r.r2 - r.r1 + 1))) }, { label: "Insert Rows Below", run: run(() => this.change(() => ops.insertRows(ed, this.sheet, r.r2 + 1, r.r2 - r.r1 + 1))) });
+      del.push({ label: "Delete Rows", run: run(() => this.change(() => ops.deleteRows(ed, this.sheet, r.r1, r.r2 - r.r1 + 1))) });
+    }
+    if (hit.area !== "rowHeader") {
+      insert.push({ label: "Insert Columns Left", run: run(() => this.change(() => ops.insertCols(ed, this.sheet, r.c1, r.c2 - r.c1 + 1))) }, { label: "Insert Columns Right", run: run(() => this.change(() => ops.insertCols(ed, this.sheet, r.c2 + 1, r.c2 - r.c1 + 1))) });
+      del.push({ label: "Delete Columns", run: run(() => this.change(() => ops.deleteCols(ed, this.sheet, r.c1, r.c2 - r.c1 + 1))) });
+    }
+    entries.push({ label: "Insert", icon: "between-horizontal-start", sub: insert }, { label: "Delete", icon: "trash-2", sub: del }, item("ClearContents"), "---");
+    if (hit.area === "cell") {
+      entries.push({ label: "Sort", icon: "arrow-down-up", sub: [item("SortAscending"), item("SortDescending")] }, item("FilterToggle"), "---");
+      entries.push(item("ReviewNewComment"));
+      const note = this.notes().get(cellName(r.r1, r.c1));
+      entries.push({ label: note ? "Edit Note" : "New Note", icon: "sticky-note", run: run(() => void this.editNote(r.r1, r.c1)) });
+      if (note) entries.push({ label: "Delete Note", icon: "trash", run: run(() => this.setNoteText(r.r1, r.c1, null)) });
+      entries.push(item("HyperlinkInsert", "Link…"), "---");
+      if (!isProtected(this.sheet)) entries.push({ label: "Lock Cells", icon: "lock", run: run(() => this.format({ locked: true })) }, { label: "Unlock Cells", icon: "lock-open", run: run(() => this.format({ locked: false })) });
+      entries.push({ label: this.sheet.merges.some((m) => m.r1 <= r.r2 && r.r1 <= m.r2 && m.c1 <= r.c2 && r.c1 <= m.c2) ? "Unmerge Cells" : "Merge Cells", icon: "merge", run: run(() => this.mergeToggle()) });
+      const pivot = pivotAt(this.sheet, r.r1, r.c1);
+      if (pivot) entries.push("---", { label: "Refresh", icon: "refresh-cw", run: run(() => this.change(() => refreshPivot(ed, this.sheet, pivot))) }, { label: "Show Field List", icon: "table-properties", run: run(() => this.pivotDialog(pivot)) });
+    } else {
+      const axis = hit.area === "rowHeader" ? "row" : "col";
+      const [a, b] = axis === "row" ? [r.r1, r.r2] : [r.c1, r.c2];
+      const n = b - a + 1;
+      const what = axis === "row" ? `${n} ${n > 1 ? "Rows" : "Row"}` : `${n} ${n > 1 ? "Columns" : "Column"}`;
+      const levels = axis === "row" ? this.sheet.rowLevels : this.sheet.colLevels;
+      const grouped = [...levels.keys()].some((i) => i >= a && i <= b);
+      entries.push(
+        { label: axis === "row" ? "Row Height…" : "Column Width…", icon: axis === "row" ? "move-vertical" : "move-horizontal", run: run(() => void this.askSize(axis, a, b)) },
+        { label: `Hide ${what}`, icon: "eye-off", run: run(() => this.hide(axis)) },
+        { label: "Unhide", icon: "eye", run: run(() => this.unhide(axis)) },
+        { label: `Group ${what}`, icon: "list-tree", run: run(() => this.change(() => groupRange(ed, this.sheet, axis, a, b))) },
+      );
+      if (grouped) entries.push({ label: `Ungroup ${what}`, icon: "list-x", run: run(() => this.change(() => ungroupRange(ed, this.sheet, axis, a, b))) });
+    }
+    entries.push("---", { label: "Freeze Panes Here", icon: "snowflake", run: run(() => this.change(() => ops.freeze(ed, this.sheet, hit.area === "colHeader" ? 0 : r.r2 + 1, hit.area === "rowHeader" ? 0 : r.c2 + 1))) },
+      item("CopyAsMarkdownTable"), item("CopyLinkToCells"), item("CreateNoteFromSelection"));
+    this.ctxMenu = showContextMenu({ x: e.clientX, y: e.clientY, doc: (e.target as Node | null)?.ownerDocument ?? undefined }, entries, { mini: (el) => this.miniToolbar(el), onClose: () => window.setTimeout(() => {
+      const a = document.activeElement;
+      if (!a || a === document.body || this.contentEl.contains(a)) this.grid?.focusGrid();
+    }) });
+  }
+
+  /** Excel's mini toolbar above the right-click menu. */
+  private miniToolbar(el: HTMLElement): void {
+    const c = this.cmds;
+    if (!c) return;
+    const button = (id: XlCommandId, onClick?: () => void) => {
+      const b = el.createEl("button", { cls: "dw-rb-btn is-icon", attr: { "aria-label": c[id].shortcut ? `${c[id].label} (${c[id].shortcut})` : c[id].label } });
+      setIcon(b.createSpan({ cls: "dw-rb-icon" }), c[id].icon);
+      b.addEventListener("click", () => (onClick ?? c[id].run)?.());
+    };
+    const select = (id: XlCommandId, text: string, options: [string, string][], set: (v: string) => void) => {
+      const b = el.createEl("button", { cls: "dw-rb-select", attr: { "aria-label": c[id].label } });
+      b.createSpan({ cls: "dw-rb-select-label", text });
+      caret(b);
+      b.addEventListener("click", () => {
+        const m = new Menu();
+        for (const [label, v] of options) m.addItem((i) => i.setTitle(label).onClick(() => set(v)));
+        const rect = b.getBoundingClientRect();
+        m.showAtPosition({ x: rect.left, y: rect.bottom });
+      });
+    };
+    const fmt = this.activeFormat();
+    select("Font", fmt.fontName, FONTS.map((x) => [x, x]), (fontName) => this.format({ fontName }));
+    select("FontSize", String(fmt.fontSize), FONT_SIZES.map((x) => [String(x), String(x)]), (v) => this.format({ fontSize: Number(v) }));
+    button("FontSizeIncrease");
+    button("FontSizeDecrease");
+    button("AccountingFormat");
+    button("PercentStyle");
+    el.createDiv({ cls: "dw-ctx-mini-break" });
+    for (const id of ["Bold", "Italic", "AlignCenter"] as const) button(id);
+    button("FillColorPicker", () => pickColor("#FFFF00", (fill) => this.format({ fill })));
+    button("FontColorPicker", () => pickColor("#FF0000", (color) => this.format({ color })));
+    button("BordersMenu", () => this.borders("all"));
+    button("MergeCenter");
+    button("DecimalsIncrease");
+    button("DecimalsDecrease");
   }
 
   private setTheme(theme: PaperTheme): void {
@@ -1455,7 +1877,12 @@ export class XlsxView extends FileView {
     if (this.fontSelect) showValue(this.fontSelect, f.fontName);
     if (this.sizeSelect) showValue(this.sizeSelect, String(f.fontSize));
     if (this.formatSelect) showValue(this.formatSelect, NUMBER_FORMATS.find(([, c]) => c === f.numFmt) ? f.numFmt : f.numFmt === "General" ? null : f.numFmt);
-    this.updateStatus(r);
+    // The Google layout's sum / average / count, or Excel's status bar (worked out again for the new selection).
+    if (this.statusBar) {
+      this.stats = undefined;
+      this.statusBar.update();
+    } else this.updateStatus(r);
+    this.ribbon?.sync();
   }
 
   private rawText(row: number, col: number): string {
@@ -1586,6 +2013,7 @@ export class XlsxView extends FileView {
 
   private contextMenu(e: MouseEvent, hit: Hit): void {
     if (this.settings.readOnly) return;
+    if (this.cmds) return this.xlContextMenu(e, hit);
     const ed = this.edits!;
     const r = this.sel;
     const menu = new Menu();

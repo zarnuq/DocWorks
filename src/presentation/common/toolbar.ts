@@ -452,12 +452,13 @@ export const EDITING_KEYS: [Modifier[], string][] = [
   [["Shift"], "Tab"], [[], "Tab"],
 ];
 export function shieldEditingKeys(scope: Scope, keys: [Modifier[], string][] = EDITING_KEYS): void {
-  for (const [mods, key] of keys)
-    scope.register(mods, key, () => {
-      const a = document.activeElement as HTMLElement | null;
-      const editable = a?.isContentEditable || !!a?.closest('[contenteditable=""], [contenteditable="true"]') || a?.tagName === "INPUT" || a?.tagName === "TEXTAREA";
-      return editable ? true : undefined;
-    });
+  for (const [mods, key] of keys) scope.register(mods, key, () => (editableFocused() ? true : undefined));
+}
+
+/** Focus is in something that takes typing (the document, a text field). */
+export function editableFocused(): boolean {
+  const a = document.activeElement as HTMLElement | null;
+  return !!(a?.isContentEditable || a?.closest('[contenteditable=""], [contenteditable="true"]') || a?.tagName === "INPUT" || a?.tagName === "TEXTAREA");
 }
 
 /**

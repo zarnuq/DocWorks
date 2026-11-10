@@ -93,6 +93,13 @@ export class DocxStyles {
     return { b: on("b"), i: on("i"), caps: on("caps") };
   }
 
+  /** The text colour (#RRGGBB) a paragraph style gives, or null (automatic). */
+  colorFor(styleId: string | null): string | null {
+    const sources = this.chain(styleId);
+    const v = sources.map((s) => wVal(w(w(s, "rPr"), "color"))).find(Boolean);
+    return v && /^[0-9a-f]{6}$/i.test(v) ? `#${v.toUpperCase()}` : null;
+  }
+
   /** The font size (pt) a paragraph style resolves to, or null. */
   sizeFor(styleId: string | null, tableStyleId: string | null = null): number | null {
     const defaults = this.stylesXml?.getElementsByTagNameNS(NS.w, "docDefaults")[0];
