@@ -3,21 +3,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
 import { App, Menu, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { XlsxView } from "../src/presentation/xlsx/xlsx-view";
+import { HEADER_H } from "../src/presentation/xlsx/grid";
 import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
 import { addComment } from "../src/domain/xlsx/comments";
 import { setNote } from "../src/domain/xlsx/notes";
-import { xlsx } from "./xlsx-fixtures";
+import { sheetXml, xlsx } from "./xlsx-fixtures";
 
 afterEach(() => {
   document.body.empty();
   vi.restoreAllMocks();
 });
 
-async function mount() {
+async function mount(bytes?: Uint8Array) {
   const app = new App();
-  const bytes = await xlsx();
-  app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const book = bytes ?? await xlsx();
+  app.vault.readBinary = async () => book.buffer.slice(book.byteOffset, book.byteOffset + book.byteLength) as ArrayBuffer;
   const saved: ArrayBuffer[] = [];
   app.vault.modifyBinary = async (_f, data) => {
     saved.push(data);
@@ -53,6 +54,63 @@ function runMenu(view: { contentEl: HTMLElement }, name: string, ...path: string
 const reopen = async (data: ArrayBuffer) => Workbook.open(await XlsxWorkbook.load(new Uint8Array(data)));
 
 describe("XlsxView", () => {
+  it("fits edited rows to their contents and keeps a manually sized row until explicitly fitted", async () => {
+    const bytes = await xlsx({ sheets: [sheetXml(
+      '<row r="1"><c r="A1" t="inlineStr"><is><t>Short</t></is></c></row>' +
+      '<row r="2" ht="24" customHeight="1"><c r="A2" t="inlineStr"><is><t>Fixed</t></is></c></row>' +
+      '<row r="3" ht="24" customHeight="1" hidden="1"><c r="A3" t="inlineStr"><is><t>Hidden</t></is></c></row>'
+    )] });
+    const { view, file, saved } = await mount(bytes);
+    const v = view as any;
+    const text = "First line\nSecond line\nThird line";
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    expect(saved).toHaveLength(0);
+    v.commit(0, 0, text);
+    const fitted = v.sheet.rowHeight(0);
+    expect(fitted).toBeGreaterThan(40);
+    v.undo();
+    expect(v.sheet.cell("A1").value).toBe("Short");
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    v.redo();
+    expect(v.sheet.rowHeight(0)).toBe(fitted);
+
+    v.commit(1, 0, text);
+    expect(v.sheet.rowHeight(1)).toBe(32);
+    view.contentEl.querySelector(".xlsx-canvas")!.dispatchEvent(new MouseEvent("contextmenu", {
+      clientX: 10, clientY: HEADER_H + fitted + 10, bubbles: true, cancelable: true,
+    }));
+    Menu.last!.items.find((item) => item.title === "Fit row height to data")!.run!(new MouseEvent("click"));
+    expect(v.sheet.rowHeight(1)).toBe(fitted);
+    expect(v.sheet.rowHeight(2)).toBe(0);
+    await view.onUnloadFile(file);
+    const wb = await reopen(saved.at(-1)!);
+    expect(wb.sheets[0].rowHeight(1)).toBe(fitted);
+    expect(wb.sheets[0].rowEl(1, false)?.getAttribute("customHeight")).toBeNull();
+    expect(wb.sheets[0].rowHeight(2)).toBe(0);
+  });
+  it("fits wrapped Chinese text after editing and recalculates the height when the column is resized", async () => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement, id, options) {
+      if (id === "2d" && !this.isConnected) {
+        return { measureText: (text: string) => ({ width: Array.from(text).length * 10 }) } as CanvasRenderingContext2D;
+      }
+      return getContext.call(this, id, options);
+    });
+    const { view, file, saved } = await mount(await xlsx({ sheets: [sheetXml("")] }));
+    const v = view as any;
+    v.format({ wrap: true });
+    v.commit(0, 0, "短句 中文内容可以在没有空格的地方换行");
+    const narrow = v.sheet.rowHeight(0);
+    expect(narrow).toBeGreaterThan(40);
+    v.change(() => v.resizeColumns(0, 0, 300));
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    v.undo();
+    expect(v.sheet.rowHeight(0)).toBe(narrow);
+    v.commit(0, 0, "短句");
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    await view.onUnloadFile(file);
+    expect((await reopen(saved.at(-1)!)).sheets[0].rowHeight(0)).toBe(20);
+  });
   it("finds notes and replies in empty cells, opens the matching message and excludes annotations from replace", async () => {
     const { view, file } = await mount();
     const v = view as any;

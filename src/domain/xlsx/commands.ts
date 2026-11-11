@@ -11,7 +11,7 @@ import { parseFormula, tokenize, translateFormula } from "./formula";
 import { parseInput, Scalar } from "./number-format";
 import { Rect } from "./references";
 import { StyleChange } from "./styles";
-import { Journal, Sheet, Workbook } from "./workbook-model";
+import { Journal, RowHeightAttributes, Sheet, Workbook } from "./workbook-model";
 
 interface Saved {
   sheet: Sheet;
@@ -23,6 +23,7 @@ interface Saved {
 
 class Transaction implements Journal {
   cells = new Map<string, Saved>();
+  rowHeights = new Map<string, { sheet: Sheet; row: number; before: RowHeightAttributes; after?: RowHeightAttributes }>();
   parts = new Map<string, { before: string | null; after?: string | null }>();
 
   constructor(private wb: Workbook) {}
@@ -35,6 +36,13 @@ class Transaction implements Journal {
     this.cells.set(id, { sheet, row, col, before: el ? (el.cloneNode(true) as Element) : null });
   }
 
+  rowHeight(sheet: Sheet, row: number): void {
+    const id = `${sheet.ref.path}|${row}`;
+    if (!this.rowHeights.has(id) && !this.parts.has(sheet.ref.path)) {
+      this.rowHeights.set(id, { sheet, row, before: sheet.rowHeightAttributes(row) });
+    }
+  }
+
   part(path: string): void {
     if (this.parts.has(path)) return;
     const doc = this.wb.pkg.xml(path);
@@ -42,7 +50,7 @@ class Transaction implements Journal {
   }
 
   get empty(): boolean {
-    return !this.cells.size && !this.parts.size;
+    return !this.cells.size && !this.parts.size && !this.rowHeights.size;
   }
 }
 
@@ -56,6 +64,8 @@ export class Edits {
   private redoStack: Transaction[] = [];
   /** Called after an edit, undo or redo with the sheets whose structure was reloaded. */
   onReload: (() => void) | null = null;
+  /** Update derived row sizes in the same transaction as text, format and formula-result changes. */
+  onCellsChanged: ((cells: Iterable<Change>) => void) | null = null;
 
   constructor(public wb: Workbook) {
     this.calc = new Calc(wb);
@@ -76,6 +86,7 @@ export class Edits {
     try {
       const changes = fn();
       if (changes.length) this.calc.recalc(changes);
+      if (tx.cells.size) this.onCellsChanged?.(tx.cells.values());
     } catch (err) {
       this.wb.journal = null;
       this.tx = null;
@@ -166,6 +177,11 @@ export class Edits {
       }
     }
     if (tx.parts.size) this.wb = Workbook.open(pkg);
+    for (const saved of tx.rowHeights.values()) {
+      const sheet = sheetOf(saved.sheet);
+      if (which === "before") saved.after ??= sheet.rowHeightAttributes(saved.row);
+      sheet.restoreRowHeight(saved.row, saved[which]!);
+    }
     for (const saved of tx.cells.values()) {
       const sheet = this.wb.sheets.find((x) => x.ref.path === saved.sheet.ref.path);
       if (!sheet) continue;

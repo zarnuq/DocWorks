@@ -40,8 +40,10 @@ const key = (row: number, col: number) => row * 16384 + col;
 /** Records state before changes, for undo: cell elements one by one, whole parts for structural edits. */
 export interface Journal {
   cell(sheet: Sheet, row: number, col: number): void;
+  rowHeight(sheet: Sheet, row: number): void;
   part(path: string): void;
 }
+export type RowHeightAttributes = [height: string | null, custom: string | null];
 const isError = (v: Scalar): v is ErrorValue => typeof v === "object" && v !== null;
 const DEFAULT_COL_PX = 64;
 
@@ -307,6 +309,36 @@ export class Sheet {
   }
   rowHeight(r: number): number {
     return this.rows.get(r);
+  }
+  rowHeightAttributes(row: number): RowHeightAttributes {
+    const el = this.rowEl(row, false);
+    return [el?.getAttribute("ht") ?? null, el?.getAttribute("customHeight") ?? null];
+  }
+  /** Replace just the sizing attributes and keep the grid's row positions in sync. */
+  restoreRowHeight(row: number, [height, custom]: RowHeightAttributes): void {
+    const el = this.rowEl(row, height !== null || custom !== null);
+    if (!el) return;
+    if (height === null) el.removeAttribute("ht");
+    else el.setAttribute("ht", height);
+    if (custom === null) el.removeAttribute("customHeight");
+    else el.setAttribute("customHeight", custom);
+    this.rows.set(row, this.hiddenRows.has(row) ? 0 : height === null ? null : Math.round(Number(height) * 4 / 3));
+    this.touch();
+  }
+  setFittedRowHeight(row: number, px: number): void {
+    const [height, custom] = this.rowHeightAttributes(row);
+    const fitted = px === this.rows.size ? null : String(px * 0.75);
+    if (height === fitted && custom === null) return;
+    this.wb.journal?.rowHeight(this, row);
+    this.restoreRowHeight(row, [fitted, null]);
+  }
+  *cellsInRow(row: number): IterableIterator<Cell> {
+    let col = -1;
+    for (const el of this.all(this.rowEl(row, false), "c")) {
+      col = parseCellRef(el.getAttribute("r") ?? "")?.col ?? col + 1;
+      const cell = this.at(row, col);
+      if (cell) yield cell;
+    }
   }
   colX(c: number): number {
     return this.cols.pos(c);

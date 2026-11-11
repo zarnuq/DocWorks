@@ -12,9 +12,8 @@ import { Cell, Sheet } from "../../domain/xlsx/workbook-model";
 import { Picture } from "../../domain/xlsx/drawing";
 import type { CfStyle } from "../../domain/xlsx/conditional";
 import type { Sparkline } from "../../domain/xlsx/sparklines";
-import { fontStack } from "../../core/utils/fonts";
 import { OutlineAxis, OutlineGroup, outlineGroups, summaryIndex } from "../../domain/xlsx/outline";
-import { CHECKBOX, Op, paint } from "./paint";
+import { cellTextFont, CHECKBOX, Op, paint } from "./paint";
 import { isCheckbox } from "../../domain/xlsx/checkbox";
 
 export const HEADER_W = 46;
@@ -53,6 +52,7 @@ export interface GridHost {
   fill(src: Rect, target: Rect): void;
   resize(axis: "row" | "col", from: number, to: number, px: number): void;
   autofit(cols: number[]): void;
+  autofitRows?(from: number, to: number): void;
   contextMenu(e: MouseEvent, hit: Hit): void;
   filterMenu(col: number, anchor: HTMLElement): void;
   /** Pictures on the current sheet, and a URL for an image (null while it loads). */
@@ -730,7 +730,7 @@ export class Grid {
         w: tw,
         h,
         text: shown.text,
-        font: `${fmt.italic ? "italic " : ""}${fmt.bold ? "bold " : ""}${px}px ${fontStack(fmt.fontName)}`,
+        font: cellTextFont(fmt, px),
         size: px,
         color,
         align: align === "center" || align === "centerContinuous" ? "center" : align === "right" ? "right" : "left",
@@ -1140,6 +1140,12 @@ export class Grid {
       const sel = this.selection();
       const whole = sel.r1 === 0 && sel.r2 === 1048575 && hit.resize >= sel.c1 && hit.resize <= sel.c2;
       this.host.autofit(whole ? Array.from({ length: sel.c2 - sel.c1 + 1 }, (_, k) => sel.c1 + k) : [hit.resize]);
+      return;
+    }
+    if (!this.readOnly && hit.area === "rowHeader" && hit.resize !== undefined) {
+      const sel = this.selection(), row = hit.resize;
+      const whole = sel.c1 === 0 && sel.c2 === 16383 && row >= sel.r1 && row <= sel.r2;
+      this.host.autofitRows?.(whole ? sel.r1 : row, whole ? sel.r2 : row);
       return;
     }
     if (hit.area === "cell") this.beginEdit(null, false);

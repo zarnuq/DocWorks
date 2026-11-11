@@ -27,6 +27,7 @@ async function mount(bytes?: Uint8Array) {
     fill: vi.fn(),
     resize: vi.fn(),
     autofit: vi.fn(),
+    autofitRows: vi.fn(),
     contextMenu: vi.fn(),
     filterMenu: vi.fn(),
   };
@@ -42,6 +43,14 @@ const texts = (grid: Grid, quad: string) => textOps(grid, quad).map((o) => o.tex
 const allTexts = (grid: Grid) => ["corner", "top", "left", "main"].flatMap((q) => textOps(grid, q));
 
 describe("grid rendering", () => {
+  it("fits a row from its lower boundary, without triggering column autofit", async () => {
+    const { grid, host } = await mount();
+    grid.el.querySelector(".xlsx-canvas")!.dispatchEvent(new MouseEvent("dblclick", {
+      clientX: 12, clientY: HEADER_H + 39, bubbles: true,
+    }));
+    expect(host.autofitRows).toHaveBeenCalledWith(1, 1);
+    expect(host.autofit).not.toHaveBeenCalled();
+  });
   it("draws cell text with formats, frozen rows in their own pane", async () => {
     const { grid } = await mount();
     expect(texts(grid, "top")).toEqual(["Name", "Notes", "Double"]);
