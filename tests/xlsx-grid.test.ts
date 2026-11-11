@@ -169,6 +169,36 @@ describe("grid keyboard", () => {
     expect(grid.input.value).toBe("=SUM(A2:A4)");
   });
 
+  it("keeps a wrapped cell's editor within its column and expands it downwards", async () => {
+    const { grid, edits } = await mount();
+    const sheet = edits.wb.sheets[0];
+    const text = "Long text without an explicit line break";
+    edits.input(sheet, 1, 1, text);
+    edits.format(sheet, { r1: 1, c1: 1, r2: 1, c2: 1 }, { wrap: true });
+    vi.spyOn(grid.input, "scrollWidth", "get").mockReturnValue(300);
+    const scrollHeight = vi.spyOn(grid.input, "scrollHeight", "get").mockReturnValue(60);
+    grid.select({ row: 1, col: 1 });
+    grid.el.querySelector(".xlsx-canvas")!.dispatchEvent(new MouseEvent("dblclick", {
+      clientX: HEADER_W + sheet.colX(1) + 10, clientY: HEADER_H + sheet.rowY(1) + 10, bubbles: true,
+    }));
+
+    expect(grid.input.classList.contains("is-wrapped")).toBe(true);
+    expect(grid.input.style.getPropertyValue("--w")).toBe(`${sheet.colWidth(1)}px`);
+    expect(grid.input.style.getPropertyValue("--xlsx-edit-w")).toBe("");
+    expect(grid.input.style.getPropertyValue("--xlsx-edit-h")).toBe("60px");
+    expect(grid.input.value).toBe(text);
+    scrollHeight.mockReturnValue(80);
+    grid.setEditText(text + "\nSecond paragraph");
+    expect(grid.input.style.getPropertyValue("--xlsx-edit-h")).toBe("80px");
+    grid.cancelEdit();
+    expect(sheet.cell("B2")?.value).toBe(text);
+
+    grid.select({ row: 1, col: 0 });
+    grid.beginEdit(text, false);
+    expect(grid.input.classList.contains("is-wrapped")).toBe(false);
+    expect(grid.input.style.getPropertyValue("--xlsx-edit-w")).toBe("304px");
+  });
+
   it("clears the selection with Delete", async () => {
     const { grid, edits } = await mount();
     grid.select({ row: 1, col: 0 }, { row: 2, col: 0 });

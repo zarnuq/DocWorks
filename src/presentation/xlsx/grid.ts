@@ -13,7 +13,7 @@ import { Picture } from "../../domain/xlsx/drawing";
 import type { CfStyle } from "../../domain/xlsx/conditional";
 import type { Sparkline } from "../../domain/xlsx/sparklines";
 import { OutlineAxis, OutlineGroup, outlineGroups, summaryIndex } from "../../domain/xlsx/outline";
-import { cellTextFont, CHECKBOX, Op, paint } from "./paint";
+import { cellTextFont, cellTextLineHeight, CHECKBOX, Op, paint } from "./paint";
 import { isCheckbox } from "../../domain/xlsx/checkbox";
 
 export const HEADER_W = 46;
@@ -162,7 +162,7 @@ export class Grid {
   private textCache = new Map<number, Record<string, string>>();
   private boxCache = new Map<number, Record<string, string>>();
   /** Font properties last copied onto the editor. */
-  private editorFont: string[] = [];
+  private editorStyleKeys: string[] = [];
   /** Obsidian's interface font for header labels (a canvas can't use CSS variables), read once. */
   private uiFont = getComputedStyle(document.body).getPropertyValue("--font-interface").trim() || "sans-serif";
   /** Dark theme: white fills and black text on unfilled cells take the theme's colors instead. */
@@ -564,11 +564,17 @@ export class Grid {
       activeCell && this.host.isStale(activeCell) ? "Result is stale" : "",
       `Selected ${rangeName(sel)}`].filter(Boolean).join(". ");
     if (!this.edit && this.announcement.textContent !== details) this.announcement.setText(details);
-    // While editing, the editor shows the cell's font.
-    const cell = this.edit ? s.at(this.active.row, this.active.col) : undefined;
-    const editFont = Object.fromEntries(Object.entries(cell ? this.css(cell.style, false) : {}).filter(([k]) => /^(font|color)/.test(k)));
-    this.input.setCssProps({ ...Object.fromEntries(this.editorFont.map((k) => [k, ""])), ...editFont });
-    this.editorFont = Object.keys(editFont);
+    const style = this.edit ? s.styleAt(this.active.row, this.active.col) : undefined;
+    const format = style === undefined ? undefined : s.wb.styles.format(style);
+    const wrapped = !!format?.wrap;
+    this.input.toggleClass("is-wrapped", wrapped);
+    const css = style === undefined || (!activeCell && !wrapped) ? {} : this.css(style, false);
+    const editorStyle = Object.fromEntries(Object.entries(css).filter(([k]) =>
+      /^(font|color)/.test(k) || (wrapped && /^(padding-left|padding-right|text-align|text-decoration)$/.test(k))
+    ));
+    if (format?.wrap) editorStyle["line-height"] = `${cellTextLineHeight(format.fontSize * 4 / 3)}px`;
+    this.input.setCssProps({ ...Object.fromEntries(this.editorStyleKeys.map((k) => [k, ""])), ...editorStyle });
+    this.editorStyleKeys = Object.keys(editorStyle);
   }
 
   /** Where a group's +/- button sits in its header strip: centre across (gutter) and along (sheet offset + `o`). */
@@ -1156,7 +1162,7 @@ export class Grid {
   // ---------------------------------------------------------------------------
 
   /** Start editing the active cell with `text` (null: its current content). */
-  beginEdit(text: string | null, typed: boolean): void {
+  beginEdit(text: string | null, typed: boolean, focus = true): void {
     if (this.readOnly) return;
     const s = this.sheet;
     const cell = s.at(this.active.row, this.active.col);
@@ -1164,7 +1170,7 @@ export class Grid {
     this.edit = { text: value, typed };
     this.refRange = null;
     this.input.value = value;
-    this.input.focus({ preventScroll: true });
+    if (focus) this.input.focus({ preventScroll: true });
     this.input.setSelectionRange(value.length, value.length);
     this.reveal(this.active);
     this.render();
@@ -1174,10 +1180,23 @@ export class Grid {
 
   /** Replace the editor's text (from the formula bar). */
   setEditText(text: string): void {
-    if (!this.edit) this.beginEdit(text, false);
+    if (!this.edit) {
+      this.beginEdit(text, false, false);
+      return;
+    }
     this.input.value = text;
-    this.edit!.text = text;
+    this.edit.text = text;
+    this.autosize();
     this.render();
+  }
+
+  /** Insert a line break at the cell editor's caret, opening it first if needed. */
+  insertLineBreak(): void {
+    if (!this.edit) this.beginEdit(null, false);
+    if (!this.edit) return;
+    const input = this.input;
+    input.setRangeText("\n", input.selectionStart, input.selectionEnd, "end");
+    this.onInput();
   }
 
   private onInput(fromRef = false): void {
@@ -1194,6 +1213,11 @@ export class Grid {
   }
 
   private autosize(): void {
+    if (this.input.classList.contains("is-wrapped")) {
+      this.input.setCssProps({ "--xlsx-edit-w": "", "--xlsx-edit-h": "0px" });
+      this.input.setCssProps({ "--xlsx-edit-h": `${this.input.scrollHeight}px` });
+      return;
+    }
     this.input.setCssProps({ "--xlsx-edit-w": "0px", "--xlsx-edit-h": "0px" });
     this.input.setCssProps({ "--xlsx-edit-w": `${this.input.scrollWidth + 4}px`, "--xlsx-edit-h": `${this.input.scrollHeight}px` });
   }
@@ -1235,12 +1259,9 @@ export class Grid {
         this.cancelEdit();
         return;
       }
-      if (e.key === "Enter" && (e.altKey || mod)) {
+      if (e.key === "Enter" && mod) {
         e.preventDefault();
-        const i = this.input.selectionStart, v = this.input.value;
-        this.input.value = v.slice(0, i) + "\n" + v.slice(this.input.selectionEnd);
-        this.input.setSelectionRange(i + 1, i + 1);
-        this.onInput();
+        this.insertLineBreak();
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {

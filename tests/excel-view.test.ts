@@ -144,6 +144,14 @@ describe("XlsxView Excel-style review fixes", () => {
     expect(scopeKey(v, "Mod", "5")).toEqual([]);
   });
 
+  it("offers AutoFit Row Height for column headers", async () => {
+    const { v, view, file } = await openXl();
+    v.grid.select({ row: 0, col: 0 }, { row: 1048575, col: 0 });
+    v.contextMenu(new MouseEvent("contextmenu", { clientX: 10, clientY: 10 }), { area: "colHeader", row: 0, col: 0 });
+    expect(Array.from(document.querySelectorAll(".dw-ctx .menu-item-title")).map((item) => item.textContent)).toContain("AutoFit Row Height");
+    await view.onUnloadFile(file);
+  });
+
   it("reads the selection once per selection change, and not while typing in a cell", async () => {
     const { v } = await openXl();
     const scan = vi.spyOn(v.sheet, "cellsIn");

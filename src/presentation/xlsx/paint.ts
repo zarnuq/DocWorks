@@ -142,14 +142,14 @@ export function cellTextFont(format: Pick<Format, "fontName" | "bold" | "italic"
 }
 
 type TextLayout = Pick<Extract<Op, { kind: "text" }>, "text" | "w" | "pad" | "size" | "wrap">;
-const lineHeight = (px: number) => Math.round(px * 1.25);
+export const cellTextLineHeight = (px: number) => Math.round(px * 1.25);
 
 function textLines(ctx: Pick<CanvasRenderingContext2D, "measureText"> | null, op: TextLayout): string[] {
   return ctx && op.wrap ? wrapLines(ctx, op.text, Math.max(1, op.w - 2 * PAD - op.pad)) : op.text.split("\n");
 }
 
 export function cellTextHeight(ctx: Pick<CanvasRenderingContext2D, "measureText"> | null, op: TextLayout): number {
-  return textLines(ctx, op).length * lineHeight(op.size) + 2;
+  return textLines(ctx, op).length * cellTextLineHeight(op.size) + 2;
 }
 
 function drawText(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "text" }>): void {
@@ -170,7 +170,7 @@ function drawTextIn(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "text
   ctx.textAlign = op.align;
   ctx.textBaseline = "alphabetic";
   const lines = textLines(ctx, op);
-  const lh = lineHeight(op.size);
+  const lh = cellTextLineHeight(op.size);
   const block = lh * lines.length;
   const top = op.valign === "top" ? op.y + 1 : op.valign === "center" ? op.y + (op.h - block) / 2 : op.y + op.h - block - 1;
   const x = op.align === "left" ? op.x + PAD + op.pad : op.align === "right" ? op.x + op.w - PAD - op.pad : op.x + op.w / 2;

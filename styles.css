@@ -2351,6 +2351,16 @@ textarea.pptx-notes {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
+.xlsx-grid .xlsx-editor.is-editing.is-wrapped {
+  width: var(--w);
+  padding-block: 1px;
+  border: 0;
+  box-shadow: inset 0 0 0 2px #1a73e8;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
 .xlsx-bottom {
   display: flex;
   align-items: center;
