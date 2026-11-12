@@ -8,9 +8,12 @@ const truth = (value: string | null | undefined, fallback: boolean) => value == 
 export function isProtected(sheet: Sheet): boolean {
   return truth(sheet.first(sheet.doc.documentElement, "sheetProtection")?.getAttribute("sheet"), false);
 }
-export function assertAction(sheet: Sheet, action: ProtectedAction): void {
+export function allowsAction(sheet: Sheet, action: ProtectedAction): boolean {
   const p = sheet.first(sheet.doc.documentElement, "sheetProtection");
-  if (isProtected(sheet) && truth(p?.getAttribute(action), true)) throw new Error("This sheet is protected. This operation is not allowed.");
+  return !isProtected(sheet) || !truth(p?.getAttribute(action), true);
+}
+export function assertAction(sheet: Sheet, action: ProtectedAction): void {
+  if (!allowsAction(sheet, action)) throw new Error("This sheet is protected. This operation is not allowed.");
 }
 export function assertCell(sheet: Sheet, row: number, col: number): void {
   if (!isProtected(sheet)) return;

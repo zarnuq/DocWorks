@@ -11,7 +11,7 @@ import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
 import { Edits } from "../../domain/xlsx/commands";
 import { FormulaSyntaxError } from "../../domain/xlsx/formula";
-import { Rect, cellName, colName, parseCellRef, parseRange, quoteSheet as quoteSheetName, rangeName } from "../../domain/xlsx/references";
+import { MAX_COL, MAX_ROW, Rect, cellName, colName, parseCellRef, parseRange, quoteSheet as quoteSheetName, rangeName } from "../../domain/xlsx/references";
 import { linksOf, setLink } from "../../domain/xlsx/links";
 import { adjustDecimals, formatGeneral, formatValue, parseInput } from "../../domain/xlsx/number-format";
 import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
@@ -48,6 +48,7 @@ import { XL_FILE_MENU, XL_QAT, XL_SHORTCUTS, excelTabs, type XlCommandId } from 
 import { canExportPdf, renderPdf } from "../common/pdf";
 import { ExportFormat, exportDialog, writeExport } from "../common/export-dialog";
 import { Grid, Hit } from "./grid";
+import { fitRowHeights } from "./row-autofit";
 import { deletePicture, insertPicture, movePicture, Picture, sheetPictures } from "../../domain/xlsx/drawing";
 import { pickImage } from "../common/images";
 import { addRule, CfStyle, ConditionalFormats, deleteRule, readRules } from "../../domain/xlsx/conditional";
@@ -171,6 +172,19 @@ export class XlsxView extends FileView {
         return false;
       });
     }
+    this.scope.register(["Alt"], "Enter", (event) => {
+      if (!this.grid || this.settings.readOnly || event.isComposing) return true;
+      const input = document.activeElement;
+      if (input === this.grid.input) {
+        this.grid.insertLineBreak();
+      } else if (input === this.formulaInput) {
+        this.formulaInput.setRangeText("\n", this.formulaInput.selectionStart, this.formulaInput.selectionEnd, "end");
+        this.grid.setEditText(this.formulaInput.value);
+      } else {
+        return true;
+      }
+      return false;
+    });
     // The grid's own keys (its input is a textarea) that a user hotkey could take.
     shieldEditingKeys(this.scope, [[["Shift"], "Tab"], [[], "Tab"]]);
     focusRegions(this.scope, this.contentEl, () => {
@@ -235,6 +249,7 @@ export class XlsxView extends FileView {
       // Opened again meanwhile (a setting change while loading): only the newest load draws.
       if (load !== this.loads) return;
       this.edits = new Edits(Workbook.open(book));
+      this.cfCache.clear();
     } catch (err) {
       status.setText(`Could not open this .xlsx file: ${(err as Error).message}`);
       console.error(err);
@@ -243,6 +258,15 @@ export class XlsxView extends FileView {
     }
     status.remove();
     this.edits.onReload = () => this.afterReload();
+    this.edits.onCellsChanged = (cells) => {
+      const rowsBySheet = new Map<Sheet, Set<number>>();
+      for (const { sheet, row } of cells) {
+        let rows = rowsBySheet.get(sheet);
+        if (!rows) rowsBySheet.set(sheet, rows = new Set());
+        rows.add(row);
+      }
+      for (const [sheet, rows] of rowsBySheet) fitRowHeights(sheet, rows);
+    };
     const view = this.wb.pkg.workbook.getElementsByTagNameNS("*", "workbookView")[0];
     this.sheetIndex = Number(view?.getAttribute("activeTab") ?? 0) || 0;
     if (this.sheet.ref.state !== "visible") this.sheetIndex = Math.max(0, this.wb.sheets.findIndex((s) => s.ref.state === "visible"));
@@ -269,8 +293,9 @@ export class XlsxView extends FileView {
       },
       clear: (r) => this.change(() => this.edits!.clear(this.sheet, r)),
       fill: (src, target) => this.change(() => this.edits!.fill(this.sheet, src, target)),
-      resize: (axis, a, b, px) => this.change(() => (axis === "col" ? ops.setColWidth(this.edits!, this.sheet, a, b, px) : ops.setRowHeight(this.edits!, this.sheet, a, b, px))),
+      resize: (axis, a, b, px) => this.change(() => (axis === "col" ? this.resizeColumns(a, b, px) : ops.setRowHeight(this.edits!, this.sheet, a, b, px))),
       autofit: (cols) => this.autofit(cols),
+      autofitRows: (a, b) => this.autofitRows(a, b),
       contextMenu: (e, hit) => this.contextMenu(e, hit),
       filterMenu: (col, anchor) => this.filterMenu(col, anchor),
       pictures: () => this.pictures(),
@@ -294,6 +319,13 @@ export class XlsxView extends FileView {
       deletePicture: (key) => this.change(() => deletePicture(this.edits!, this.sheet, key)),
       toggleGroup: (axis, g) => this.change(() => setGroupCollapsed(this.edits!, this.sheet, axis, g, !g.collapsed)),
     });
+    this.grid.el.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey || !event.deltaY || !this.grid) return;
+      event.preventDefault();
+      const current = SHEET_ZOOMS.indexOf(String(this.grid.zoom));
+      const next = SHEET_ZOOMS[current - Math.sign(event.deltaY)];
+      if (next) this.setZoom(next);
+    }, { passive: false });
     this.grid.readOnly = this.grid.input.readOnly = this.formulaInput.readOnly = this.settings.readOnly;
     if (this.savedZoom() !== "1") this.grid.setZoom(Number(this.savedZoom()));
     const bottom = this.contentEl.createDiv({ cls: "xlsx-bottom" });
@@ -367,6 +399,7 @@ export class XlsxView extends FileView {
     for (const url of this.imageUrls.values()) if (url) URL.revokeObjectURL(url);
     this.imageUrls.clear();
     this.pictureCache.clear();
+    this.cfCache.clear();
     this.edits = null;
     this.clip = null;
   }
@@ -1074,11 +1107,54 @@ export class XlsxView extends FileView {
             ctx.font = `${css["font-style"] ?? ""} ${css["font-weight"] ?? ""} ${css["font-size"]} ${css["font-family"]}`;
             w = Math.max(w, ctx.measureText(s.display(c.row, c.col).text).width);
           }
-          if (w) ops.setColWidth(this.edits!, this.sheet, col, col, Math.ceil(w + 10));
+          if (w) this.resizeColumns(col, col, Math.ceil(w + 10));
         }
         return [];
       })
     );
+  }
+
+  private resizeColumns(first: number, last: number, px: number): void {
+    const edits = this.edits!;
+    edits.run(() => {
+      ops.setColWidth(edits, this.sheet, first, last, px);
+      const sheet = this.sheet;
+      const rows = new Set<number>();
+      for (const cell of sheet.cellsIn(WHOLE_COL(first, last))) {
+        if (sheet.wb.styles.format(cell.style).wrap) rows.add(cell.row);
+      }
+      for (const merge of sheet.merges) {
+        if (merge.c1 > last || merge.c2 < first) continue;
+        const cell = sheet.at(merge.r1, merge.c1);
+        if (cell && sheet.wb.styles.format(cell.style).wrap) rows.add(cell.row);
+      }
+      fitRowHeights(sheet, rows);
+      return [];
+    });
+  }
+
+  private autofitRows(first: number, last: number, columns?: Pick<Rect, "c1" | "c2">): void {
+    this.change(() => {
+      const sheet = this.sheet;
+      assertAction(sheet, "formatRows");
+      const rows = new Set<number>();
+      for (const cell of sheet.cellsIn({ r1: first, r2: last, c1: columns?.c1 ?? 0, c2: columns?.c2 ?? MAX_COL })) {
+        const empty = cell.formula === undefined && (cell.value === null || cell.value === "");
+        if (!columns || !empty) rows.add(cell.row);
+      }
+      for (const merge of sheet.merges) {
+        if (merge.r1 > last || merge.r2 < first || (columns && (merge.c1 > columns.c2 || merge.c2 < columns.c1))) continue;
+        const anchor = sheet.at(merge.r1, merge.c1);
+        if (anchor && sheet.wb.styles.format(anchor.style).wrap) rows.add(anchor.row);
+      }
+      if (!columns) {
+        for (const row of sheet.rows.overrides.keys()) if (row >= first && row <= last) rows.add(row);
+      }
+      this.edits!.run(() => {
+        fitRowHeights(sheet, rows, true);
+        return [];
+      });
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -1739,6 +1815,7 @@ export class XlsxView extends FileView {
       const grouped = [...levels.keys()].some((i) => i >= a && i <= b);
       entries.push(
         { label: axis === "row" ? "Row Height…" : "Column Width…", icon: axis === "row" ? "move-vertical" : "move-horizontal", run: run(() => void this.askSize(axis, a, b)) },
+        { label: "AutoFit Row Height", icon: "move-vertical", run: () => this.autofitRows(r.r1, r.r2, axis === "col" ? r : undefined) },
         { label: `Hide ${what}`, icon: "eye-off", run: run(() => this.hide(axis)) },
         { label: "Unhide", icon: "eye", run: run(() => this.unhide(axis)) },
         { label: `Group ${what}`, icon: "list-tree", run: run(() => this.change(() => groupRange(ed, this.sheet, axis, a, b))) },
@@ -1820,7 +1897,7 @@ export class XlsxView extends FileView {
       if (this.grid && !this.grid.edit) this.grid.setEditText(this.formulaInput.value);
     });
     this.formulaInput.addEventListener("keydown", (e) => {
-      if (!this.grid) return;
+      if (!this.grid || e.isComposing) return;
       if (e.key === "Escape") {
         e.preventDefault();
         this.grid.cancelEdit();
@@ -2061,11 +2138,13 @@ export class XlsxView extends FileView {
       item(`Hide ${rows}`, "eye-off", () => this.change(() => ops.setHidden(ed, this.sheet, "row", r.r1, r.r2, true)));
       item("Unhide rows", "eye", () => this.change(() => ops.setHidden(ed, this.sheet, "row", Math.max(0, r.r1 - 1), r.r2 + 1, false)));
       item("Resize rows…", "move-vertical", () => void this.askSize("row", r.r1, r.r2));
+      item("Fit row height to data", "move-vertical", () => this.autofitRows(r.r1, r.r2));
       this.groupItems(menu, "row", r.r1, r.r2);
     } else if (hit.area === "colHeader") {
       item(`Hide ${cols}`, "eye-off", () => this.change(() => ops.setHidden(ed, this.sheet, "col", r.c1, r.c2, true)));
       item("Unhide columns", "eye", () => this.change(() => ops.setHidden(ed, this.sheet, "col", Math.max(0, r.c1 - 1), r.c2 + 1, false)));
       item("Resize columns…", "move-horizontal", () => void this.askSize("col", r.c1, r.c2));
+      item("Fit row height to data", "move-vertical", () => this.autofitRows(0, MAX_ROW, r));
       this.groupItems(menu, "col", r.c1, r.c2);
     } else {
       item("Sort range ascending", "arrow-down-az", () => this.sort(false));
@@ -2093,7 +2172,8 @@ export class XlsxView extends FileView {
     const v = await promptText(this.app, axis === "col" ? "Column width in pixels" : "Row height in pixels", String(current));
     const px = Number(v);
     if (v === null || !Number.isFinite(px) || px <= 0) return;
-    this.change(() => (axis === "col" ? ops.setColWidth(this.edits!, s, a, b, px) : ops.setRowHeight(this.edits!, s, a, b, px)));
+    if (s !== this.sheet) return;
+    this.change(() => (axis === "col" ? this.resizeColumns(a, b, px) : ops.setRowHeight(this.edits!, s, a, b, px)));
   }
 
   private mergeToggle(): void {

@@ -3,21 +3,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
 import { App, Menu, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { XlsxView } from "../src/presentation/xlsx/xlsx-view";
+import { HEADER_H, HEADER_W } from "../src/presentation/xlsx/grid";
+import { MAX_ROW } from "../src/domain/xlsx/references";
 import { XlsxWorkbook } from "../src/infrastructure/xlsx/xlsx-workbook";
 import { Workbook } from "../src/domain/xlsx/workbook-model";
 import { addComment } from "../src/domain/xlsx/comments";
 import { setNote } from "../src/domain/xlsx/notes";
-import { xlsx } from "./xlsx-fixtures";
+import { sheetXml, STYLES, xlsx } from "./xlsx-fixtures";
 
 afterEach(() => {
   document.body.empty();
   vi.restoreAllMocks();
 });
 
-async function mount() {
+async function mount(bytes?: Uint8Array) {
   const app = new App();
-  const bytes = await xlsx();
-  app.vault.readBinary = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const book = bytes ?? await xlsx();
+  app.vault.readBinary = async () => book.buffer.slice(book.byteOffset, book.byteOffset + book.byteLength) as ArrayBuffer;
   const saved: ArrayBuffer[] = [];
   app.vault.modifyBinary = async (_f, data) => {
     saved.push(data);
@@ -33,7 +35,7 @@ async function mount() {
     input.dispatchEvent(new Event("input"));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   };
-  return { view, file, saved, input, type };
+  return { app, view, file, saved, input, type };
 }
 
 function menuTitles(view: { contentEl: HTMLElement }, name: string): string[] {
@@ -51,8 +53,245 @@ function runMenu(view: { contentEl: HTMLElement }, name: string, ...path: string
 }
 
 const reopen = async (data: ArrayBuffer) => Workbook.open(await XlsxWorkbook.load(new Uint8Array(data)));
+const wrappedStyles = STYLES.replace('<cellXfs count="3">', '<cellXfs count="4">')
+  .replace("</cellXfs>", '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>');
 
 describe("XlsxView", () => {
+  it("zooms the worksheet with Ctrl+wheel using the toolbar levels", async () => {
+    const { app, view, file, saved } = await mount();
+    const persistZoom = vi.spyOn(app, "saveLocalStorage").mockImplementation(() => {});
+    const grid = view.contentEl.querySelector<HTMLElement>(".xlsx-grid")!;
+    const canvas = grid.querySelector(".xlsx-canvas")!;
+    const select = view.contentEl.querySelector<HTMLSelectElement>('select[aria-label="Zoom"]')!;
+    const wheel = (deltaY: number, ctrlKey = true, target = canvas) => target.dispatchEvent(
+      new WheelEvent("wheel", { deltaY, ctrlKey, bubbles: true, cancelable: true }),
+    );
+
+    expect(wheel(-120, false)).toBe(true);
+    expect(wheel(-120, true, select)).toBe(true);
+    expect(wheel(0)).toBe(true);
+    expect(select.value).toBe("1");
+    expect(persistZoom).not.toHaveBeenCalled();
+
+    expect(wheel(-120)).toBe(false);
+    expect(select.value).toBe("1.25");
+    expect(grid.style.getPropertyValue("zoom")).toBe("1.25");
+    expect(persistZoom).toHaveBeenLastCalledWith("doc-works-xlsx-zoom", "1.25");
+    for (const level of ["1", "0.9", "0.75", "0.5"]) {
+      expect(wheel(120)).toBe(false);
+      expect(select.value).toBe(level);
+    }
+    expect(wheel(120)).toBe(false);
+    expect(select.value).toBe("0.5");
+    await view.onUnloadFile(file);
+    expect(saved).toHaveLength(0);
+  });
+
+  it("fits the entire wrapped vertical merge from a covered column and keeps other cells readable", async () => {
+    const bytes = await xlsx({ styles: wrappedStyles, sheets: [sheetXml(
+      '<row r="1" ht="24" customHeight="1"><c r="A1" s="3" t="inlineStr"><is><t>One\nTwo\nThree\nFour\nFive\nSix\nSeven</t></is></c></row>' +
+      '<row r="2" ht="24" customHeight="1"/>' +
+      '<row r="3" ht="24" customHeight="1"><c r="C3" t="inlineStr"><is><t>Own\nTall\nCell</t></is></c></row>' +
+      '<row r="4" ht="24" customHeight="1"><c r="C4"><v>1</v></c></row>',
+      { before: "", after: '<mergeCells count="1"><mergeCell ref="A1:B3"/></mergeCells>' }
+    )] });
+    const { view, file, saved } = await mount(bytes);
+    const v = view as any;
+    view.contentEl.querySelector(".xlsx-canvas")!.dispatchEvent(new MouseEvent("contextmenu", {
+      clientX: HEADER_W + v.sheet.colX(1) + 10, clientY: HEADER_H / 2, bubbles: true, cancelable: true,
+    }));
+    Menu.last!.items.find((item) => item.title === "Fit row height to data")!.run!(new MouseEvent("click"));
+    const heights = [0, 1, 2].map(row => v.sheet.rowHeight(row));
+    expect(heights.reduce((total, height) => total + height, 0)).toBe(128);
+    expect(heights[2]).toBeGreaterThanOrEqual(56);
+    expect(v.sheet.rowHeight(3)).toBe(32);
+    v.undo();
+    expect([0, 1, 2].map(row => v.sheet.rowHeight(row))).toEqual([32, 32, 32]);
+    v.redo();
+    await view.onUnloadFile(file);
+    const loaded = (await reopen(saved.at(-1)!)).sheets[0];
+    expect([0, 1, 2].map(row => loaded.rowHeight(row))).toEqual(heights);
+  });
+
+  it("fits wrapped merged text after editing while keeping fixed and hidden rows", async () => {
+    const bytes = await xlsx({ styles: wrappedStyles, sheets: [sheetXml(
+      '<row r="1" ht="24" customHeight="1"><c r="A1" s="3" t="inlineStr"><is><t>Short</t></is></c></row>' +
+      '<row r="2" hidden="1"/>',
+      { before: "", after: '<mergeCells count="1"><mergeCell ref="A1:A3"/></mergeCells>' }
+    )] });
+    const { view, file } = await mount(bytes);
+    const v = view as any;
+    v.commit(0, 0, "One\nTwo\nThree\nFour\nFive");
+    expect([0, 1, 2].map(row => v.sheet.rowHeight(row))).toEqual([32, 0, 60]);
+    v.commit(0, 0, "Short");
+    expect([0, 1, 2].map(row => v.sheet.rowHeight(row))).toEqual([32, 0, 20]);
+    await view.onUnloadFile(file);
+  });
+
+  it("preserves enough height for overlapping vertical merges when fitting a covered row", async () => {
+    const text = "One\nTwo\nThree\nFour\nFive\nSix\nSeven";
+    const bytes = await xlsx({ styles: wrappedStyles, sheets: [sheetXml(
+      `<row r="1"><c r="A1" s="3" t="inlineStr"><is><t>${text}</t></is></c></row>` +
+      `<row r="3"><c r="B3" s="3" t="inlineStr"><is><t>${text}</t></is></c></row>`,
+      { before: "", after: '<mergeCells count="2"><mergeCell ref="A1:A3"/><mergeCell ref="B3:B5"/></mergeCells>' }
+    )] });
+    const { view, file } = await mount(bytes);
+    const v = view as any;
+    v.autofitRows(1, 1);
+    expect(v.sheet.rowY(3)).toBeGreaterThanOrEqual(128);
+    expect(v.sheet.rowY(5) - v.sheet.rowY(2)).toBeGreaterThanOrEqual(128);
+    await view.onUnloadFile(file);
+  });
+
+  it("uses only the active workbook's status formatting when switching files or reloading", async () => {
+    const statuses = (values: string[]) => xlsx({
+      sheets: [sheetXml(values.map((status, index) =>
+        `<row r="${index + 1}"><c r="G${index + 1}" t="inlineStr"><is><t>${status}</t></is></c></row>`
+      ).join(""), { before: "", after: '<conditionalFormatting sqref="G1:G3">' +
+        '<cfRule type="containsText" dxfId="0" priority="2" text="open"/>' +
+        '<cfRule type="containsText" dxfId="1" priority="1" text="closed"/></conditionalFormatting>' })],
+      styles: STYLES.replace("</styleSheet>", '<dxfs count="2">' +
+        '<dxf><fill><patternFill patternType="solid"><bgColor rgb="FFFFF2CC"/></patternFill></fill></dxf>' +
+        '<dxf><fill><patternFill patternType="solid"><bgColor rgb="FFE2F0D9"/></patternFill></fill></dxf></dxfs></styleSheet>'),
+    });
+    const previous = await statuses(["open", "closed", ""]);
+    const current = await statuses(["closed", "", "closed"]);
+    const { app, view, file, saved } = await mount(previous);
+    const v = view as any;
+    const fills = () => [0, 1, 2].map(row => v.conditional(v.sheet, row, 6)?.fill ?? null);
+    expect(fills()).toEqual(["#FFF2CC", "#E2F0D9", null]);
+    await view.onUnloadFile(file);
+    const next = new TFile("another.xlsx") as unknown as RealTFile;
+    view.file = next;
+    app.vault.readBinary = async () => current.slice().buffer as ArrayBuffer;
+    await view.onLoadFile(next);
+    expect(fills()).toEqual(["#E2F0D9", null, "#E2F0D9"]);
+    app.vault.readBinary = async () => previous.slice().buffer as ArrayBuffer;
+    await v.onExternalChange();
+    expect(fills()).toEqual(["#FFF2CC", "#E2F0D9", null]);
+    expect(saved).toHaveLength(0);
+    await view.onUnloadFile(next);
+  });
+
+  it("handles Alt+Enter in the view scope for the cell editor and formula bar", async () => {
+    const { view, file, input, saved } = await mount();
+    const v = view as any;
+    const key = v.scope.keys.find((key: { mods: string[]; key: string }) => key.mods.join() === "Alt" && key.key === "Enter");
+    expect(key).toBeDefined();
+    const altEnter = () => key.fn(new KeyboardEvent("keydown", { key: "Enter", altKey: true }));
+
+    v.grid.select({ row: 1, col: 1 });
+    v.grid.focusGrid();
+    expect(altEnter()).toBe(false);
+    expect(input.value).toBe("rich text\n");
+    v.grid.cancelEdit();
+
+    v.grid.beginEdit("FirstSecond", false);
+    input.setSelectionRange(5, 5);
+    expect(altEnter()).toBe(false);
+    expect(input.value).toBe("First\nSecond");
+    expect(v.grid.edit.text).toBe("First\nSecond");
+    v.grid.cancelEdit();
+
+    const formula = view.contentEl.querySelector<HTMLTextAreaElement>(".xlsx-formula-input")!;
+    formula.focus();
+    expect(document.activeElement).toBe(formula);
+    formula.value = "FirstSecond";
+    formula.setSelectionRange(5, 5);
+    expect(altEnter()).toBe(false);
+    expect(formula.value).toBe("First\nSecond");
+    expect(v.grid.edit.text).toBe("First\nSecond");
+    formula.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await view.onUnloadFile(file);
+    expect((await reopen(saved.at(-1)!)).sheets[0].cell("B2")!.value).toBe("First\nSecond");
+  });
+
+  it("fits rows with data in the selected columns without turning on wrap", async () => {
+    const bytes = await xlsx({ sheets: [sheetXml(
+      '<row r="1" ht="24" customHeight="1"><c r="A1"><v>1</v></c><c r="B1" t="inlineStr"><is><t>First\nSecond\nThird</t></is></c></row>' +
+      '<row r="2" ht="24" customHeight="1"><c r="B2"><v>2</v></c></row>' +
+      '<row r="3" ht="24" customHeight="1"><c r="C3"><v>3</v></c></row>'
+    )] });
+    const { view, file, saved } = await mount(bytes);
+    const v = view as any;
+    v.grid.select({ row: 0, col: 0 }, { row: MAX_ROW, col: 1 });
+    view.contentEl.querySelector(".xlsx-canvas")!.dispatchEvent(new MouseEvent("contextmenu", {
+      clientX: HEADER_W + 10, clientY: HEADER_H / 2, bubbles: true, cancelable: true,
+    }));
+    const item = Menu.last!.items.find((item) => item.title === "Fit row height to data");
+    expect(item).toBeDefined();
+    item!.run!(new MouseEvent("click"));
+    const fitted = v.sheet.rowHeight(0);
+    expect(fitted).toBeGreaterThan(40);
+    expect(v.sheet.rowHeight(1)).toBe(20);
+    expect(v.sheet.rowHeight(2)).toBe(32);
+    v.undo();
+    expect(v.sheet.rowHeight(0)).toBe(32);
+    v.redo();
+    expect(v.sheet.rowHeight(0)).toBe(fitted);
+    expect(v.sheet.rowHeight(2)).toBe(32);
+    expect(v.wb.styles.format(v.sheet.cell("B1").style).wrap).toBe(false);
+    await view.onUnloadFile(file);
+    expect((await reopen(saved.at(-1)!)).sheets[0].rowHeight(0)).toBe(fitted);
+  });
+
+  it("fits edited rows to their contents and keeps a manually sized row until explicitly fitted", async () => {
+    const bytes = await xlsx({ sheets: [sheetXml(
+      '<row r="1"><c r="A1" t="inlineStr"><is><t>Short</t></is></c></row>' +
+      '<row r="2" ht="24" customHeight="1"><c r="A2" t="inlineStr"><is><t>Fixed</t></is></c></row>' +
+      '<row r="3" ht="24" customHeight="1" hidden="1"><c r="A3" t="inlineStr"><is><t>Hidden</t></is></c></row>'
+    )] });
+    const { view, file, saved } = await mount(bytes);
+    const v = view as any;
+    const text = "First line\nSecond line\nThird line";
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    expect(saved).toHaveLength(0);
+    v.commit(0, 0, text);
+    const fitted = v.sheet.rowHeight(0);
+    expect(fitted).toBeGreaterThan(40);
+    v.undo();
+    expect(v.sheet.cell("A1").value).toBe("Short");
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    v.redo();
+    expect(v.sheet.rowHeight(0)).toBe(fitted);
+
+    v.commit(1, 0, text);
+    expect(v.sheet.rowHeight(1)).toBe(32);
+    view.contentEl.querySelector(".xlsx-canvas")!.dispatchEvent(new MouseEvent("contextmenu", {
+      clientX: 10, clientY: HEADER_H + fitted + 10, bubbles: true, cancelable: true,
+    }));
+    Menu.last!.items.find((item) => item.title === "Fit row height to data")!.run!(new MouseEvent("click"));
+    expect(v.sheet.rowHeight(1)).toBe(fitted);
+    expect(v.sheet.rowHeight(2)).toBe(0);
+    await view.onUnloadFile(file);
+    const wb = await reopen(saved.at(-1)!);
+    expect(wb.sheets[0].rowHeight(1)).toBe(fitted);
+    expect(wb.sheets[0].rowEl(1, false)?.getAttribute("customHeight")).toBeNull();
+    expect(wb.sheets[0].rowHeight(2)).toBe(0);
+  });
+  it("fits wrapped Chinese text after editing and recalculates the height when the column is resized", async () => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement, id, options) {
+      if (id === "2d" && !this.isConnected) {
+        return { measureText: (text: string) => ({ width: Array.from(text).length * 10 }) } as CanvasRenderingContext2D;
+      }
+      return getContext.call(this, id, options);
+    });
+    const { view, file, saved } = await mount(await xlsx({ sheets: [sheetXml("")] }));
+    const v = view as any;
+    v.format({ wrap: true });
+    v.commit(0, 0, "短句 中文内容可以在没有空格的地方换行");
+    const narrow = v.sheet.rowHeight(0);
+    expect(narrow).toBeGreaterThan(40);
+    v.change(() => v.resizeColumns(0, 0, 300));
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    v.undo();
+    expect(v.sheet.rowHeight(0)).toBe(narrow);
+    v.commit(0, 0, "短句");
+    expect(v.sheet.rowHeight(0)).toBe(20);
+    await view.onUnloadFile(file);
+    expect((await reopen(saved.at(-1)!)).sheets[0].rowHeight(0)).toBe(20);
+  });
   it("finds notes and replies in empty cells, opens the matching message and excludes annotations from replace", async () => {
     const { view, file } = await mount();
     const v = view as any;

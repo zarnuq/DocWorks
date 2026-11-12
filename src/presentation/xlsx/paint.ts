@@ -4,6 +4,8 @@
  * paint operations (plain data, which tests read), and `paint` draws them.
  */
 import type { Sparkline } from "../../domain/xlsx/sparklines";
+import type { Format } from "../../domain/xlsx/styles";
+import { fontStack } from "../../core/utils/fonts";
 
 export type Op =
   | { kind: "rect"; x: number; y: number; w: number; h: number; color: string }
@@ -107,29 +109,47 @@ function drawSpark(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "spark
 }
 
 /** Lines of `text` wrapped to `width` at spaces (long words break anywhere). */
-function wrapLines(ctx: CanvasRenderingContext2D, text: string, width: number): string[] {
+function wrapLines(ctx: Pick<CanvasRenderingContext2D, "measureText">, text: string, width: number): string[] {
   const out: string[] = [];
   for (const para of text.split("\n")) {
     let line = "";
     // Words with the space after them (no lookbehind: iOS before 16.4 lacks it).
     for (const word of para.match(/[^ ]+ ?| /g) ?? []) {
-      if (ctx.measureText(line + word).width <= width || !line) {
-        line += word;
-        // A single word wider than the cell: break it by characters.
-        while (ctx.measureText(line).width > width && line.length > 1) {
-          let cut = line.length - 1;
-          while (cut > 1 && ctx.measureText(line.slice(0, cut)).width > width) cut--;
-          out.push(line.slice(0, cut));
-          line = line.slice(cut);
-        }
-      } else {
+      if (line && ctx.measureText(line + word).width > width) {
         out.push(line.trimEnd());
-        line = word;
+        line = "";
+      }
+      line += word;
+      // Break an oversized word (including unspaced CJK text) one line at a time.
+      if (ctx.measureText(line).width > width) {
+        const chars = Array.from(line);
+        let start = 0;
+        for (let end = 2; end <= chars.length; end++) {
+          if (ctx.measureText(chars.slice(start, end).join("")).width <= width) continue;
+          out.push(chars.slice(start, end - 1).join(""));
+          start = end - 1;
+        }
+        line = chars.slice(start).join("");
       }
     }
     out.push(line.trimEnd());
   }
   return out;
+}
+
+export function cellTextFont(format: Pick<Format, "fontName" | "bold" | "italic">, px: number): string {
+  return `${format.italic ? "italic " : ""}${format.bold ? "bold " : ""}${px}px ${fontStack(format.fontName)}`;
+}
+
+type TextLayout = Pick<Extract<Op, { kind: "text" }>, "text" | "w" | "pad" | "size" | "wrap">;
+export const cellTextLineHeight = (px: number) => Math.round(px * 1.25);
+
+function textLines(ctx: Pick<CanvasRenderingContext2D, "measureText"> | null, op: TextLayout): string[] {
+  return ctx && op.wrap ? wrapLines(ctx, op.text, Math.max(1, op.w - 2 * PAD - op.pad)) : op.text.split("\n");
+}
+
+export function cellTextHeight(ctx: Pick<CanvasRenderingContext2D, "measureText"> | null, op: TextLayout): number {
+  return textLines(ctx, op).length * cellTextLineHeight(op.size) + 2;
 }
 
 function drawText(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "text" }>): void {
@@ -149,9 +169,8 @@ function drawTextIn(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "text
   ctx.strokeStyle = color;
   ctx.textAlign = op.align;
   ctx.textBaseline = "alphabetic";
-  const inner = op.w - 2 * PAD - op.pad;
-  const lines = op.wrap ? wrapLines(ctx, op.text, Math.max(1, inner)) : op.text.split("\n");
-  const lh = Math.round(op.size * 1.25);
+  const lines = textLines(ctx, op);
+  const lh = cellTextLineHeight(op.size);
   const block = lh * lines.length;
   const top = op.valign === "top" ? op.y + 1 : op.valign === "center" ? op.y + (op.h - block) / 2 : op.y + op.h - block - 1;
   const x = op.align === "left" ? op.x + PAD + op.pad : op.align === "right" ? op.x + op.w - PAD - op.pad : op.x + op.w / 2;
