@@ -319,6 +319,13 @@ export class XlsxView extends FileView {
       deletePicture: (key) => this.change(() => deletePicture(this.edits!, this.sheet, key)),
       toggleGroup: (axis, g) => this.change(() => setGroupCollapsed(this.edits!, this.sheet, axis, g, !g.collapsed)),
     });
+    this.grid.el.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey || !event.deltaY || !this.grid) return;
+      event.preventDefault();
+      const current = SHEET_ZOOMS.indexOf(String(this.grid.zoom));
+      const next = SHEET_ZOOMS[current - Math.sign(event.deltaY)];
+      if (next) this.setZoom(next);
+    }, { passive: false });
     this.grid.readOnly = this.grid.input.readOnly = this.formulaInput.readOnly = this.settings.readOnly;
     if (this.savedZoom() !== "1") this.grid.setZoom(Number(this.savedZoom()));
     const bottom = this.contentEl.createDiv({ cls: "xlsx-bottom" });

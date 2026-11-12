@@ -57,6 +57,36 @@ const wrappedStyles = STYLES.replace('<cellXfs count="3">', '<cellXfs count="4">
   .replace("</cellXfs>", '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>');
 
 describe("XlsxView", () => {
+  it("zooms the worksheet with Ctrl+wheel using the toolbar levels", async () => {
+    const { app, view, file, saved } = await mount();
+    const persistZoom = vi.spyOn(app, "saveLocalStorage").mockImplementation(() => {});
+    const grid = view.contentEl.querySelector<HTMLElement>(".xlsx-grid")!;
+    const canvas = grid.querySelector(".xlsx-canvas")!;
+    const select = view.contentEl.querySelector<HTMLSelectElement>('select[aria-label="Zoom"]')!;
+    const wheel = (deltaY: number, ctrlKey = true, target = canvas) => target.dispatchEvent(
+      new WheelEvent("wheel", { deltaY, ctrlKey, bubbles: true, cancelable: true }),
+    );
+
+    expect(wheel(-120, false)).toBe(true);
+    expect(wheel(-120, true, select)).toBe(true);
+    expect(wheel(0)).toBe(true);
+    expect(select.value).toBe("1");
+    expect(persistZoom).not.toHaveBeenCalled();
+
+    expect(wheel(-120)).toBe(false);
+    expect(select.value).toBe("1.25");
+    expect(grid.style.getPropertyValue("zoom")).toBe("1.25");
+    expect(persistZoom).toHaveBeenLastCalledWith("doc-works-xlsx-zoom", "1.25");
+    for (const level of ["1", "0.9", "0.75", "0.5"]) {
+      expect(wheel(120)).toBe(false);
+      expect(select.value).toBe(level);
+    }
+    expect(wheel(120)).toBe(false);
+    expect(select.value).toBe("0.5");
+    await view.onUnloadFile(file);
+    expect(saved).toHaveLength(0);
+  });
+
   it("fits the entire wrapped vertical merge from a covered column and keeps other cells readable", async () => {
     const bytes = await xlsx({ styles: wrappedStyles, sheets: [sheetXml(
       '<row r="1" ht="24" customHeight="1"><c r="A1" s="3" t="inlineStr"><is><t>One\nTwo\nThree\nFour\nFive\nSix\nSeven</t></is></c></row>' +
