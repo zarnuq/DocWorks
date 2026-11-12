@@ -2331,6 +2331,8 @@ textarea.pptx-notes {
   opacity: 0;
   background: var(--xlsx-paper, #ffffff);
   color: var(--xlsx-ink, #000000);
+  /* The theme's caret is light in dark themes, unseen on white paper. */
+  caret-color: var(--xlsx-ink, #000000);
   font-family: Arial, "Liberation Sans", sans-serif;
   font-size: 10pt;
   line-height: 1.25;
