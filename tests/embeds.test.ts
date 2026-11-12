@@ -33,6 +33,26 @@ describe("embeds in notes", () => {
     done();
   });
 
+  it("reports the sheet a tab shows, so opening the file goes there", async () => {
+    const bytes = await xlsx({ sheets: [sheetXml(""), sheetXml("")], names: ["One", "100% two"] });
+    const el = document.body.createDiv();
+    const places: string[] = [];
+    const done = await renderXlsxEmbed(el, bytes, "", (p) => places.push(p));
+    (el.querySelectorAll(".dw-embed-tabs button")[1] as HTMLButtonElement).click();
+    expect(places).toEqual(["#100%25%20two"]);
+    expect(sheetTarget(places[0], ["One", "100% two"])).toEqual({ sheet: "100% two", range: null });
+    done();
+  });
+
+  it("reports the slide shown after previous / next", async () => {
+    const el = document.body.createDiv();
+    const places: string[] = [];
+    const done = await renderPptxEmbed(el, readFileSync("tests/fixtures/sample.pptx"), "#2", (p) => places.push(p));
+    (el.querySelector("button[aria-label='Previous slide']") as HTMLButtonElement).click();
+    expect(places).toEqual(["#1"]);
+    done();
+  });
+
   it("reads a sheet and range from #Sheet!A1:B2, #A1:B2 or #Sheet", () => {
     const names = ["One", "My Sheet", "A1"];
     expect(sheetTarget("#One!B2:C3", names)).toEqual({ sheet: "One", range: { r1: 1, c1: 1, r2: 2, c2: 2 } });

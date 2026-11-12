@@ -82,8 +82,11 @@ const blobUrl = (bytes: Uint8Array, path: string) => {
   return URL.createObjectURL(new Blob([bytes as BlobPart], { type: IMAGE_MIME[ext] ?? `image/${ext}` }));
 };
 
+/** Told the link subpath of what the embed now shows ("#3", "#Sheet"), so opening the file goes there. */
+type OnPlace = (subpath: string) => void;
+
 /** A deck's slide, with previous / next buttons. Returns what to undo when the embed goes. */
-export async function renderPptxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint8Array, subpath: string): Promise<() => void> {
+export async function renderPptxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint8Array, subpath: string, onPlace?: OnPlace): Promise<() => void> {
   const doc = await PptxDocument.load(bytes);
   const urls = new Map<string, string>();
   for (const path of doc.mediaPaths()) if (IMAGE_MIME[path.slice(path.lastIndexOf(".") + 1).toLowerCase()]) urls.set(path, blobUrl(await doc.media(path), path));
@@ -101,8 +104,13 @@ export async function renderPptxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
     renderSlide(stage, parseSlide(doc, doc.slides()[index].path), doc.slideSize, { width, editable: false, imageUrl: (p) => urls.get(p) ?? null, slideNumber: index + 1 });
     label.setText(`${index + 1} / ${count}`);
   };
-  prev.addEventListener("click", () => { index = Math.max(0, index - 1); draw(); });
-  next.addEventListener("click", () => { index = Math.min(count - 1, index + 1); draw(); });
+  const go = (i: number) => {
+    index = i;
+    draw();
+    onPlace?.(`#${index + 1}`);
+  };
+  prev.addEventListener("click", () => go(Math.max(0, index - 1)));
+  next.addEventListener("click", () => go(Math.min(count - 1, index + 1)));
   draw();
   // Redrawn at the note's width (the slide is laid out in pixels).
   let last = el.clientWidth;
@@ -121,7 +129,7 @@ export async function renderPptxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
 }
 
 /** A sheet's used area (up to MAX_ROWS × MAX_COLS) as the grid draws it, with sheet tabs when there are several. */
-export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint8Array, subpath: string): Promise<() => void> {
+export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint8Array, subpath: string, onPlace?: OnPlace): Promise<() => void> {
   const edits = new Edits(Workbook.open(await XlsxWorkbook.load(bytes)));
   const wb = edits.wb;
   const visible = wb.sheets.filter((s) => s.ref.state === "visible");
@@ -171,6 +179,7 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
   for (const s of visible) tabs?.createEl("button", { text: s.name }).addEventListener("click", () => {
     sheet = s;
     void draw();
+    onPlace?.(`#${encodeURIComponent(s.name)}`);
   });
   await draw();
   return () => {
@@ -206,9 +215,12 @@ type Kind = keyof typeof RENDER;
 
 class OfficeEmbed extends Component {
   private cleanup: (() => void) | null = null;
+  /** What the embed shows (a tab or slide the reader moved to), where the title opens the file. */
+  private place: string;
 
   constructor(private app: App, private containerEl: HTMLElement, private file: TFile, private subpath: string, private kind: Kind) {
     super();
+    this.place = subpath;
   }
 
   /** Called by Obsidian once the embed is attached. */
@@ -217,10 +229,10 @@ class OfficeEmbed extends Component {
     el.empty();
     el.addClass("dw-embed", `dw-embed-file-${this.kind}`);
     const title = el.createDiv({ cls: "dw-embed-title", text: this.file.basename });
-    title.addEventListener("click", () => void this.app.workspace.getLeaf("tab").openFile(this.file));
+    title.addEventListener("click", () => void this.app.workspace.getLeaf("tab").openFile(this.file, this.place ? { eState: { subpath: this.place } } : undefined));
     const body = el.createDiv({ cls: `dw-embed-body dw-embed-${this.kind}` });
     try {
-      this.cleanup = await RENDER[this.kind](body, await this.app.vault.readBinary(this.file), this.subpath);
+      this.cleanup = await RENDER[this.kind](body, await this.app.vault.readBinary(this.file), this.subpath, (p) => (this.place = p));
     } catch (err) {
       body.setText(`Couldn't show this file: ${(err as Error).message}`);
     }
