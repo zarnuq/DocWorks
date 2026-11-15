@@ -169,6 +169,8 @@ export class DocxView extends FileView {
   private pageView = this.app.loadLocalStorage(PAGE_VIEW_KEY) !== "off";
   private zoom: string = ZOOMS.includes(this.app.loadLocalStorage(ZOOM_KEY) as string) ? (this.app.loadLocalStorage(ZOOM_KEY) as string) : "fit";
   private zoomSelect: HTMLSelectElement | null = null;
+  /** A zoom picked while the pane is narrow; until then a narrow pane fits the page to its width. Not remembered. */
+  private narrowZoom: string | null = null;
   private hostEl: HTMLElement | null = null;
   private linked = new LinkedFrom(this, "docx", () => this.renderOutline());
   private wordsEl: HTMLElement | null = null;
@@ -487,8 +489,9 @@ export class DocxView extends FileView {
     this.resizeObserver.observe(host);
     this.narrowWatch = watchNarrow(this.contentEl, (narrow) => {
       if (!narrow) this.closeDrawer?.();
+      this.narrowZoom = null;
       (this.ribbon ?? this.toolbar)?.fit();
-      this.fitDocument();
+      this.showZoom();
     });
     this.updateWordCount();
     this.renderReview();
@@ -615,9 +618,22 @@ export class DocxView extends FileView {
 
   /** View › Zoom: "fit" shrinks a page wider than the pane to fit it, as before; a number is that zoom, remembered. */
   private setZoom(zoom: string): void {
-    this.zoom = ZOOMS.includes(zoom) ? zoom : "fit";
-    this.app.saveLocalStorage(ZOOM_KEY, this.zoom);
-    if (this.zoomSelect) this.zoomSelect.value = this.zoom;
+    const value = ZOOMS.includes(zoom) ? zoom : "fit";
+    if (this.contentEl.hasClass("is-narrow")) this.narrowZoom = value;
+    else {
+      this.zoom = value;
+      this.app.saveLocalStorage(ZOOM_KEY, value);
+    }
+    this.showZoom();
+  }
+
+  /** The zoom in use: a narrow pane (a phone) fits the page to its width unless a zoom was picked there. */
+  private get shownZoom(): string {
+    return this.contentEl.hasClass("is-narrow") ? (this.narrowZoom ?? "fit") : this.zoom;
+  }
+
+  private showZoom(): void {
+    if (this.zoomSelect) this.zoomSelect.value = this.shownZoom;
     this.fitDocument();
     this.statusBar?.update();
     this.ribbon?.sync();
@@ -629,7 +645,8 @@ export class DocxView extends FileView {
     const padding = getComputedStyle(host);
     const available = host.clientWidth - (Number.parseFloat(padding.paddingLeft) || 0) - (Number.parseFloat(padding.paddingRight) || 0);
     const fit = this.pageView && available > 0 ? Math.min(1, available / setup.width) : 1;
-    const zoom = this.zoom === "fit" ? fit : Number(this.zoom);
+    const shown = this.shownZoom;
+    const zoom = shown === "fit" ? fit : Number(shown);
     const value = String(zoom);
     const changed = editor.dom.style.zoom !== value;
     editor.dom.style.zoom = value;
@@ -722,7 +739,7 @@ export class DocxView extends FileView {
     tb.pin();
     sep();
     this.zoomSelect = tb.select("Zoom", "Zoom", ZOOMS.map((z) => [zoomLabel(z), z]), (z) => this.setZoom(z));
-    this.zoomSelect.value = this.zoom;
+    this.zoomSelect.value = this.shownZoom;
     this.pageViewBtn = tb.icon("file-text", "Page view", () => this.togglePageView());
     this.pageViewBtn.toggleClass("is-active", this.pageView);
     tb.keep();
@@ -803,7 +820,7 @@ export class DocxView extends FileView {
       menuItem(mn, "Review panel", () => this.toggleReview(), { checked: this.reviewOpen });
       menuItem(mn, "Linked from", () => this.linked.toggle());
       subMenu(mn, "Zoom", (z) => {
-        for (const value of ZOOMS) menuItem(z, zoomLabel(value), () => this.setZoom(value), { checked: this.zoom === value });
+        for (const value of ZOOMS) menuItem(z, zoomLabel(value), () => this.setZoom(value), { checked: this.shownZoom === value });
       });
       mn.addSeparator();
       menuItem(mn, "Light", () => this.setPaperTheme("light"), { checked: this.paperTheme === "light" });
@@ -1009,7 +1026,7 @@ export class DocxView extends FileView {
         }
       } },
     ], this.app, "doc-works-sb-docx"));
-    bar.zoom({ get: () => this.zoom, set: (z) => this.setZoom(z), levels: ZOOMS });
+    bar.zoom({ get: () => this.shownZoom, set: (z) => this.setZoom(z), levels: ZOOMS });
     const status = new SaveStatus(bar.save);
     if (this.settings.readOnly) bar.save.hide();
     else this.autosave.status = status;
@@ -1165,7 +1182,7 @@ export class DocxView extends FileView {
       ViewRulerWord: { label: "Ruler", icon: "ruler", run: () => this.toggleRuler(), active: () => this.rulerViewport?.style.display !== "none" },
       NavigationPaneShowHide: { label: "Navigation Pane", icon: "list-tree", run: () => this.toggleOutline(), active: () => this.outlineOpen, view: true },
       ZoomDialog: { label: "Zoom", icon: "zoom-in", view: true, menu: (mn) => {
-        for (const z of ZOOMS) menuItem(mn, zoomLabel(z), () => this.setZoom(z), { checked: this.zoom === z });
+        for (const z of ZOOMS) menuItem(mn, zoomLabel(z), () => this.setZoom(z), { checked: this.shownZoom === z });
       } },
       ZoomCurrent100: { label: "100%", icon: "scan", run: () => this.setZoom("1"), view: true },
       ZoomPageWidth: { label: "Page Width", icon: "move-horizontal", run: () => this.setZoom("fit"), view: true },

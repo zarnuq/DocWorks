@@ -1980,3 +1980,33 @@ describe("File › Properties", () => {
     expect(Array.from(last.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Close"]);
   });
 });
+
+describe("DocxView zoom in a narrow pane", () => {
+  it("fits the page to the width when narrow, whatever zoom the wide pane uses, and keeps a zoom picked while narrow for that time only", async () => {
+    localData.set("doc-works-docx-zoom", "1");
+    const view = mount(DocxView, "sample.docx");
+    const file = await open(view, "zoom.docx");
+    const v = view as any;
+    Object.defineProperty(v.hostEl, "clientWidth", { configurable: true, get: () => (view.contentEl.hasClass("is-narrow") ? 408 : 1200) });
+    v.fitDocument();
+    expect(v.editor.dom.style.zoom).toBe("1");
+    Object.defineProperty(view.contentEl, "clientWidth", { configurable: true, value: 420 });
+    v.narrowWatch.check();
+    const fit = Number(v.editor.dom.style.zoom);
+    expect(fit).toBeGreaterThan(0.3);
+    expect(fit).toBeLessThan(1);
+    expect(v.zoomSelect.value).toBe("fit");
+    v.setZoom("1.5");
+    expect(v.editor.dom.style.zoom).toBe("1.5");
+    expect(localData.get("doc-works-docx-zoom")).toBe("1");
+    Object.defineProperty(view.contentEl, "clientWidth", { configurable: true, value: 1300 });
+    v.narrowWatch.check();
+    expect(v.editor.dom.style.zoom).toBe("1");
+    expect(v.zoomSelect.value).toBe("1");
+    Object.defineProperty(view.contentEl, "clientWidth", { configurable: true, value: 420 });
+    v.narrowWatch.check();
+    expect(v.zoomSelect.value).toBe("fit");
+    await view.onUnloadFile(file);
+    localData.delete("doc-works-docx-zoom");
+  });
+});
