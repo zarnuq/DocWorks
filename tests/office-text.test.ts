@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { officeText, searchText } from "../src/infrastructure/office-text";
 import { fixture } from "./helpers";
+import { DocxDocument } from "../src/infrastructure/docx/docx-document";
+import { writeProps } from "../src/infrastructure/ooxml/doc-props";
 import { sheetXml, xlsx } from "./xlsx-fixtures";
 
 describe("text of Office files, for vault search", () => {
@@ -8,6 +10,16 @@ describe("text of Office files, for vault search", () => {
     const parts = await officeText("docx", fixture("sample.docx"));
     expect(parts[0]).toEqual({ label: "", text: "Doc Heading" });
     expect(parts.some((p) => p.text.startsWith("Plain bold and italic"))).toBe(true);
+  });
+
+  it("puts the file's properties first when asked (search), not otherwise (version compare)", async () => {
+    const docx = await DocxDocument.load(fixture("sample.docx"));
+    writeProps(docx, { title: "Quarterly plan", keywords: "budget", subject: "" });
+    const bytes = await docx.save();
+    const parts = await officeText("docx", bytes, { properties: true });
+    expect(parts[0]).toEqual({ label: "Properties · Title", text: "Quarterly plan" });
+    expect(parts).toContainEqual({ label: "Properties · Keywords", text: "budget" });
+    expect((await officeText("docx", bytes))[0]).toEqual({ label: "", text: "Doc Heading" });
   });
 
   it("reads slides in deck order, labelled by slide", async () => {

@@ -16,8 +16,9 @@ GPL-3.0.
 
 ## Layout
 
-- `src/core/` — xml namespaces/helpers, `History<T>` undo stack, `utils/fonts.ts` (CSS font stacks with metric-compatible fallbacks, shared by both views and by text measuring).
+- `src/core/` — xml namespaces/helpers, `History<T>` undo stack, `utils/fonts.ts` (CSS font stacks with metric-compatible fallbacks, shared by both views and by text measuring), `utils/markdown.ts` (Markdown read line by line for pasting: blocks, inline marks, `looksLikeMarkdown`, `markdownToPlain`; docx pastes go through `domain/docx/from-markdown.ts` into the note export's `htmlToDoc`, slides through `insertMarkdown` in `presentation/pptx/text-html.ts`).
 - `src/infrastructure/ooxml/ooxml-package.ts` — shared OPC zip: every XML part as a live DOM, rels, content types, media, snapshot/restore, save. With `dirtyOnly` (xlsx) save writes only parts passed to `touch` (plus new/removed ones), so untouched parts keep their bytes.
+- `src/infrastructure/ooxml/doc-props.ts` — docProps/core.xml for all three formats (`readProps` / `writeProps`, `filePropsOf` on raw bytes for search and companion notes, `fromTemplate` for New from template); `presentation/common/properties-dialog.ts` is File › Properties.
 - `src/infrastructure/xlsx/xlsx-workbook.ts` — workbook package: sheets found through relationships (tab order, sheetId, rId, path kept apart), shared strings, add/delete sheet parts, `dropCalcChain`.
 - `src/infrastructure/blank.ts` — blank 16:9 deck / Letter document / one-sheet workbook for the New presentation / document / spreadsheet commands.
 - `src/infrastructure/{pptx,docx}/` — format packages on top of it (slide ops incl. layouts/`setLayout`, background, `setSlideSize`, p14 sections kept in step by `adjustSections`; docx main part, images, numbering/`ensureList`).

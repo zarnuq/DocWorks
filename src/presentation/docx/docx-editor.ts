@@ -58,6 +58,11 @@ function codeBlockAt($pos: ResolvedPos): { node: PMNode; pos: number } | null {
   return null;
 }
 
+/** Whether the caret is in a code box (pastes go in as written there). */
+export function inCodeBlock(state: EditorState): boolean {
+  return !!codeBlockAt(state.selection.$from);
+}
+
 /** Positions and nodes of the paragraphs touched by the selection. */
 function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[] {
   const out: { pos: number; node: PMNode }[] = [];

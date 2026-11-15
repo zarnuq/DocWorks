@@ -27,11 +27,13 @@ export interface DocWorksSettings {
   /** Keep earlier versions of files before saving over them (File › Version history), for `historyDays` days. */
   history: boolean;
   historyDays: number;
+  /** Vault folder whose .docx / .pptx / .xlsx (and .dotx / .potx / .xltx) files New from template offers; "" = none. */
+  templatesFolder: string;
 }
 
 export const DEFAULT_SETTINGS: DocWorksSettings = {
   pageSize: "document", author: "", paperDocx: "default", paperPptx: "default", paperXlsx: "default", officeDocx: false, officePptx: false, officeXlsx: false,
-  openDocx: true, openPptx: true, openXlsx: true, readOnly: false, history: true, historyDays: 14,
+  openDocx: true, openPptx: true, openXlsx: true, readOnly: false, history: true, historyDays: 14, templatesFolder: "",
 };
 
 const PAPERS: readonly unknown[] = ["default", "light", "dark", "obsidian"];

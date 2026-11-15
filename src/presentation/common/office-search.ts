@@ -109,7 +109,7 @@ export class OfficeSearchView extends ItemView {
     if (cached && cached.mtime === file.stat.mtime) return cached.parts;
     let parts: TextPart[] = [];
     try {
-      parts = await officeText(file.extension.toLowerCase() as "docx", await this.app.vault.readBinary(file));
+      parts = await officeText(file.extension.toLowerCase() as "docx", await this.app.vault.readBinary(file), { properties: true });
     } catch (err) {
       console.warn(`[doc-works] couldn't read ${file.path} for search`, err);
     }

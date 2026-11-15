@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderParagraphs, refreshMarks, insertPlainText, readParagraphs, applyRunStyle, selectionRunProps, updateParagraphs } from "../src/presentation/pptx/text-html";
+import { renderParagraphs, refreshMarks, insertMarkdown, insertPlainText, readParagraphs, applyRunStyle, selectionRunProps, updateParagraphs } from "../src/presentation/pptx/text-html";
 import type { Para, RunProps } from "../src/domain/pptx/slide-model";
 
 const PX_PER_PT = 2;
@@ -233,6 +233,13 @@ describe("renderParagraphs spacing", () => {
 });
 
 describe("insertPlainText", () => {
+  it("joins the last paragraph when the caret is at the box's end, outside every paragraph", () => {
+    renderParagraphs(host, [para([run("one")], { align: "ctr" })], PX_PER_PT);
+    select(host, 1, host, 1);
+    insertPlainText(" more");
+    expect(read().map((p) => [p.runs.map((r) => r.text).join(""), p.align])).toEqual([["one more", "ctr"]]);
+  });
+
   it("replaces the selection with text, turning newlines into line breaks", () => {
     renderParagraphs(host, [para([run("hello world")])], PX_PER_PT);
     const text = host.querySelector("span")!.firstChild!;
@@ -243,6 +250,48 @@ describe("insertPlainText", () => {
     const caret = window.getSelection()!.getRangeAt(0);
     expect(caret.collapsed).toBe(true);
     expect(caret.startContainer.textContent).toBe("day");
+  });
+});
+
+describe("insertMarkdown", () => {
+  it("splits the paragraph at the caret into bulleted, numbered and indented paragraphs with bold headings and inline marks", () => {
+    renderParagraphs(host, [para([run("before after")], { lvl: 1 })], PX_PER_PT);
+    const text = host.querySelector("span")!.firstChild!;
+    select(text, 7, text, 7);
+    insertMarkdown(host, "## Head\n- a **b**\n  - c\n1. one\n- [x] done\nplain [l](https://x.y)", PX_PER_PT);
+    const paras = read();
+    expect(paras.map((p) => [p.runs.map((r) => r.text).join(""), p.lvl, p.bullet])).toEqual([
+      ["before Head", 1, null],
+      ["a b", 1, "•"],
+      ["c", 2, "•"],
+      ["one", 1, "#arabicPeriod"],
+      ["☑ done", 1, null],
+      ["plain lafter", 1, null],
+    ]);
+    expect(paras[0].runs.find((r) => r.text === "Head")?.b).toBe(true);
+    expect(paras[1].runs.find((r) => r.text === "b")?.b).toBe(true);
+    expect(paras[5].runs.find((r) => r.text === "l")?.link).toBe("https://x.y");
+    // The caret ends after the pasted text, before the rest of the paragraph.
+    const caret = window.getSelection()!.getRangeAt(0);
+    expect(caret.collapsed).toBe(true);
+    expect(caret.startContainer.childNodes[caret.startOffset - 1].textContent).toBe("l");
+  });
+
+  it("pastes with the caret between paragraphs or over the whole box (Select all)", () => {
+    renderParagraphs(host, [para([run("one")]), para([run("two")])], PX_PER_PT);
+    select(host, 2, host, 2);
+    insertMarkdown(host, "- a\n- b", PX_PER_PT);
+    expect(read().map((p) => [p.runs.map((r) => r.text).join(""), p.bullet])).toEqual([["one", null], ["twoa", null], ["b", "•"]]);
+    select(host, 0, host, host.childNodes.length);
+    insertMarkdown(host, "# T\n- x", PX_PER_PT);
+    expect(read().map((p) => [p.runs.map((r) => r.text).join(""), p.bullet])).toEqual([["T", null], ["x", "•"]]);
+  });
+
+  it("gives an empty paragraph the first pasted line's bullet", () => {
+    renderParagraphs(host, [para([])], PX_PER_PT);
+    select(host.firstChild!, 0, host.firstChild!, 0);
+    insertMarkdown(host, "- x\n- y", PX_PER_PT);
+    expect(read().map((p) => [p.runs.map((r) => r.text).join(""), p.bullet])).toEqual([["x", "•"], ["y", "•"]]);
   });
 });
 

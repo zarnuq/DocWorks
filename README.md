@@ -70,7 +70,8 @@ If it saves you a trip to Office, please ⭐ the repo.
 - Read-only mode in settings: view files without any chance of changing them
 - Version history: earlier versions are kept (in the app, not the vault) before saving; File › Version history to preview, compare with the file now, and restore
 - Export to PDF; slides to PNG, sheets to CSV
-- New document / presentation / spreadsheet commands
+- New document / presentation / spreadsheet commands, or New from template from a folder of your own files (Office .dotx / .potx / .xltx too)
+- File › Properties: title, author, keywords and description, searchable from the vault search
 - No Office or other software needed; works offline and on mobile
 
 ### Notes and Markdown
@@ -81,6 +82,7 @@ If it saves you a trip to Office, please ⭐ the repo.
 - **Export to Markdown** from a Word file, keeping frontmatter, tasks, callouts and code languages from notes exported here
 - **Export current note to .docx** also brings in embedded files: sheets as tables, slides as pictures, documents as their content
 - Embed a file in a note: `![[report.docx]]`, `![[deck.pptx#3]]`, `![[budget.xlsx#Sheet2]]`, or just a range: `![[budget.xlsx#Sheet2!A1:D10]]`
+- **Paste Markdown:** text copied from a note pastes into documents as headings, lists, tasks, quotes, code boxes, tables and links, and into slides as bullets, numbering, bold and links; Paste without formatting drops the Markdown syntax
 - **Copy as Markdown:** a sheet range as a Markdown table, a deck as a headed outline
 - **Links to a place in a file:** `[[deck.pptx#5]]`, `[[budget.xlsx#Sheet2!B4]]`, `[[report.docx#Results]]` open at that slide, cell or heading; Edit › Copy link makes them
 - **A section of a document:** `![[report.docx#Results]]` embeds just that heading's section

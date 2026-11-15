@@ -1916,3 +1916,67 @@ describe("PptxView context menus", () => {
     await view.onUnloadFile(file);
   });
 });
+
+describe("DocxView Markdown paste", () => {
+  const paste = (editor: any, types: Record<string, string>) => {
+    const event = { clipboardData: { files: [], types: Object.keys(types), getData: (t: string) => types[t] ?? "" } };
+    return editor.someProp("handlePaste", (f: any) => f(editor, event, editor.state.doc.slice(0, 0)));
+  };
+
+  it("pastes a note's Markdown as headings, lists and bold, saved as Word lists and styles", async () => {
+    const app = new App();
+    app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
+    const saved = vi.spyOn(app.vault, "modifyBinary");
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, pageSize: "document" as const });
+    document.body.appendChild(view.containerEl);
+    await open(view, "md.docx");
+    const editor = (view as any).editor;
+    expect(paste(editor, { "text/plain": "## Plan\n- **first**\n1. one" })).toBe(true);
+    const texts: [string, string | null, string | null][] = [];
+    editor.state.doc.forEach((n: any) => texts.push([n.textContent, n.attrs.style, n.attrs.numId]));
+    expect(texts.slice(0, 3)).toMatchObject([["Plan", "Heading2", null], ["first", null, expect.any(String)], ["one", null, expect.any(String)]]);
+    await view.requestSave();
+    const back = await DocxDocument.load(saved.mock.calls.at(-1)![1]);
+    expect(back.body.getElementsByTagNameNS(W, "numPr").length).toBeGreaterThanOrEqual(2);
+    expect(Array.from(back.body.getElementsByTagNameNS(W, "pStyle")).some((s) => s.getAttributeNS(W, "val") === "Heading2")).toBe(true);
+  });
+
+  it("leaves HTML pastes to the editor and strips Markdown syntax from a plain-text paste", async () => {
+    const view = mount(DocxView, "sample.docx");
+    await open(view, "plain.docx");
+    const editor = (view as any).editor;
+    expect(paste(editor, { "text/plain": "# H", "text/html": "<h1>H</h1>" })).toBeFalsy();
+    const pasted = vi.spyOn(editor, "pasteText").mockReturnValue(true);
+    (await import("../src/presentation/common/spelling")).notePasteKey(new KeyboardEvent("keydown", { key: "V", ctrlKey: true, shiftKey: true }));
+    expect(paste(editor, { "text/plain": "## Plan\n- **first** [[Note|link]]" })).toBe(true);
+    expect(pasted).toHaveBeenCalledWith("Plan\nfirst link");
+  });
+});
+
+describe("File › Properties", () => {
+  it("edits a document's title and saves it into docProps/core.xml; read-only files can't be changed", async () => {
+    const app = new App();
+    app.vault.readBinary = async () => fixture("sample.docx").buffer as ArrayBuffer;
+    const saved = vi.spyOn(app.vault, "modifyBinary");
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, pageSize: "document" as const });
+    document.body.appendChild(view.containerEl);
+    await open(view, "props.docx");
+    view.showProperties();
+    const modal = document.querySelector(".test-modal")!;
+    const title = modal.querySelector<HTMLInputElement>('[data-prop="title"]')!;
+    title.value = "Field study";
+    title.dispatchEvent(new Event("change"));
+    Array.from(modal.querySelectorAll("button")).find((b) => b.textContent === "Save")!.click();
+    await view.requestSave();
+    const { readProps } = await import("../src/infrastructure/ooxml/doc-props");
+    expect(readProps(await DocxDocument.load(saved.mock.calls.at(-1)![1])).title).toBe("Field study");
+
+    const ro = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, readOnly: true });
+    document.body.appendChild(ro.containerEl);
+    await open(ro, "ro.docx");
+    ro.showProperties();
+    const last = Array.from(document.querySelectorAll(".test-modal")).at(-1)!;
+    expect(last.querySelector<HTMLInputElement>('[data-prop="title"]')!.disabled).toBe(true);
+    expect(Array.from(last.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Close"]);
+  });
+});

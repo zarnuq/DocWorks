@@ -19,8 +19,8 @@ it("offers one Export… item in the document pane menu", () => {
     cb(item as never); return menu;
   });
   view.onPaneMenu(menu, "more-options");
-  expect(titles).toEqual(["Export…"]);
-  callbacks[0]();
+  expect(titles).toEqual(["Properties…", "Export…"]);
+  callbacks[1]();
   expect(run).toHaveBeenCalledOnce();
 });
 function vaultApp(existing: string[] = []) {

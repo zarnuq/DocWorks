@@ -1,4 +1,5 @@
 import { App, Notice, parseLinktext, parseYaml, TFile } from "obsidian";
+import { filePropsOf } from "../../infrastructure/ooxml/doc-props";
 
 /** Literal Office text in a Markdown note, keeping paragraphs without interpreting markup. */
 export const noteText = (text: string): string => text.replace(/[\\`*_[\]<>!#|~$+=-]/g, "\\$&")
@@ -41,7 +42,12 @@ async function companion(app: App, source: TFile): Promise<TFile> {
   }
   const path = nextPath(app, source, "notes");
   const link = app.fileManager.generateMarkdownLink(source, path);
-  return app.vault.create(path, `---\ndoc-works: companion\nsource: ${JSON.stringify(link)}\ntags: []\nproject: ""\nstatus: ""\n---\n\n# Notes\n\nSource: ${link}\n\n`);
+  // The file's own title, author... (File › Properties) as note properties.
+  const props = await app.vault.readBinary(source).then(filePropsOf).catch(() => null);
+  const keywords = props?.keywords.split(/[,;]/).map((k) => k.trim()).filter(Boolean) ?? [];
+  const fields = props ? ([["title", props.title], ["author", props.creator], ["subject", props.subject], ["description", props.description]] as const).filter(([, v]) => v) : [];
+  const extra = [...fields.map(([k, v]) => `${k}: ${JSON.stringify(v)}\n`), keywords.length ? `keywords: ${JSON.stringify(keywords)}\n` : ""].join("");
+  return app.vault.create(path, `---\ndoc-works: companion\nsource: ${JSON.stringify(link)}\n${extra}tags: []\nproject: ""\nstatus: ""\n---\n\n# Notes\n\nSource: ${link}\n\n`);
 }
 
 const pending = new WeakMap<App, Map<string, Promise<TFile | null>>>();

@@ -3,6 +3,7 @@ import { DrawingView } from "./docx-drawing-view";
 import { ChartView } from "./docx-chart-view";
 import { chartAt, chartRun, docxChartColors, editedChartRun } from "../../domain/docx/chart";
 import { chartPalette } from "../../domain/pptx/chart-format";
+import { propertiesDialog } from "../common/properties-dialog";
 import { chartDialog, NEW_CHART_TYPES, newChartFormat } from "../common/chart-form";
 import type { ChartKind } from "../../domain/pptx/chart-format";
 import { drawingEditor } from "./drawing-editor";
@@ -29,7 +30,10 @@ import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../commo
 import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems, ZOOMS, zoomLabel, editableFocused, EDITING_KEYS } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { pickImage } from "../common/images";
-import { electronSpeller, runEditCommand, Speller } from "../common/spelling";
+import { electronSpeller, notePasteKey, runEditCommand, Speller, wantsPlainPaste } from "../common/spelling";
+import { looksLikeMarkdown, markdownToPlain } from "../../core/utils/markdown";
+import { markdownToDoc, pasteSlice } from "../../domain/docx/from-markdown";
+import { CellSelection } from "./cell-selection";
 import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, DOCS_SHORTCUTS, registerShortcutsKey, shortcutsDialog } from "../common/shortcuts";
 import { recrop, Wrap } from "../../domain/docx/drawing";
@@ -37,7 +41,7 @@ import { readWatermark, setWatermark, TextWatermark, Watermark } from "../../dom
 import { directFormat, updateStyleToMatch } from "../../domain/docx/style-edit";
 import { fontStack } from "../../core/utils/fonts";
 import { IMAGE_MIME } from "../../core/utils/images";
-import { cmd, commentRanges, docxPlugins, EditorContext, PaintFormat, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
+import { cmd, commentRanges, docxPlugins, inCodeBlock, EditorContext, PaintFormat, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { pageAt, pagesKey, pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
@@ -226,6 +230,12 @@ export class DocxView extends FileView {
     });
   }
 
+  /** File › Properties: title, author, keywords... saved into the file. */
+  showProperties(): void {
+    const pkg = this.docx;
+    if (pkg) propertiesDialog(this.app, pkg, this.settings.readOnly, () => this.autosave.markDirty());
+  }
+
   onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
     addFileItems(this, menu, source, this.settings.readOnly, () => void this.exportAs());
@@ -403,6 +413,7 @@ export class DocxView extends FileView {
       },
       handleKeyDown: (_view, event) => {
         this.lastKey = event.key;
+        notePasteKey(event);
         if (event.key === "Escape" && this.painter) {
           this.stopPainting();
           return true;
@@ -430,7 +441,29 @@ export class DocxView extends FileView {
           return false;
         },
       },
-      handlePaste: (_view, event) => this.takeImage(event.clipboardData?.files),
+      handlePaste: (view, event) => {
+        if (this.takeImage(event.clipboardData?.files)) return true;
+        // Markdown from a note: formatted, or without its syntax when pasted as plain text.
+        const plain = wantsPlainPaste();
+        const data = event.clipboardData;
+        const text = data?.getData("text/plain") ?? "";
+        if (!data || !looksLikeMarkdown(text) || view.state.selection instanceof CellSelection || inCodeBlock(view.state)) return false;
+        if (plain) return view.pasteText(markdownToPlain(text)), true;
+        if (data.types.includes("text/html")) return false;
+        const pasted = markdownToDoc(text, {
+          // Each pasted numbered list counts from 1, not on from a list already in the document.
+          list: (kind) => {
+            const id = ctx.ensureList(kind);
+            if (kind !== "ordered") return id;
+            const restarted = docx.restartList(id);
+            ctx.styles = new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml());
+            return restarted;
+          },
+          image: () => null,
+        });
+        view.dispatch(view.state.tr.replaceSelection(pasteSlice(pasted)).scrollIntoView().setMeta("uiEvent", "paste"));
+        return true;
+      },
       handleDrop: (view, event) => {
         const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
         const files = event.dataTransfer?.files;

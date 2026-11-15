@@ -154,7 +154,7 @@ export class Setting {
     this.settingEl = containerEl.createDiv({ cls: "setting-item" });
   }
   setName(name: string) { this.settingEl.createDiv({ cls: "setting-item-name", text: name }); return this; }
-  setDesc() { return this; }
+  setDesc(desc?: string) { if (desc) this.settingEl.createDiv({ cls: "setting-item-description", text: desc }); return this; }
   setHeading() { return this; }
   private control(cb: Fn, kind = "text") {
     const input = kind === "select" ? this.settingEl.createEl("select") : this.settingEl.createEl("input", { type: kind });
@@ -173,6 +173,7 @@ export class Setting {
   addDropdown(cb: Fn) { return this.control(cb, "select"); }
   addSlider(cb: Fn) { return this.control(cb, "range"); }
   addText(cb: Fn) { return this.control(cb); }
+  addTextArea(cb: Fn) { return this.control(cb); }
   addColorPicker(cb: Fn) { return this.control(cb, "color"); }
   addButton(cb: Fn) {
     const el = this.settingEl.createEl("button");

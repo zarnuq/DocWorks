@@ -465,7 +465,8 @@ export function editableFocused(): boolean {
  * The file items Obsidian puts in its own editors' ⋮ menu (rename, delete, and what core and other plugins add on
  * "file-menu": move, bookmark, copy path, open in default app…), which a plain FileView doesn't get.
  */
-export function addFileItems(view: FileView & VersionedView, menu: Menu, source: string, readOnly: boolean, exportAs: (() => void) | null): void {
+export function addFileItems(view: FileView & VersionedView & { showProperties?(): void }, menu: Menu, source: string, readOnly: boolean, exportAs: (() => void) | null): void {
+  if (view.showProperties) menu.addItem((i) => i.setTitle("Properties…").setIcon("info").setSection("action").onClick(() => view.showProperties!()));
   if (versions) menu.addItem((i) => i.setTitle("Version history…").setIcon("history").setSection("action").onClick(() => void versionHistoryDialog(view.app, view, readOnly)));
   if (exportAs) menu.addItem((i) => i.setTitle("Export…").setIcon("file-output").setSection("action").onClick(exportAs));
   const file = view.file;

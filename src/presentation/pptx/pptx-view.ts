@@ -2,6 +2,7 @@ import { addSlideComment, editSlideComment, removeSlideThread, resolveSlideThrea
 import { addMedia, linkedMediaCandidates, MEDIA_MIME, setMediaPlayback } from "../../domain/pptx/media";
 import { addChart, chartWorkbook, prepareChartEdit } from "../../domain/pptx/chart";
 import { ChartKind, chartPalette, setChartFormat } from "../../domain/pptx/chart-format";
+import { propertiesDialog } from "../common/properties-dialog";
 import { chartDialog, NEW_CHART_TYPES, newChartFormat } from "../common/chart-form";
 import { App, Modal, FileView, KeymapEventHandler, Menu, Modifier, Notice, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { dropIndex, PptxDocument, PptxSnapshot, SlideClip } from "../../infrastructure/pptx/pptx-document";
@@ -42,7 +43,8 @@ import { findSlideMatches, SlideSearchMatch, replaceAll, replaceMatch } from "..
 import { showFindPreview } from "../common/find-preview";
 import { findBar } from "../common/find-bar";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
-import { electronSpeller, runEditCommand, type Speller } from "../common/spelling";
+import { electronSpeller, notePasteKey, runEditCommand, type Speller, wantsPlainPaste } from "../common/spelling";
+import { looksLikeMarkdown, markdownToPlain } from "../../core/utils/markdown";
 import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
 import { EDITING_KEYS, editableFocused, FONTS, menuItem, pickColor, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
@@ -77,7 +79,7 @@ import { renderPng } from "../common/png";
 import { exportDialog, writeExport } from "../common/export-dialog";
 import { RenderedShape, renderSlide } from "./slide-renderer";
 import { rangeInParagraph } from "./text-html";
-import { applyRunStyle, insertField, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
+import { applyRunStyle, insertField, insertMarkdown, insertPlainText, refreshMarks, readParagraphs, renderParagraphs, selectionRunProps, updateParagraphs } from "./text-html";
 
 export const VIEW_TYPE_PPTX = "doc-works-pptx-view";
 
@@ -323,6 +325,12 @@ export class PptxView extends FileView {
         return false;
       });
     }
+  }
+
+  /** File › Properties: title, author, keywords... saved into the file. */
+  showProperties(): void {
+    const pkg = this.doc;
+    if (pkg) propertiesDialog(this.app, pkg, this.settings.readOnly, () => this.autosave.markDirty());
   }
 
   onPaneMenu(menu: Menu, source: string): void {
@@ -2064,6 +2072,7 @@ export class PptxView extends FileView {
 
   private onTextKey(e: KeyboardEvent, rs: RenderedShape): void {
     const key = e.key.toLowerCase();
+    notePasteKey(e);
     if (isMod(e) && (key === "z" || key === "y")) {
       e.preventDefault();
       // The slide is redrawn: put the caret back in the same box, at the same place in its text.
@@ -2099,10 +2108,17 @@ export class PptxView extends FileView {
       return;
     }
     // Only plain text goes into slides; foreign HTML would bring styles we can't save.
-    const target = this.rendered.find((r) => r.textEl?.contains(e.target as Node))?.textEl;
-    if (target) {
+    // Markdown from a note becomes bullets, numbering, bold and links (or loses its syntax when pasted as plain text).
+    const rs = this.rendered.find((r) => r.textEl?.contains(e.target as Node));
+    const target = rs?.textEl;
+    const plain = wantsPlainPaste();
+    if (rs && target) {
       e.preventDefault();
-      insertPlainText(e.clipboardData?.getData("text/plain") ?? "");
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (!looksLikeMarkdown(text)) insertPlainText(text);
+      else if (plain) insertPlainText(markdownToPlain(text));
+      else if (e.clipboardData?.types.includes("text/html")) insertPlainText(text);
+      else insertMarkdown(target, text, rs.pxPerPt);
       // Programmatic edits fire no input event; send one so the change is committed.
       target.dispatchEvent(new Event("input", { bubbles: true }));
     }

@@ -19,18 +19,31 @@ works and where the project stands.
   multi-column CSS in styles.css (set inline from code); no `window.localStorage` (use `app.loadLocalStorage`).
 - Replies: short, result first.
 
-## Status (0.9.0, not yet released when written)
+## Status (1.4.2 released; work below not yet released)
 
-Done in 0.9.0: slideshow animations + transitions, Export to PDF (docx + pptx), editable equations (LaTeX + MathML
-preview), table-style cell padding, toolbar menus anchored to their buttons, vault storage for view preferences,
-multi-column CSS moved inline (cleared the directory's CSS lint warning). minAppVersion is now 1.8.7.
+Released through 1.4.2 (manifest.json, package.json, package-lock.json and versions.json all say 1.4.2): everything in
+README's feature list, including row AutoFit, Alt+Enter line breaks and Ctrl+wheel zoom in sheets. minAppVersion 1.8.7.
+Release steps are in CLAUDE.md ("Generated files and releasing"); the next release needs a version bump.
 
-Also implemented: slide animation authoring, theme/master/custom layouts, chart data editing, embedded audio/video,
-suggestion mode, comment threads and resolution, floating picture dragging, table pagination in column sections,
-document outline navigation and a margin/indent/tab ruler. Review and outline panels fit the document to available space.
-
-Release steps are in CLAUDE.md ("Generated files and releasing"); version is already bumped to 0.9.0 in
-manifest.json, package.json, package-lock.json and versions.json.
+Unreleased (2026-11-14):
+- Markdown paste (`core/utils/markdown.ts`: line-based block parser + inline marks; wikilinks become their text).
+  Documents: plain text that looks like Markdown, with no text/html on the clipboard, goes through
+  `domain/docx/from-markdown.ts` (Markdown -> the HTML Obsidian renders -> the note export's `htmlToDoc`); each
+  pasted numbered list restarts at 1 (`restartList`). Slides: `insertMarkdown` in `presentation/pptx/text-html.ts`
+  splits the caret paragraph (bullets "•", numbering "#arabicPeriod", depth -> lvl, headings bold).
+  Paste without formatting (Ctrl+Shift+V or the menu) gives `markdownToPlain`: bullets / task boxes / heading marks
+  and inline syntax dropped, numbers kept. How a paste was asked for comes from `notePasteKey` / `runEditCommand`
+  (`wantsPlainPaste` in `presentation/common/spelling.ts`). Not carried: math, pictures, callout styling.
+- New from template: setting "Templates folder"; command + folder menu open a picker of .docx/.pptx/.xlsx and
+  .dotx/.potx/.xltx there; `fromTemplate` (`infrastructure/ooxml/doc-props.ts`) rewrites a template content type
+  to a document's and dates the copy now.
+- File › Properties in all three editors (`presentation/common/properties-dialog.ts` over `readProps` /
+  `writeProps`): title, subject, author, keywords, description, category; the part is created when missing.
+  New companion notes copy title / author / subject / description / keywords; vault search matches them
+  (`officeText(..., { properties: true })`, labelled "Properties · Title"...). Version compare doesn't include them.
+- Mobile: tried in `dev:mobile` emulation at 400 px (no errors in any editor); the views are padded above
+  Obsidian's floating navigation bar (it hid the sheet tabs). Still not tried on a real phone. Open: at phone width a
+  document page is wider than the screen (no fit-to-width zoom).
 
 ## Spreadsheets (.xlsx), from plan.md
 
@@ -48,7 +61,7 @@ Implemented in the resumed work: notes and native threaded comments (replies, ed
 - Note export (`domain/docx/from-html.ts` + `presentation/common/export-note.ts` + `render-note-export.ts`): Obsidian's `MarkdownRenderer` renders the note (frontmatter saved in a nonprinting Word document variable), the HTML becomes a document (headings/Quote styles, lists via `ensureList` by depth, task boxes as ☐/☑, Google's code box, bordered tables, callouts as tagged native content controls with Quote paragraphs), vault pictures from ![[embeds]] or relative paths are added with `addImage`, and `writeBody` writes it into `blankDocx()`. Math rendering is awaited and its LaTeX becomes native editable Word equations. Note embeds are rendered recursively from source, including heading/block ranges from `resolveSubpath`; cycles, missing sources and depth/count limits keep a name or link and show a notice. Links become Obsidian open URIs; pictures and links resolve relative to each embedded note. Code languages and callout type/folding are stored on native content controls; task bookmarks distinguish exported tasks from ordinary checkbox glyphs. DOCX-to-Markdown restores these properties, column alignment and horizontal rules. Web images are not carried. Each numbered list after the first gets its own w:num with a startOverride (`restartList`), so it counts from 1.
 - Embeds in notes (`presentation/common/embeds.ts`): registered through `app.embedRegistry` (not in Obsidian's typings; skipped when missing) for the enabled file types. docx: read-only ProseMirror view of the text flow (no pages); pptx: one slide (`#n`) with previous / next, redrawn on resize, embedded fonts loaded; xlsx: the sheet (`#Name`) up to 60 × 20 cells drawn with `Grid.drawRange`, tabs for other sheets. Sheet charts aren't drawn in embeds.
 - Google Sheets functions (2026-10-12): ARRAYFORMULA (argument evaluated with `arrays`), REGEXMATCH / REGEXEXTRACT (first group) / REGEXREPLACE / Excel's REGEXTEST lift element-wise via `lifted`, QUERY (`domain/xlsx/query.ts`: select / where / group by / order by / limit / offset / label; letters or ColN), SPARKLINE() returns "" and is drawn from `formulaSparklines`. Google's exports wrap its own functions as `IFERROR(__xludf.DUMMYFUNCTION("…"), cached)`: the text is parsed and evaluated, and its references count as dependencies. Formulas typed here are saved as written (QUERY etc. show #NAME? in Excel, work in Google Sheets).
-- Mobile (2026-10-12): `isDesktopOnly: false`. The only Electron uses are PDF export (`canExportPdf()` hides the menu item and command off desktop) and the sheet menu's cut/copy/paste (mobile falls back to `execCommand` copy/cut; paste from the menu is refused). Lint's mobile rules apply now (no regex lookbehind: iOS < 16.4). Draggable targets set `touch-action: none`. Not yet tried on a phone or in `dev:mobile` emulation.
+- Mobile (2026-10-12): `isDesktopOnly: false`. The only Electron uses are PDF export (`canExportPdf()` hides the menu item and command off desktop) and the sheet menu's cut/copy/paste (mobile falls back to `execCommand` copy/cut; paste from the menu is refused). Lint's mobile rules apply now (no regex lookbehind: iOS < 16.4). Draggable targets set `touch-action: none`. Emulation results are under Status.
 - Slide comments (`domain/pptx/comments.ts`, toolbar comment button): new threads are PowerPoint modern comments (ppt/authors.xml with userId/providerId, one modernComment part per slide linked from the slide's extLst `{6950BFC3-…}` commentRel, sldMkLst anchor with the slide's p14:creationId); replies, edit, resolve, delete. Legacy p:cmLst comments are read (with 2013 reply threading) and can be deleted. Duplicated or copied slides leave comments behind, as Google Slides. LibreOffice doesn't import modern comments, so no external check beyond the file opening.
 - SmartArt top-level items are added and removed (`addSmartArtItem` / `removeSmartArtItem`): data points, transitions and presentation points are cloned or removed, and the drawing of a one-row or one-column layout is spread again over the same span (shrinking to fit, never growing). Other layouts are refused.
 - Implemented: SmartArt text editing, combo and scatter chart editing, picture cropping, per-section headers/footers, inline code versus native Word code boxes, default paper theme and file-type settings. 3-D charts are edited like flat ones; changing their type makes them flat (depth axis and 3-D view dropped).

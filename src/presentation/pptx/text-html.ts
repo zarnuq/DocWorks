@@ -14,6 +14,7 @@ import { letterNumber, romanNumber } from "../../core/utils/numbering";
 import type { ParaInput } from "../../domain/pptx/slide-edit";
 import { fontStack, letterSpacing } from "./text-fit";
 import { EMU_PER_PT } from "../../core/utils/xml";
+import { markdownToPlain, MdBlock, MdRun, parseMarkdown } from "../../core/utils/markdown";
 
 const CSS_ALIGN: Record<Align, string> = { l: "left", ctr: "center", r: "right", just: "justify" };
 const FROM_CSS_ALIGN: Record<string, Align> = { left: "l", start: "l", center: "ctr", right: "r", end: "r", justify: "just" };
@@ -427,7 +428,10 @@ export function insertPlainText(text: string): void {
   const sel = window.getSelection();
   if (!sel?.rangeCount) return;
   const range = sel.getRangeAt(0);
+  const host = range.startContainer as HTMLElement;
+  const template = host.nodeType === Node.ELEMENT_NODE ? host.querySelector(":scope > p") : null;
   range.deleteContents();
+  if (template) caretIntoParagraph(host, range, template);
   const frag = createFragment();
   text.replace(/\r\n?/g, "\n").split("\n").forEach((line, i) => {
     if (i > 0) frag.appendChild(createEl("br"));
@@ -440,6 +444,120 @@ export function insertPlainText(text: string): void {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+}
+
+/**
+ * The caret can sit between paragraphs (after Select all, or at the box's end): move it into the paragraph beside it
+ * (a copy of `template` when none is left), so pasted text joins a paragraph. Returns the caret's container.
+ */
+function caretIntoParagraph(host: HTMLElement, range: Range, template: Element | null): Node {
+  if (range.startContainer !== host) return range.startContainer;
+  const next = host.childNodes[range.startOffset] ?? null;
+  let p: Node | null = next ?? host.childNodes[range.startOffset - 1] ?? null;
+  if (!p && template) host.append((p = template.cloneNode(false)));
+  if (!p || !isElement(p) || !BLOCK.has(p.tagName)) return host;
+  range.setStart(p, p === next ? 0 : p.childNodes.length);
+  range.collapse(true);
+  return p;
+}
+
+interface MdLine {
+  runs: MdRun[];
+  /** Added to the caret paragraph's level. */
+  depth: number;
+  /** A list item's bullet ("•", "#arabicPeriod", null for a task); undefined keeps the paragraph's own. */
+  bullet?: string | null;
+}
+
+/** Markdown blocks as slide paragraphs: list items keep their kind and depth, headings are bold, code and table rows are lines. */
+function markdownLines(blocks: MdBlock[]): MdLine[] {
+  const out: MdLine[] = [];
+  for (const b of blocks) {
+    if (b.kind === "blank" || b.kind === "hr") continue;
+    if (b.kind === "code") for (const line of b.text.split("\n")) out.push({ runs: line ? [{ text: line, code: true }] : [], depth: 0 });
+    else if (b.kind === "table") for (const row of b.rows) out.push({ runs: row.flatMap((cell, i) => (i ? [{ text: "\t" }, ...cell] : cell)), depth: 0 });
+    else if (b.kind === "heading") out.push({ runs: b.runs.map((r) => ({ ...r, b: true as const })), depth: 0 });
+    else if (b.kind === "item") {
+      const box = b.list === "task" ? [{ text: b.checked ? "☑ " : "☐ " }] : [];
+      out.push({ runs: [...box, ...b.runs], depth: b.depth, bullet: b.list === "bullet" ? "•" : b.list === "ordered" ? "#arabicPeriod" : null });
+    } else out.push({ runs: b.runs, depth: 0 });
+  }
+  return out;
+}
+
+function runNodes(runs: MdRun[], pxPerPt: number): Node[] {
+  return runs.map((r) => {
+    if (!r.b && !r.i && !r.strike && !r.code && !r.highlight && !r.href) return document.createTextNode(r.text);
+    const span = createSpan({ text: r.text });
+    styleRun(span, {
+      ...(r.b ? { b: true } : {}),
+      ...(r.i ? { i: true } : {}),
+      ...(r.strike ? { strike: true } : {}),
+      ...(r.code ? { font: "Consolas" } : {}),
+      ...(r.highlight ? { highlight: "#FFFF00" } : {}),
+      ...(r.href ? { link: r.href } : {}),
+    }, pxPerPt);
+    return span;
+  });
+}
+
+/**
+ * Replace the selection with Markdown: the first line continues the paragraph at the caret, the others become
+ * paragraphs like it (bulleted, numbered and indented for list items), and the rest of that paragraph follows the last.
+ */
+export function insertMarkdown(host: HTMLElement, markdown: string, pxPerPt: number): void {
+  const range = rangeIn(host);
+  if (!range) return;
+  const lines = markdownLines(parseMarkdown(markdown));
+  const template = host.querySelector(":scope > p");
+  if (!lines.length || !template) return void insertPlainText(markdownToPlain(markdown));
+  range.deleteContents();
+  let p: Node | null = caretIntoParagraph(host, range, template);
+  while (p && p.parentNode !== host) p = p.parentNode;
+  if (!p || !isElement(p) || !BLOCK.has(p.tagName)) return void insertPlainText(markdownToPlain(markdown));
+  const para = p as HTMLElement;
+  const empty = !para.textContent;
+  const lvl = Number(para.dataset.lvl) || 0;
+  const setAttrs = (el: HTMLElement, line: MdLine) => {
+    el.dataset.lvl = String(Math.min(8, lvl + line.depth));
+    if (line.bullet) el.dataset.bullet = line.bullet;
+    else if (line.bullet === null) delete el.dataset.bullet;
+  };
+  // The rest of the paragraph after the caret, kept for the end.
+  const after = document.createRange();
+  after.setStart(range.startContainer, range.startOffset);
+  after.setEnd(para, para.childNodes.length);
+  const tail = after.extractContents();
+  tail.querySelectorAll("br").forEach((br) => !br.nextSibling && !br.previousSibling && br.remove());
+  para.querySelectorAll(":scope > br").forEach((br) => br.remove());
+
+  const first = runNodes(lines[0].runs, pxPerPt);
+  const frag = createFragment();
+  frag.append(...first);
+  range.insertNode(frag);
+  if (empty) setAttrs(para, lines[0]);
+  let last: HTMLElement = para;
+  let end: Node | null = first[first.length - 1] ?? null;
+  for (const line of lines.slice(1)) {
+    const next = para.cloneNode(false) as HTMLElement;
+    setAttrs(next, line);
+    const nodes = runNodes(line.runs, pxPerPt);
+    next.append(...nodes);
+    last.after(next);
+    last = next;
+    end = nodes[nodes.length - 1] ?? null;
+  }
+  last.append(tail);
+  for (const el of [para, last]) if (!el.textContent) el.appendChild(createEl("br"));
+
+  const caret = document.createRange();
+  if (end) caret.setStartAfter(end);
+  else caret.setStart(last, 0);
+  caret.collapse(true);
+  const sel = window.getSelection()!;
+  sel.removeAllRanges();
+  sel.addRange(caret);
+  refreshMarks(host);
 }
 
 /** DOM range for character offsets [start, end) of a rendered paragraph; a <br> counts as one character. */

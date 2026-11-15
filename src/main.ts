@@ -5,7 +5,8 @@ import { canExportPdf } from "./presentation/common/pdf";
 import { OfficeSearchView, VIEW_TYPE_SEARCH } from "./presentation/common/office-search";
 import { registerCellValues } from "./presentation/common/cell-values";
 import { IndexedDbVersionStore, setVersionHistory, VersionHistory, versions } from "./presentation/common/version-history";
-import { App, FileView, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, FileView, FuzzySuggestModal, normalizePath, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { fromTemplate } from "./infrastructure/ooxml/doc-props";
 import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
 import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
 import { migrateSettings, type PaperSetting } from "./presentation/common/settings";
@@ -135,12 +136,18 @@ export default class DocWorksPlugin extends Plugin {
         callback: () => void this.createFile(ext, make, this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path ?? "")),
       });
     }
+    this.addCommand({
+      id: "new-from-template",
+      name: "New from template…",
+      callback: () => this.pickTemplate(this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path ?? "")),
+    });
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (!(file instanceof TFolder)) return;
         for (const [, name, icon, ext, make] of NEW_FILES) {
           menu.addItem((item) => item.setTitle(name).setIcon(icon).onClick(() => void this.createFile(ext, make, file)));
         }
+        if (this.settings.templatesFolder) menu.addItem((item) => item.setTitle("New from template…").setIcon("copy-plus").onClick(() => this.pickTemplate(file)));
       })
     );
 
@@ -199,6 +206,18 @@ export default class DocWorksPlugin extends Plugin {
     await this.app.workspace.getLeaf("tab").openFile(file);
   }
 
+  /** Choose a file in the templates folder; its copy (as a document, not a template) opens as "Untitled" in `folder`. */
+  private pickTemplate(folder: TFolder): void {
+    const root = normalizePath(this.settings.templatesFolder.trim());
+    if (!root || root === "/") return void new Notice("Set a templates folder in the plugin settings first.");
+    const templates = this.app.vault.getFiles().filter((f) => f.path.startsWith(`${root}/`) && TEMPLATE_EXTS[f.extension.toLowerCase()]);
+    if (!templates.length) return void new Notice(`No .docx, .pptx or .xlsx files in ${root}.`);
+    new TemplatePicker(this.app, templates, (file) => {
+      const ext = TEMPLATE_EXTS[file.extension.toLowerCase()];
+      void this.createFile(ext, async () => fromTemplate(new Uint8Array(await this.app.vault.readBinary(file))), folder);
+    }).open();
+  }
+
   /** Another plugin may already own the extension; keep loading instead of failing. */
   private claimExtension(ext: string, viewType: string): void {
     try {
@@ -209,6 +228,27 @@ export default class DocWorksPlugin extends Plugin {
     }
   }
 }
+
+/** Template file extensions and the kind of file each makes. */
+const TEMPLATE_EXTS: Record<string, string> = { docx: "docx", dotx: "docx", pptx: "pptx", potx: "pptx", xlsx: "xlsx", xltx: "xlsx" };
+
+class TemplatePicker extends FuzzySuggestModal<TFile> {
+  constructor(app: App, private templates: TFile[], private choose: (file: TFile) => void) {
+    super(app);
+    this.setPlaceholder("Choose a template");
+  }
+  getItems(): TFile[] {
+    return this.templates;
+  }
+  getItemText(file: TFile): string {
+    return file.path;
+  }
+  onChooseItem(file: TFile): void {
+    this.choose(file);
+  }
+}
+
+const TEMPLATES = { name: "Templates folder", desc: "Files here (.docx, .pptx, .xlsx and Office's .dotx, .potx, .xltx) start new files with New from template." };
 
 const READ_ONLY = { name: "Read only", desc: "Open documents, presentations and spreadsheets for viewing only: no editing tools, and files are never changed." };
 
@@ -278,6 +318,7 @@ class DocWorksSettingTab extends PluginSettingTab {
     const s = this.plugin.settings;
     if (key === "pageSize") s.pageSize = value === "letter" ? "letter" : "document";
     if (key === "author") s.author = typeof value === "string" ? value.trim() : "";
+    if (key === "templatesFolder") s.templatesFolder = typeof value === "string" ? value.trim() : "";
     for (const paper of PAPER_KEYS) if (key === paper && typeof value === "string" && value in PAPER_OPTIONS) s[paper] = value as PaperSetting;
     for (const [open] of OPEN) if (key === open) s[open] = value !== false;
     const toggles = ["readOnly", "officeDocx", "officePptx", "officeXlsx"] as const;
@@ -323,6 +364,7 @@ const SECTIONS: [heading: string, defs: Def[]][] = [
     { ...HISTORY, control: { type: "toggle", key: "history", defaultValue: true } },
     { name: HISTORY_DAYS.name, desc: HISTORY_DAYS.desc, control: { type: "dropdown", key: "historyDays", options: HISTORY_DAYS.options, defaultValue: "14" } },
     { ...AUTHOR, control: { type: "text", key: "author", defaultValue: "" } },
+    { ...TEMPLATES, control: { type: "text", key: "templatesFolder", defaultValue: "" } },
   ]],
   ["Word documents", [
     open(0),

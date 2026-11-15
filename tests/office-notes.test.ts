@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { App as RealApp, TFile as RealFile } from "obsidian";
 import { App, TFile } from "./obsidian-stub";
 import { openCompanionNote, createSelectionNote, noteText } from "../src/presentation/common/office-notes";
+import JSZip from "jszip";
 
 vi.mock("obsidian", async (original) => ({ ...await original<object>(), parseYaml: (s: string) => {
   const out: Record<string, unknown> = {};
@@ -32,6 +33,18 @@ function vault() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Office companion notes", () => {
+  it("copies the file's title, author, subject, description and keywords into a new companion", async () => {
+    const { app, source, files } = vault();
+    const zip = new JSZip();
+    zip.file("docProps/core.xml", `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Q3 "plan"</dc:title><dc:creator>Ada</dc:creator><cp:keywords>alpha; beta, gamma</cp:keywords></cp:coreProperties>`);
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    app.vault.readBinary = async () => bytes.buffer as ArrayBuffer;
+    const note = await openCompanionNote(app, source);
+    const text = files.get(note!.path)!.text;
+    expect(text).toContain('source: "[[Report.docx]]"\ntitle: "Q3 \\"plan\\""\nauthor: "Ada"\nkeywords: ["alpha","beta","gamma"]\ntags: []');
+    expect(text).not.toContain("subject:");
+  });
+
   it("creates beside the source with editable properties and opens a new tab", async () => {
     const { app, source, files, opened } = vault();
     const note = await openCompanionNote(app, source);

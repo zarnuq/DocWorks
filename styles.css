@@ -3695,3 +3695,9 @@ textarea.pptx-notes {
   white-space: nowrap;
   line-height: 1.1;
 }
+
+/* Obsidian's floating mobile navigation bar sits over the bottom of the view: keep sheet tabs, slide notes and pages clear of it. */
+.is-mobile.is-floating-nav .dw-root,
+.is-mobile.is-floating-nav .pptx-editor-root {
+  padding-bottom: calc(var(--navbar-height) + var(--navbar-bottom-offset));
+}

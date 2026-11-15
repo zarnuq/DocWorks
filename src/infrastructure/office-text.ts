@@ -8,6 +8,7 @@ import { NS } from "../core/utils/xml";
 import { SearchOptions, textMatches } from "../core/utils/text-matches";
 import { diff } from "../core/utils/diff";
 import { parseXml, resolvePath } from "./ooxml/ooxml-package";
+import { EDITABLE_PROPS, filePropsOf } from "./ooxml/doc-props";
 
 export interface TextPart {
   label: string;
@@ -44,8 +45,17 @@ function paragraphs(doc: Document, ns: string): string[] {
   return [...texts.values()].filter((t) => t.trim());
 }
 
-export async function officeText(ext: "docx" | "pptx" | "xlsx", bytes: ArrayBuffer | Uint8Array): Promise<TextPart[]> {
+const PROP_LABELS = { title: "Title", subject: "Subject", creator: "Author", keywords: "Keywords", description: "Description", category: "Category" } as const;
+
+/** The file's text; with `properties`, its title, author, keywords... first (labelled "Properties · Title"...). */
+export async function officeText(ext: "docx" | "pptx" | "xlsx", bytes: ArrayBuffer | Uint8Array, opts: { properties?: boolean } = {}): Promise<TextPart[]> {
   const zip = await JSZip.loadAsync(bytes);
+  const props = opts.properties ? await filePropsOf(zip) : null;
+  const head = props ? EDITABLE_PROPS.filter((k) => props[k]).map((k) => ({ label: `Properties · ${PROP_LABELS[k]}`, text: props[k] })) : [];
+  return [...head, ...(await bodyText(ext, zip))];
+}
+
+async function bodyText(ext: "docx" | "pptx" | "xlsx", zip: JSZip): Promise<TextPart[]> {
   if (ext === "docx") {
     const doc = await xml(zip, "word/document.xml");
     return doc ? paragraphs(doc, NS.w).map((text) => ({ label: "", text })) : [];

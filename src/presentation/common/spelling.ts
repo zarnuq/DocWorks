@@ -32,8 +32,23 @@ export function electronSpeller(): Speller | null {
   };
 }
 
+let plainPasteAt = 0;
+
+/** Note a Ctrl+V (plain when Shift is held), so the paste it fires knows how it was asked for. */
+export function notePasteKey(e: KeyboardEvent): void {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") plainPasteAt = e.shiftKey ? Date.now() : 0;
+}
+
+/** Whether the paste being handled was asked for as plain text (Ctrl+Shift+V or a "without formatting" item); asks once. */
+export function wantsPlainPaste(): boolean {
+  const plain = Date.now() - plainPasteAt < 1000;
+  plainPasteAt = 0;
+  return plain;
+}
+
 /** Cut / copy / paste as the app's Edit menu does it (Electron runs the real clipboard command). */
 export function runEditCommand(command: "cut" | "copy" | "paste" | "pasteAndMatchStyle"): boolean {
+  if (command === "paste" || command === "pasteAndMatchStyle") plainPasteAt = command === "pasteAndMatchStyle" ? Date.now() : 0;
   if (!Platform.isDesktopApp) return command !== "paste" && command !== "pasteAndMatchStyle" && activeDocument.execCommand(command);
   const contents = (window.require("electron") as { remote: { getCurrentWebContents(): Record<typeof command, () => void> } }).remote.getCurrentWebContents();
   contents[command]();

@@ -17,6 +17,7 @@ import { adjustDecimals, formatGeneral, formatValue, parseInput } from "../../do
 import { BorderStyle, StyleChange } from "../../domain/xlsx/styles";
 import { Clip, copyRange, pasteClip, pasteText } from "../../domain/xlsx/clipboard";
 import { SheetSearchMatch, findSheetMatches, replaceCells } from "../../domain/xlsx/find";
+import { propertiesDialog } from "../common/properties-dialog";
 import { showFindPreview } from "../common/find-preview";
 import { findBar } from "../common/find-bar";
 import * as ops from "../../domain/xlsx/sheet-edit";
@@ -211,6 +212,12 @@ export class XlsxView extends FileView {
   }
   canAcceptExtension(extension: string): boolean {
     return extension === "xlsx";
+  }
+
+  /** File › Properties: title, author, keywords... saved into the file. */
+  showProperties(): void {
+    const pkg = this.edits?.wb.pkg;
+    if (pkg) propertiesDialog(this.app, pkg, this.settings.readOnly, () => this.autosave.markDirty());
   }
 
   onPaneMenu(menu: Menu, source: string): void {
