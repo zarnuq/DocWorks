@@ -12,6 +12,7 @@
     "lint": "eslint src",
     "check:files": "bash scripts/check-files.sh",
     "check:pages": "node scripts/check-pages.mjs",
+    "test:gui": "/usr/bin/python3 scripts/gui-test.py",
     "benchmark": "node scripts/benchmark.mjs"
   },
   "dependencies": {
