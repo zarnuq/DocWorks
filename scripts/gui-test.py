@@ -142,6 +142,8 @@ def test_visual_baselines():
                                ('sample.pptx', 'doc-works-pptx-view', '.pptx-stage'),
                                ('libreoffice-budget.xlsx', 'doc-works-xlsx-view', '.xlsx-grid')):
         open_file(f'{RUN}/{name}', view)
+        if view == 'doc-works-docx-view':  # the zoom is remembered per profile; baselines are at Fit
+            ev('(app.workspace.getMostRecentLeaf().view.setZoom("fit"), 1)')
         desk('move', '1', '1199')  # no hover effects
         desk('wait-idle')
         box = ev(f'''(() => {{ const r = document.querySelector(".workspace-leaf.mod-active {region}").getBoundingClientRect();
@@ -160,6 +162,22 @@ def test_visual_baselines():
         if result.returncode:
             problems.append(f'{name}: {result.stdout.strip()} (diff in {OUT})')
     assert not problems, '; '.join(problems)
+
+
+def test_docx_page_break_mid_paragraph():
+    """A page break inside a paragraph starts the next page with the text after it (Word / WordCraft /
+    LibreOffice): "Before break" ends page 1, "after break" starts page 2."""
+    open_file(f'{RUN}/sample.docx', 'doc-works-docx-view')
+    pages = ev('''(() => { const dom = app.workspace.getMostRecentLeaf().view.editor.dom;
+        const gaps = [...dom.querySelectorAll(".docx-page-space")].map(e => e.getBoundingClientRect().bottom);
+        const page = (text) => { const w = document.createTreeWalker(dom, NodeFilter.SHOW_TEXT);
+            for (let n = w.nextNode(); n; n = w.nextNode()) if (n.textContent.includes(text)) {
+                const r = document.createRange(); r.setStart(n, n.textContent.indexOf(text)); r.setEnd(n, n.textContent.indexOf(text) + 1);
+                const top = r.getBoundingClientRect().top; return 1 + gaps.filter(g => g <= top).length; }
+            return null; };
+        return [page("Before break"), page("after break")]; })()''')
+    assert pages == [1, 2], f'"Before break" / "after break" on pages {pages}, want [1, 2]'
+    shot('docx-page-break')
 
 
 def test_docx_type_bold_undo_redo():
@@ -203,7 +221,7 @@ def test_docx_markdown_paste():
     path = f'{RUN}/sample.docx'
     open_file(path, 'doc-works-docx-view')
     x, y, right, _ = ev('''(() => { const p = [...document.querySelectorAll(".workspace-leaf.mod-active .ProseMirror p")]
-        .find(p => p.textContent.includes("Before break")); const r = p.getBoundingClientRect();
+        .find(p => p.textContent.includes("See example page")); const r = p.getBoundingClientRect();
         return [r.x, r.y + r.height/2, r.right - 4, r.y]; })()''')
     click(right, y)
     desk('key', 'End')

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Node as PMNode } from "prosemirror-model";
-import { markdownToDoc, pasteSlice } from "../src/domain/docx/from-markdown";
+import { EditorState, TextSelection } from "prosemirror-state";
+import { docxSchema as schema } from "../src/domain/docx/schema";
+import { markdownToDoc, pasteMarkdown, pasteSlice } from "../src/domain/docx/from-markdown";
 
 const ctx = { list: (kind: "bullet" | "ordered" | "task") => (kind === "bullet" ? "1" : kind === "task" ? "3" : "2"), image: () => null };
 const nodes = (doc: PMNode) => {
@@ -46,5 +48,31 @@ describe("Markdown pasted into a document", () => {
     expect([pasteSlice(markdownToDoc("a **b**", ctx)).openStart, pasteSlice(markdownToDoc("a **b**", ctx)).openEnd]).toEqual([1, 1]);
     const s = pasteSlice(markdownToDoc("# H\ntext", ctx));
     expect([s.openStart, s.openEnd]).toEqual([0, 1]);
+  });
+});
+
+describe("caret after a Markdown paste", () => {
+  // Word and Google Docs leave the caret at the end of what was pasted, so typing (or pasting again) continues there.
+  const start = () => {
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, schema.text("See")),
+      schema.nodes.paragraph.create(),
+      schema.nodes.paragraph.create(null, schema.text("First bullet")),
+    ]);
+    const state = EditorState.create({ doc, schema });
+    return state.apply(state.tr.setSelection(TextSelection.create(doc, 6))); // in the empty paragraph
+  };
+  const caret = (md: string) => {
+    const state = start();
+    const $from = state.apply(pasteMarkdown(state, markdownToDoc(md, ctx))).selection.$from;
+    return [$from.parent.textContent, $from.parentOffset];
+  };
+
+  it("ends after a pasted list, not at the start of the next paragraph", () => {
+    expect(caret("## Pasted heading\n\n- item one\n- item two")).toEqual(["item two", 8]);
+  });
+
+  it("ends after pasted plain text", () => {
+    expect(caret("**plain** text")).toEqual(["plain text", 10]);
   });
 });

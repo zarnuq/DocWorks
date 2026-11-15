@@ -288,6 +288,12 @@
   color: #1a1a1a;
 }
 
+/* ...unless the run has a colour of its own (the colour mark's span wraps the
+   highlight), e.g. light-grey code on a black highlight, white text on a dark bar. */
+.docx-editor-host .ProseMirror [style^="color:"] mark {
+  color: inherit;
+}
+
 .docx-editor-host .ProseMirror p {
   margin: 0 0 0.4em;
 }
@@ -446,6 +452,12 @@
   display: inline;
   margin: 0;
   border: 0;
+}
+
+/* One inside a paragraph ends its line: the text after it starts the next page. */
+.is-paged .docx-page-break::after {
+  content: "\A";
+  white-space: pre;
 }
 
 .is-paged .docx-page-break-label {

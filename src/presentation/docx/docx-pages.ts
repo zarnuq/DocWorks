@@ -57,8 +57,12 @@ export function repaginate(view: EditorView): void {
   schedulers.get(view)?.();
 }
 
+/** A page break ends the block: a section end, a page break anywhere in a table or other block, or one that is a
+ * paragraph's last content. One inside a paragraph's text breaks after its line instead (`Line.breakAfter`). */
 function hasPageBreak(node: PMNode, sectionEnds: Set<PMNode>): boolean {
-  let found = sectionEnds.has(node);
+  if (sectionEnds.has(node)) return true;
+  if (node.type === schema.nodes.paragraph) return node.lastChild?.type === schema.nodes.page_break;
+  let found = false;
   node.descendants((n) => {
     if (n.type === schema.nodes.page_break) found = true;
     return !found;
@@ -86,7 +90,7 @@ function contentLeft(el: HTMLElement, origin: DOMRect): number {
 }
 
 /** A paragraph's lines, relative to its top. Each line's start position is looked up only if a break lands on it. */
-function linesOf(view: EditorView, el: HTMLElement, from: number, to: number): Line[] {
+function linesOf(view: EditorView, el: HTMLElement, from: number, to: number, endBreak = false): Line[] {
   const range = document.createRange();
   range.selectNodeContents(el);
   const top = el.getBoundingClientRect().top;
@@ -101,9 +105,14 @@ function linesOf(view: EditorView, el: HTMLElement, from: number, to: number): L
     } else lines.push({ top: r.top, bottom: r.bottom, left: r.left });
   }
   lines.sort((a, b) => a.top - b.top);
-  return lines.map((l) => ({
+  // A page break inside the text ends its line (it is drawn as a line end); the next line starts a page.
+  // One that is the paragraph's last content is the block's breakAfter instead.
+  const found = Array.from(el.querySelectorAll(".docx-page-break"));
+  const breaks = (endBreak ? found.slice(0, -1) : found).map((b) => b.getBoundingClientRect());
+  return lines.map((l, i) => ({
     top: l.top - top,
     bottom: l.bottom - top,
+    breakAfter: i < lines.length - 1 && breaks.some((b) => b.top < l.bottom && b.bottom > l.top - 1),
     get pos() {
       const hit = view.posAtCoords({ left: l.left + 1, top: (l.top + l.bottom) / 2 })?.pos ?? from;
       return Math.min(Math.max(hit, from), to);
@@ -113,7 +122,8 @@ function linesOf(view: EditorView, el: HTMLElement, from: number, to: number): L
 
 function measureUnit(view: EditorView, node: PMNode, pos: number, el: HTMLElement, height: number, origin: DOMRect): Unit {
   if (node.type === schema.nodes.paragraph) {
-    return { kind: "text", height, pos, left: contentLeft(el, origin), lines: linesOf(view, el, pos + 1, pos + node.nodeSize - 1) };
+    const endBreak = node.lastChild?.type === schema.nodes.page_break;
+    return { kind: "text", height, pos, left: contentLeft(el, origin), lines: linesOf(view, el, pos + 1, pos + node.nodeSize - 1, endBreak) };
   }
   if (node.type === schema.nodes.table) return { kind: "table", height, pos, rows: measureRows(view, node, pos, origin) };
   return { kind: "block", height, pos };

@@ -609,3 +609,37 @@ describe("layoutPages: spacing at the bottom of a page", () => {
     expect(lay([block(400), para(4, 20, 0, 10), block(50)]).fills[0]).toBe(10);
   });
 });
+
+describe("layoutPages: a page break inside a paragraph (w:br w:type=page mid-paragraph)", () => {
+  /** A paragraph whose line `k` ends with a page break. */
+  const broken = (n: number, lh: number, k: number, pos = 0): TopBlock => {
+    const b = para(n, lh, pos);
+    const u = b.unit as Extract<Unit, { kind: "text" }>;
+    u.lines[k] = { ...u.lines[k], breakAfter: true };
+    return b;
+  };
+
+  it("starts a new page with the line after the break, as Word does", () => {
+    // 100 used, then "Before break" (line 0) | page break | "after break" (lines 1-3).
+    const l = lay([block(100), broken(4, 20, 0), block(50)]);
+    expect(l.pages).toBe(2);
+    expect(l.spacers).toEqual([{ pos: 200, height: AVAIL - 120 + GAP, gapAt: AVAIL - 120, left: 96, page: 1 }]);
+    // fills lists pages ended between blocks, plus the last: page 2 holds lines 1-3 (60) and the block (50).
+    expect(l.fills).toEqual([AVAIL - 110]);
+  });
+
+  it("still breaks a long paragraph for length after its manual break", () => {
+    // Lines 0-4 (100) on page 1; the break moves line 5 on; 25 more lines (500) fill page 2 exactly.
+    const l = lay([broken(30, 20, 4)]);
+    expect(l.pages).toBe(2);
+    expect(l.spacers.map((s) => s.pos)).toEqual([600]);
+  });
+
+  it("leaves a break at the paragraph's end to the block (no spacer inside it)", () => {
+    const b = broken(3, 20, 2);
+    b.breakAfter = true;
+    const l = lay([b, block(50)]);
+    expect(l.spacers).toEqual([]);
+    expect(l.starts).toEqual([1]);
+  });
+});

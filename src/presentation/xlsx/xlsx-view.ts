@@ -256,7 +256,8 @@ export class XlsxView extends FileView {
       // Opened again meanwhile (a setting change while loading): only the newest load draws.
       if (load !== this.loads) return;
       this.edits = new Edits(Workbook.open(book));
-      this.cfCache.clear();
+      // The view may be reused for another file, and every workbook has xl/worksheets/sheet1.xml.
+      this.clearCaches();
     } catch (err) {
       status.setText(`Could not open this .xlsx file: ${(err as Error).message}`);
       console.error(err);
@@ -1029,14 +1030,21 @@ export class XlsxView extends FileView {
     return null;
   }
 
-  private afterReload(): void {
+  /** Everything read from the workbook and kept per sheet part. */
+  private clearCaches(): void {
     this.pictureCache.clear();
     this.cfCache.clear();
     this.sparkCache.clear();
     this.notesCache = null;
     this.commentsCache = null;
+    this.linksCache = null;
     this.invalidCache.clear();
     this.chartCache.clear();
+    this.chartSvgs.clear();
+  }
+
+  private afterReload(): void {
+    this.clearCaches();
     this.sheetIndex = Math.min(this.sheetIndex, this.wb.sheets.length - 1);
     this.renderTabs();
   }

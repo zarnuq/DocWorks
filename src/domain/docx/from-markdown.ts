@@ -3,6 +3,7 @@
  * and handed to the note export's converter, so pasted headings, lists, tasks, code and tables match an exported note.
  */
 import { Fragment, Node as PMNode, Slice } from "prosemirror-model";
+import { EditorState, Selection, Transaction } from "prosemirror-state";
 import { MdBlock, MdRun, parseMarkdown } from "../../core/utils/markdown";
 import { htmlToDoc } from "./from-html";
 import { attrsOf } from "./schema";
@@ -86,4 +87,16 @@ const plainParagraph = (n: PMNode | null) => n?.type.name === "paragraph" && !at
 /** The document as a paste: a plain first / last paragraph joins the paragraph at the caret, anything else stays a block. */
 export function pasteSlice(doc: PMNode): Slice {
   return new Slice(Fragment.from(doc.content), plainParagraph(doc.firstChild) ? 1 : 0, plainParagraph(doc.lastChild) ? 1 : 0);
+}
+
+/**
+ * The transaction that pastes `doc` over the selection, with the caret at the end of what was pasted (as in Word and
+ * Google Docs). A slice that ends in a closed block (a list item, a heading) would otherwise leave ProseMirror's caret
+ * at the start of the paragraph after it.
+ */
+export function pasteMarkdown(state: EditorState, doc: PMNode): Transaction {
+  const tr = state.tr.replaceSelection(pasteSlice(doc));
+  let end = -1;
+  tr.mapping.maps[tr.mapping.maps.length - 1]?.forEach((_from, _to, _newFrom, newTo) => (end = newTo));
+  return end < 0 ? tr : tr.setSelection(Selection.near(tr.doc.resolve(end), -1));
 }

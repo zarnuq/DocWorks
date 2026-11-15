@@ -942,3 +942,31 @@ describe("XlsxView menus", () => {
     await view.onUnloadFile(file);
   });
 });
+
+describe("opening another workbook in the same view", () => {
+  // Obsidian reuses a tab's view for the next .xlsx opened in it. Per-sheet caches are keyed by part path
+  // (xl/worksheets/sheet1.xml), which every workbook has, so they must not survive into the next file.
+  const C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+  const PIE = `<c:chartSpace xmlns:c="${C}"><c:chart><c:plotArea><c:pieChart><c:ser><c:idx val="0"/><c:order val="0"/><c:cat><c:strRef><c:f>Data!$A$2:$A$3</c:f></c:strRef></c:cat><c:val><c:numRef><c:f>Data!$B$2:$B$3</c:f></c:numRef></c:val></c:ser></c:pieChart></c:plotArea></c:chart></c:chartSpace>`;
+  const ANCHOR = `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><xdr:oneCellAnchor><xdr:from><xdr:col>3</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="5715000" cy="3533775"/><xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id="1" name="Chart 1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="${C}"><c:chart xmlns:c="${C}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>`;
+  const cell = (r: string, v: string | number) => typeof v === "number" ? `<c r="${r}"><v>${v}</v></c>` : `<c r="${r}" t="inlineStr"><is><t>${v}</t></is></c>`;
+  const DATA = `<row r="1">${cell("A1", "Item")}${cell("B1", "N")}</row><row r="2">${cell("A2", "a")}${cell("B2", 3)}</row><row r="3">${cell("A3", "b")}${cell("B3", 5)}</row>`;
+
+  it("shows the second workbook's chart, not the first one's (empty) chart list", async () => {
+    const { app, view } = await mount(await xlsx({ sheets: [sheetXml(DATA)], names: ["Data"] }));
+    const charts = () => (view as unknown as { charts(): unknown[] }).charts();
+    expect(charts()).toHaveLength(0);
+    const withChart = await xlsx({
+      sheets: [sheetXml(DATA, { before: "", after: `<drawing r:id="rId1"/>` })],
+      names: ["Data"],
+      drawing: ANCHOR,
+      drawingRels: [["rId1", "../charts/chart1.xml"]],
+      parts: { "xl/charts/chart1.xml": PIE },
+    });
+    app.vault.readBinary = async () => withChart.buffer.slice(withChart.byteOffset, withChart.byteOffset + withChart.byteLength) as ArrayBuffer;
+    const next = new TFile("other.xlsx") as unknown as RealTFile;
+    view.file = next;
+    await view.onLoadFile(next);
+    expect(charts()).toHaveLength(1);
+  });
+});

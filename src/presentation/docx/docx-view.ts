@@ -32,7 +32,7 @@ import { openDrawer, watchNarrow } from "../common/narrow";
 import { pickImage } from "../common/images";
 import { electronSpeller, notePasteKey, runEditCommand, Speller, wantsPlainPaste } from "../common/spelling";
 import { looksLikeMarkdown, markdownToPlain } from "../../core/utils/markdown";
-import { markdownToDoc, pasteSlice } from "../../domain/docx/from-markdown";
+import { markdownToDoc, pasteMarkdown } from "../../domain/docx/from-markdown";
 import { CellSelection } from "./cell-selection";
 import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, DOCS_SHORTCUTS, registerShortcutsKey, shortcutsDialog } from "../common/shortcuts";
@@ -463,7 +463,7 @@ export class DocxView extends FileView {
           },
           image: () => null,
         });
-        view.dispatch(view.state.tr.replaceSelection(pasteSlice(pasted)).scrollIntoView().setMeta("uiEvent", "paste"));
+        view.dispatch(pasteMarkdown(view.state, pasted).scrollIntoView().setMeta("uiEvent", "paste"));
         return true;
       },
       handleDrop: (view, event) => {

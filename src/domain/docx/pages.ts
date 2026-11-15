@@ -78,6 +78,8 @@ export interface Line {
   top: number;
   bottom: number;
   pos: number;
+  /** A manual page break ends this line: the next line starts a page (as in Word). One at the paragraph's end is the block's `breakAfter`. */
+  breakAfter?: boolean;
 }
 
 /**
@@ -186,7 +188,18 @@ export function layoutPages(blocks: TopBlock[], baseAvail: number, gap: number, 
     let start = 0;
     let startTop = 0;
     let base = used;
-    while (base + u.height - startTop > capacity(page)) {
+    for (;;) {
+      // The part to fit: up to the next manual break inside the paragraph, else its end.
+      const brk = lines.findIndex((l, k) => k >= start && k < lines.length - 1 && l.breakAfter);
+      const end = brk < 0 ? u.height : lines[brk].bottom;
+      if (base + end - startTop <= capacity(page)) {
+        if (brk < 0) break;
+        addSpacer(lines[brk + 1].pos, base + lines[brk + 1].top - startTop, u.left, page++);
+        base = 0;
+        startTop = lines[brk + 1].top;
+        start = brk + 1;
+        continue;
+      }
       let k = start;
       while (k < lines.length && base + lines[k].bottom - startTop <= capacity(page)) k++;
       if (k >= lines.length) break; // only the spacing after it overflows
