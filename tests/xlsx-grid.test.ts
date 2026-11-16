@@ -410,3 +410,35 @@ describe("group gutter", () => {
     expect(host.toggleGroup).toHaveBeenCalledWith("row", { level: 1, start: 2, end: 4, collapsed: false });
   });
 });
+
+describe("numbers too wide for their cell", () => {
+  // Fake font: every character 7px wide.
+  const measure = (t: string) => t.length * 7;
+
+  it("fill the cell with # as Excel does, instead of being cut off", async () => {
+    const { fitNumber } = await import("../src/presentation/xlsx/paint");
+    expect(fitNumber("$1,234,567.00", 50, measure, false)).toBe("#######");
+    expect(fitNumber("$12.00", 50, measure, false)).toBe("$12.00");
+  });
+
+  it("drop decimals first in the General format, then use #", async () => {
+    const { fitNumber } = await import("../src/presentation/xlsx/paint");
+    expect(fitNumber("3.14159265", 30, measure, true)).toBe("3.14");
+    expect(fitNumber("1.0001", 30, measure, true)).toBe("1");
+    expect(fitNumber("-12.75", 30, measure, true)).toBe("-13");
+    expect(fitNumber("123456", 30, measure, true)).toBe("####");
+  });
+
+  it("are marked on their paint op; text cells are not", async () => {
+    const { grid, edits } = await mount();
+    const s = edits.wb.sheets[0];
+    edits.input(s, 8, 0, "3.5");
+    edits.input(s, 9, 0, "12%");
+    edits.input(s, 10, 0, "label");
+    grid.invalidate();
+    const op = (t: string) => allTexts(grid).find((o) => o.text === t)!;
+    expect(op("3.5").number).toBe("general");
+    expect(op("12%").number).toBe("fixed");
+    expect(op("label").number).toBeUndefined();
+  });
+});

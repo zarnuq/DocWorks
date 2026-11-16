@@ -178,6 +178,12 @@ describe("chart rendering", () => {
   const rects = (host: HTMLElement) => Array.from(host.querySelectorAll("rect.chart-mark")).map((r) => ["x", "y", "width", "height"].map((a) => Number(r.getAttribute(a))));
   const texts = (host: HTMLElement, cls = "") => Array.from(host.querySelectorAll(`text${cls}`)).map((t) => t.textContent);
 
+  it("draws a negative pie value as a slice of its size, as Excel does", () => {
+    const host = draw({ kind: "pie", labels: true }, { categories: ["A", "B"], series: [{ name: "S", values: [-1, 3] }] }, "pieChart");
+    expect(host.querySelectorAll("path.chart-mark")).toHaveLength(2);
+    expect(texts(host, ".chart-label")).toEqual(["25%", "75%"]);
+  });
+
   it("draws horizontal bars with lengths along x, first category at the bottom", () => {
     const r = rects(draw({ kind: "bar" }));
     expect(r).toHaveLength(6);

@@ -31,6 +31,8 @@ export type Op =
       pad: number;
       /** Text past `from` (on the empty cells it runs onto) in another colour: dark text on a fill turns light there in the dark theme. */
       spill?: { from: number; color: string };
+      /** A number: too wide for its cell it becomes ##### (Excel), after dropping decimals in the General format. */
+      number?: "general" | "fixed";
     }
   | { kind: "corner"; x: number; y: number; color: string }
   /** A cell checkbox centred in the cell box; `color` fills it when checked. */
@@ -152,7 +154,23 @@ export function cellTextHeight(ctx: Pick<CanvasRenderingContext2D, "measureText"
   return textLines(ctx, op).length * cellTextLineHeight(op.size) + 2;
 }
 
+/** A number's text as Excel shows it in `width` px: General drops decimals until it fits; then it is all #. */
+export function fitNumber(text: string, width: number, measure: (t: string) => number, general: boolean): string {
+  if (measure(text) <= width) return text;
+  const m = general ? /^-?\d+\.(\d+)$/.exec(text) : null;
+  // ponytail: no switch to scientific notation for General integers (Excel shows 1E+10); add if wide integers show up.
+  for (let d = m ? m[1].length - 1 : -1; d >= 0; d--) {
+    const shorter = String(Number(Number(text).toFixed(d)));
+    if (measure(shorter) <= width) return shorter;
+  }
+  return "#".repeat(Math.max(1, Math.floor(width / measure("#"))));
+}
+
 function drawText(ctx: CanvasRenderingContext2D, op: Extract<Op, { kind: "text" }>): void {
+  if (op.number && !op.wrap) {
+    ctx.font = op.font;
+    op = { ...op, text: fitNumber(op.text, op.w - 2 * PAD - op.pad, (t) => ctx.measureText(t).width, op.number === "general") };
+  }
   if (!op.spill) return drawTextIn(ctx, op, op.x, op.w, op.color);
   drawTextIn(ctx, op, op.x, op.spill.from - op.x, op.color);
   drawTextIn(ctx, op, op.spill.from, op.x + op.w - op.spill.from, op.spill.color);

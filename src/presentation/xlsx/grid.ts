@@ -746,6 +746,7 @@ export class Grid {
         strike: fmt.strike,
         pad: (indent ? indent - 3 : 0) + (cf?.icon && align === "left" ? px + 2 : 0),
         ...(spill ? { spill } : {}),
+        ...(isNum ? { number: /^general$/i.test(fmt.numFmt) ? ("general" as const) : ("fixed" as const) } : {}),
       });
     };
     for (const m of merges) drawCell(m.r1, m.c1, m);

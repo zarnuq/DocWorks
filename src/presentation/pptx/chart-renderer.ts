@@ -110,7 +110,8 @@ export function renderChart(host: HTMLElement, chart: ChartModel, size = { w: 48
   legend(svg, box, f.legend, pie ? categories : series.map((s) => s.name), color);
 
   if (pie) {
-    const values = series[0].values.map((v) => Math.max(0, v));
+    // Excel draws a negative value as a slice of its size.
+    const values = series[0].values.map((v) => Math.abs(v || 0));
     const total = values.reduce((a, b) => a + b, 0);
     const cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
     const r = Math.max(4, Math.min(box.right - box.left, box.bottom - box.top) / 2 - 2);
