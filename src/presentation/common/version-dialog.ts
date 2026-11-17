@@ -1,6 +1,7 @@
 /** File › Version history: the kept versions of a file, newest first, each with Preview and Restore. */
 import { App, Modal, Notice, TFile } from "obsidian";
 import { renderDocxEmbed, renderPptxEmbed, renderXlsxEmbed } from "./embeds";
+import { kindOfExtension } from "./settings";
 import { keepVersion, versions } from "./version-history";
 import { diffWords } from "../../core/utils/diff";
 import { compareText, officeText, type TextChange } from "../../infrastructure/office-text";
@@ -42,19 +43,18 @@ export async function versionHistoryDialog(app: App, view: VersionedView, readOn
     row.createEl("button", { text: "Preview" }).addEventListener("click", () => void (async () => {
       clear();
       const bytes = await versions?.bytes(v.id);
-      const render = PREVIEW[file.extension.toLowerCase() as keyof typeof PREVIEW];
-      if (!bytes || !render) return void preview.setText("This version can't be shown.");
+      const kind = kindOfExtension(file.extension);
+      if (!bytes || !kind) return void preview.setText("This version can't be shown.");
       preview.createDiv({ cls: "dw-version-preview-title", text: `As it was on ${when}` });
-      cleanup = await render(preview.createDiv({ cls: `dw-embed-body dw-embed-${file.extension.toLowerCase()}` }), bytes, "");
+      cleanup = await PREVIEW[kind](preview.createDiv({ cls: `dw-embed-body dw-embed-${kind}` }), bytes, "");
     })());
     row.createEl("button", { text: "Compare" }).addEventListener("click", () => void (async () => {
       clear();
-      const ext = file.extension.toLowerCase();
+      const kind = kindOfExtension(file.extension);
       const old = await versions?.bytes(v.id);
-      if (!old || !(ext in PREVIEW)) return void preview.setText("This version can't be compared.");
+      if (!old || !kind) return void preview.setText("This version can't be compared.");
       // The file as it is now includes edits still waiting to be saved.
       await view.requestSave();
-      const kind = ext as keyof typeof PREVIEW;
       const changes = compareText(kind, await officeText(kind, old), await officeText(kind, await app.vault.readBinary(file)));
       showChanges(preview, changes, when);
     })());

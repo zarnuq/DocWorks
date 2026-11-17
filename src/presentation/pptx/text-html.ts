@@ -470,12 +470,17 @@ interface MdLine {
 }
 
 /** Markdown blocks as slide paragraphs: list items keep their kind and depth, headings are bold, code and table rows are lines. */
-function markdownLines(blocks: MdBlock[]): MdLine[] {
+function markdownLines(blocks: MdBlock[], pictures: Set<string>): MdLine[] {
   const out: MdLine[] = [];
-  for (const b of blocks) {
+  // Slides have no equations: math stays as its source. Pictures the view found go on the slide, not in the text;
+  // the others keep their name.
+  const text = (runs: MdRun[]): MdRun[] => runs.filter((r) => !r.image || !pictures.has(r.image)).map((r) => (r.math ? { text: `$${r.text}$` } : r.image ? { text: r.text } : r));
+  for (const b of blocks.map((x) => ("runs" in x ? { ...x, runs: text(x.runs) } : x))) {
     if (b.kind === "blank" || b.kind === "hr") continue;
-    if (b.kind === "code") for (const line of b.text.split("\n")) out.push({ runs: line ? [{ text: line, code: true }] : [], depth: 0 });
-    else if (b.kind === "table") for (const row of b.rows) out.push({ runs: row.flatMap((cell, i) => (i ? [{ text: "\t" }, ...cell] : cell)), depth: 0 });
+    if ("runs" in b && !b.runs.length) continue;
+    if (b.kind === "math") out.push({ runs: [{ text: b.latex }], depth: 0 });
+    else if (b.kind === "code") for (const line of b.text.split("\n")) out.push({ runs: line ? [{ text: line, code: true }] : [], depth: 0 });
+    else if (b.kind === "table") for (const row of b.rows) out.push({ runs: row.flatMap((cell, i) => (i ? [{ text: "\t" }, ...text(cell)] : text(cell))), depth: 0 });
     else if (b.kind === "heading") out.push({ runs: b.runs.map((r) => ({ ...r, b: true as const })), depth: 0 });
     else if (b.kind === "item") {
       const box = b.list === "task" ? [{ text: b.checked ? "☑ " : "☐ " }] : [];
@@ -504,13 +509,14 @@ function runNodes(runs: MdRun[], pxPerPt: number): Node[] {
 /**
  * Replace the selection with Markdown: the first line continues the paragraph at the caret, the others become
  * paragraphs like it (bulleted, numbered and indented for list items), and the rest of that paragraph follows the last.
+ * `pictures`: the picture links the caller puts on the slide itself, left out of the text.
  */
-export function insertMarkdown(host: HTMLElement, markdown: string, pxPerPt: number): void {
+export function insertMarkdown(host: HTMLElement, markdown: string, pxPerPt: number, pictures = new Set<string>()): void {
   const range = rangeIn(host);
   if (!range) return;
-  const lines = markdownLines(parseMarkdown(markdown));
+  const lines = markdownLines(parseMarkdown(markdown), pictures);
   const template = host.querySelector(":scope > p");
-  if (!lines.length || !template) return void insertPlainText(markdownToPlain(markdown));
+  if (!lines.length || !template) { if (!pictures.size) insertPlainText(markdownToPlain(markdown)); return; }
   range.deleteContents();
   let p: Node | null = caretIntoParagraph(host, range, template);
   while (p && p.parentNode !== host) p = p.parentNode;

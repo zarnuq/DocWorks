@@ -51,7 +51,7 @@ export function showContextMenu(at: { x: number; y: number; doc?: Document }, en
   const root = createDiv({ cls: "dw-ctx" });
   doc.body.appendChild(root);
   // The clicked window's own AbortController: its listeners take only its own signals.
-  const abort = new (win as typeof globalThis).AbortController();
+  const abort = new win.AbortController();
   let closed = false;
   const handle = {
     close: () => {

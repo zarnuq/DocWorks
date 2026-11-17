@@ -22,6 +22,12 @@ const COLOR_TAGS = new Set(["srgbClr", "schemeClr", "sysClr", "prstClr", "scrgbC
 export const hex = (rgb: number[]) =>
   "#" + rgb.map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, "0")).join("").toUpperCase();
 
+/** Relative luminance of "#RRGGBB", 0 (black) to 1 (white). */
+export function luminance(color: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 export function rgbToHsl([r, g, b]: number[]): [number, number, number] {
   r /= 255;
   g /= 255;

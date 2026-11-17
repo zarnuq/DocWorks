@@ -623,7 +623,7 @@ function textOf(el: Element | null): string {
     .join("");
 }
 
-function isoToSerial(iso: string, date1904: boolean): number {
+export function isoToSerial(iso: string, date1904: boolean): number {
   const ms = Date.parse(iso.endsWith("Z") || /T.*[+-]\d\d:/.test(iso) ? iso : iso + (iso.includes("T") ? "Z" : "T00:00:00Z"));
   const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30);
   return (ms - epoch) / 86400000;

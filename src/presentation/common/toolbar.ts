@@ -13,7 +13,7 @@ export const ZOOMS = ["fit", "0.5", "0.75", "0.9", "1", "1.25", "1.5", "2"];
 export const zoomLabel = (z: string) => (z === "fit" ? "Fit" : `${Math.round(Number(z) * 100)}%`);
 
 /** Open a toolbar menu under its button. */
-function showBelow(menu: Menu, anchor: HTMLElement): void {
+export function showBelow(menu: Menu, anchor: HTMLElement): void {
   const r = anchor.getBoundingClientRect();
   menu.showAtPosition({ x: r.left, y: r.bottom });
 }

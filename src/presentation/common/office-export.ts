@@ -18,9 +18,11 @@ import { renderSlide } from "../pptx/slide-renderer";
 import { embedRange, sectionOf, sheetTarget, slideIndex } from "./embeds";
 import { readDocx } from "../../domain/docx/docx-reader";
 import { PNG_WIDTH, renderPng } from "./png";
+import { kindOfExtension } from "./settings";
 
 export type ExportPicture = { bytes: Uint8Array; ext: string; width: number; height: number };
-export const OFFICE_EXTENSIONS = new Set(["docx", "pptx", "xlsx"]);
+/** The kind of Office file a file name is (templates and macro-enabled files included), or null. */
+export const OFFICE_KINDS_OF = (name: string) => kindOfExtension(name.slice(name.lastIndexOf(".") + 1));
 
 /** Folder name the embedded document's pictures are given in its Markdown, to find them again. */
 const PICTURES = "dw-embedded-pictures";
@@ -28,7 +30,7 @@ const PICTURES = "dw-embedded-pictures";
 /** What replaces the embed of `file` in the exported note; null when the file can't be shown (it stays a link). */
 export async function officeEmbedForExport(app: App, file: TFile, subpath: string, component: Component, pictures: Map<HTMLImageElement, ExportPicture>): Promise<HTMLElement | null> {
   const bytes = await app.vault.readBinary(file);
-  const ext = file.extension.toLowerCase();
+  const ext = kindOfExtension(file.extension);
   if (ext === "xlsx") return sheetTable(bytes, subpath);
   if (ext === "pptx") return slidePicture(bytes, subpath, file.basename, pictures);
   if (ext === "docx") return documentContent(app, bytes, file, subpath, component, pictures);

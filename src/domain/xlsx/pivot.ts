@@ -1,22 +1,34 @@
 /*
  * Pivot tables: the definition (rows, columns, values) is read from the pivot table part and its cache; refreshing
  * works the table out again from the source range's current values, writes it into the sheet (Excel's compact
- * layout: row fields nested in one column with subtotals at the top, one column field, any number of values) and
- * rewrites the definition and the cache to match. The cache is marked to refresh on load, so Excel redoes its own
+ * layout: row fields nested in one column with subtotals at the top, column fields nested with a total after
+ * each group, any number of values) and
+ * rewrites the definition and the cache to match. Filters hide items of a field: a field on the rows or columns
+ * hides them in place; any other field becomes a report filter (Excel's page field), named in the rows above the
+ * table with what it shows. The cache is marked to refresh on load, so Excel redoes its own
  * layout when it opens the file.
  */
 import { Edits } from "./commands";
 import { compareValues } from "./formula-evaluator";
 import { Scalar } from "./number-format";
 import { parseRange, Rect, rangeName } from "./references";
-import { Sheet } from "./workbook-model";
+import { isoToSerial, Sheet } from "./workbook-model";
 import { escapeXml, insertInOrder, kid, kids, parseElement } from "../../core/utils/xml";
 
 export type PivotFn = "sum" | "count" | "average" | "max" | "min";
+const PIVOT_FNS: ReadonlySet<string> = new Set<PivotFn>(["sum", "count", "average", "max", "min"]);
+const asPivotFn = (s: string): PivotFn => (PIVOT_FNS.has(s) ? s as PivotFn : "sum");
 interface PivotValue {
   field: number;
   fn: PivotFn;
   name?: string;
+}
+type Item = string | number | boolean;
+/** A field showing only some of its items. */
+export interface PivotFilter {
+  field: number;
+  /** The items left out, as the table labels them (blank cells are "(blank)"). */
+  hidden: Item[];
 }
 export interface Pivot {
   name: string;
@@ -29,14 +41,17 @@ export interface Pivot {
   cols: number[];
   values: PivotValue[];
   source: { sheet: string; ref: Rect } | null;
+  /** The table itself; report filters sit above it, from row `top`, with an empty row between. */
   location: Rect;
-  /** Report filters, which are kept but not applied here. */
-  filtered: boolean;
+  top: number;
+  filters: PivotFilter[];
 }
 export interface PivotLayout {
   rows: number[];
   cols: number[];
   values: PivotValue[];
+  /** Left out: the filters stay as they are. */
+  filters?: PivotFilter[];
 }
 
 const FN_LABEL: Record<PivotFn, string> = { sum: "Sum", count: "Count", average: "Average", max: "Max", min: "Min" };
@@ -55,29 +70,54 @@ export function readPivots(sheet: Sheet): Pivot[] {
     const ws = kid(kid(cache, "cacheSource"), "worksheetSource");
     const ref = parseRange(ws?.getAttribute("ref") ?? "");
     const axis = (name: string) => kids(kid(def, name), "field").map((f) => Number(f.getAttribute("x"))).filter((x) => x >= 0);
+    // Filters: a report filter's one picked item, or the items a field marks hidden.
+    const cacheFields = kids(kid(cache, "cacheFields"), "cacheField");
+    const shared = (i: number) => kids(kid(cacheFields[i], "sharedItems")).map((el) => sharedItem(el, sheet.wb.date1904));
+    const pivotFields = kids(kid(def, "pivotFields"), "pivotField");
+    const pages = kids(kid(def, "pageFields"), "pageField");
+    const filters: PivotFilter[] = [];
+    pivotFields.forEach((f, i) => {
+      const items = kids(kid(f, "items"), "item").filter((it) => it.hasAttribute("x"));
+      const page = pages.find((pf) => Number(pf.getAttribute("fld")) === i);
+      const picked = page?.getAttribute("item");
+      const all = shared(i);
+      const of = (it: Element) => all[Number(it.getAttribute("x"))];
+      const hidden = picked != null && items[Number(picked)]
+        ? all.filter((v) => keyOf(v) !== keyOf(of(items[Number(picked)])))
+        : items.filter((it) => it.getAttribute("h") === "1").map(of);
+      if (page || hidden.length) filters.push({ field: i, hidden: hidden.filter((v) => v !== undefined).map(label) });
+    });
     out.push({
       name: def.getAttribute("name") ?? "",
       path: rel.target,
       cachePath,
-      fields: kids(kid(cache, "cacheFields"), "cacheField").map((f) => f.getAttribute("name") ?? ""),
+      fields: cacheFields.map((f) => f.getAttribute("name") ?? ""),
       rows: axis("rowFields"),
       cols: axis("colFields"),
-      values: kids(kid(def, "dataFields"), "dataField").map((d) => ({ field: Number(d.getAttribute("fld")), fn: (d.getAttribute("subtotal") ?? "sum") as PivotFn, name: d.getAttribute("name") ?? undefined })),
+      values: kids(kid(def, "dataFields"), "dataField").map((d) => ({ field: Number(d.getAttribute("fld")), fn: asPivotFn(d.getAttribute("subtotal") ?? "sum"), name: d.getAttribute("name") ?? undefined })),
       source: ref && ws ? { sheet: ws.getAttribute("sheet") ?? sheet.name, ref } : null,
       location,
-      filtered: kids(kid(def, "pageFields"), "pageField").length > 0,
+      // Report filters take `rowPageCount` rows (Excel can lay several across one row), then an empty row.
+      top: Math.max(0, location.r1 - (pages.length ? (Number(kid(def, "location")?.getAttribute("rowPageCount")) || pages.length) + 1 : 0)),
+      filters,
     });
   }
   return out;
 }
 
 export function pivotAt(sheet: Sheet, row: number, col: number): Pivot | null {
-  return readPivots(sheet).find((p) => row >= p.location.r1 && row <= p.location.r2 && col >= p.location.c1 && col <= p.location.c2) ?? null;
+  return readPivots(sheet).find((p) => row >= p.top && row <= p.location.r2 && col >= p.location.c1 && col <= p.location.c2) ?? null;
 }
 
 const blank = (v: Scalar) => v === null || v === "";
-const label = (v: Scalar): string | number | boolean => (v === null || v === "" ? "(blank)" : typeof v === "object" ? v.error : v);
-const keyOf = (v: Scalar) => `${typeof v}:${String(label(v)).toLowerCase()}`;
+const label = (v: Scalar): Item => (v === null || v === "" ? "(blank)" : typeof v === "object" ? v.error : v);
+const keyOf = (v: Scalar) => `${typeof label(v)}:${String(label(v)).toLowerCase()}`;
+/** A cache field's shared item (s / n / b / m / d / e) as the value its source cell holds: a date is its serial number. */
+function sharedItem(el: Element, date1904: boolean): Scalar {
+  const v = el.getAttribute("v") ?? "";
+  if (el.localName === "d") return isoToSerial(v, date1904);
+  return el.localName === "m" ? null : el.localName === "n" ? Number(v) : el.localName === "b" ? v === "1" : v;
+}
 const sorted = (vals: Scalar[]) => {
   const seen = new Map<string, Scalar>();
   for (const v of vals) if (!seen.has(keyOf(v))) seen.set(keyOf(v), v);
@@ -112,32 +152,60 @@ function sourceOf(sheet: Sheet, p: Pivot): { header: string[]; records: Scalar[]
   return { header, records };
 }
 
+/** A field's items in the order the table lists them, for a filter's checklist. */
+export function pivotItems(sheet: Sheet, p: Pivot, field: number): Item[] {
+  return sorted(sourceOf(sheet, p).records.map((r) => r[field])).map(label);
+}
+
 /** The pivot table's cells (row-major, null for empty). */
 function pivotGrid(header: string[], records: Scalar[][], layout: PivotLayout): Scalar[][] {
   const { rows, cols, values } = layout;
   const names = values.map((v) => valueName(header, v));
-  const colKeys = cols.length ? sorted(records.map((r) => r[cols[0]])) : [];
+  const multi = values.length > 1;
+  // The table's columns, left to right: each group of column keys, a total after every group that has groups
+  // inside it (`total`, its path the group's), and the grand total (an empty path).
+  const columns: { path: Scalar[]; total: boolean }[] = [];
+  const spread = (recs: Scalar[][], path: Scalar[]) => {
+    for (const key of sorted(recs.map((r) => r[cols[path.length]]))) {
+      const at = [...path, key];
+      if (at.length === cols.length) columns.push({ path: at, total: false });
+      else {
+        spread(recs.filter((r) => keyOf(r[cols[path.length]]) === keyOf(key)), at);
+        columns.push({ path: at, total: true });
+      }
+    }
+  };
+  if (cols.length) {
+    spread(records, []);
+    columns.push({ path: [], total: true });
+  }
   const cells = (recs: Scalar[][]): Scalar[] => {
     if (!cols.length) return values.map((v) => aggregate(v.fn, recs.map((r) => r[v.field])));
-    const out: Scalar[] = [];
-    for (const key of colKeys) {
-      const inCol = recs.filter((r) => keyOf(r[cols[0]]) === keyOf(key));
-      for (const v of values) out.push(aggregate(v.fn, inCol.map((r) => r[v.field])));
-    }
-    for (const v of values) out.push(aggregate(v.fn, recs.map((r) => r[v.field])));
-    return out;
+    return columns.flatMap((col) => {
+      const inCol = recs.filter((r) => col.path.every((k, l) => keyOf(r[cols[l]]) === keyOf(k)));
+      return values.map((v) => aggregate(v.fn, inCol.map((r) => r[v.field])));
+    });
   };
   const grid: Scalar[][] = [];
-  const width = 1 + (cols.length ? (colKeys.length + 1) * values.length : values.length);
+  const width = 1 + (cols.length ? columns.length : 1) * values.length;
   const pad = (row: Scalar[]) => [...row, ...Array<Scalar>(width - row.length).fill(null)];
+  const rest = Array<Scalar>(values.length - 1).fill(null);
   if (!cols.length) grid.push(["Row Labels", ...names]);
-  else if (values.length === 1) {
-    grid.push(pad([names[0], "Column Labels"]));
-    grid.push(["Row Labels", ...colKeys.map(label), "Grand Total"]);
-  } else {
-    grid.push(pad([null, "Column Labels"]));
-    grid.push([null, ...colKeys.flatMap((k) => [label(k), ...Array<Scalar>(values.length - 1).fill(null)]), ...names.map((n) => `Total ${n}`)]);
-    grid.push(pad(["Row Labels", ...colKeys.flatMap(() => names)]));
+  else {
+    grid.push(pad([multi ? null : names[0], "Column Labels"]));
+    // One header row per column field: a key over the first column of its group, a group's total named beside it.
+    cols.forEach((_, l) => {
+      const last = l === cols.length - 1;
+      const heads = columns.flatMap((col, i): Scalar[] => {
+        if (!col.path.length) return l ? [null, ...rest] : multi ? names.map((n) => `Total ${n}`) : ["Grand Total"];
+        if (col.total) return [l === col.path.length - 1 ? `${label(col.path[l])} Total` : null, ...rest];
+        const prev = columns[i - 1];
+        const first = !prev || prev.total || prev.path.slice(0, l + 1).some((k, j) => keyOf(k) !== keyOf(col.path[j]));
+        return [last || first ? label(col.path[l]) : null, ...rest];
+      });
+      grid.push([!multi && last ? "Row Labels" : null, ...heads]);
+    });
+    if (multi) grid.push(pad(["Row Labels", ...columns.filter((c) => c.path.length).flatMap(() => names)]));
   }
   // Row fields nest in one column; a parent row carries its subtotal.
   const walk = (recs: Scalar[][], level: number) => {
@@ -172,11 +240,14 @@ const itemXml = (v: Scalar) => (blank(v) ? "<m/>" : typeof v === "number" ? `<n 
  * undo step.
  */
 export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayout): void {
-  if (p.filtered) throw new Error("Pivot tables with report filters are refreshed in Excel or Google Sheets.");
   const layout: PivotLayout = next ?? { rows: p.rows, cols: p.cols, values: p.values };
-  if (layout.cols.length > 1) throw new Error("A pivot table here can have one column field.");
   if (!layout.values.length) throw new Error("Add at least one value.");
   const { header, records } = sourceOf(sheet, p);
+  // One filter per field; a field off the rows and columns is a report filter above the table.
+  const filters = new Map((layout.filters ?? p.filters).filter((f) => f.field >= 0 && f.field < header.length).map((f) => [f.field, new Set(f.hidden.map(keyOf))]));
+  const onAxis = new Set([...layout.rows, ...layout.cols]);
+  const pages = [...filters.keys()].filter((i) => !onAxis.has(i));
+  const shown = records.filter((r) => [...filters].every(([i, hidden]) => !hidden.has(keyOf(r[i]))));
   // Sums, averages, maxima and minima show in their source column's number format (as Google's pivot tables do).
   const src = sheet.wb.sheets.find((x) => x.name === p.source?.sheet);
   const formats = layout.values.map((v) => {
@@ -188,17 +259,22 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
     }
     return null;
   });
-  const headRows = !layout.cols.length ? 1 : layout.values.length > 1 ? 3 : 2;
-  const grid = pivotGrid(header, records, layout);
-  const { r1, c1 } = p.location;
+  const headRows = !layout.cols.length ? 1 : 1 + layout.cols.length + (layout.values.length > 1 ? 1 : 0);
+  const grid = pivotGrid(header, shown, layout);
+  const c1 = p.location.c1, r1 = p.top + (pages.length ? pages.length + 1 : 0);
   const location: Rect = { r1, c1, r2: r1 + grid.length - 1, c2: c1 + grid[0].length - 1 };
-  const old = p.location, path = sheet.ref.path, pkg = sheet.wb.pkg;
+  const old = { ...p.location, r1: p.top }, path = sheet.ref.path, pkg = sheet.wb.pkg;
+  // What a report filter shows, beside its name: everything, its one item, or several.
+  const showing = (i: number) => {
+    const left = sorted(records.map((r) => r[i])).filter((v) => !filters.get(i)!.has(keyOf(v)));
+    return !filters.get(i)!.size ? "(All)" : left.length === 1 ? label(left[0]) : "(Multiple Items)";
+  };
   e.structural(
     () => {
       // Cache: fields from the header; shared items for fields on an axis or holding text; records to match.
       const cacheDoc = pkg.xml(p.cachePath)!;
       const cache = cacheDoc.documentElement;
-      const axes = new Set([...layout.rows, ...layout.cols]);
+      const axes = new Set([...onAxis, ...pages]);
       const shared = header.map((_, i) => (axes.has(i) || records.some((r) => !blank(r[i]) && typeof r[i] !== "number") ? sorted(records.map((r) => r[i])) : null));
       const fieldsXml = header.map((name, i) => {
         const items = shared[i];
@@ -222,12 +298,21 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
       // Definition: fields on their axes with their items in display order, the value fields, the new place.
       const defDoc = pkg.xml(p.path)!;
       const def = defDoc.documentElement;
+      // A report filter showing one item names it in its pageField; otherwise hidden items are marked h="1".
+      const single = (i: number) => {
+        const hidden = filters.get(i);
+        if (!hidden?.size || !pages.includes(i)) return null;
+        const left = shared[i]!.map((v, k) => (hidden.has(keyOf(v)) ? -1 : k)).filter((k) => k >= 0);
+        return left.length === 1 ? left[0] : null;
+      };
       const pf = header.map((_, i) => {
-        const on = layout.rows.includes(i) ? "axisRow" : layout.cols.includes(i) ? "axisCol" : null;
+        const on = layout.rows.includes(i) ? "axisRow" : layout.cols.includes(i) ? "axisCol" : pages.includes(i) ? "axisPage" : null;
         const data = layout.values.some((v) => v.field === i) ? ' dataField="1"' : "";
         if (!on) return `<pivotField${data} showAll="0"/>`;
-        const items = shared[i]!.map((_, k) => `<item x="${k}"/>`).join("");
-        return `<pivotField axis="${on}"${data} showAll="0"><items count="${shared[i]!.length + 1}">${items}<item t="default"/></items></pivotField>`;
+        const hide = single(i) === null ? filters.get(i) : undefined;
+        const items = shared[i]!.map((v, k) => `<item${hide?.has(keyOf(v)) ? ' h="1"' : ""} x="${k}"/>`).join("");
+        const multi = on === "axisPage" && hide?.size ? ' multipleItemSelectionAllowed="1"' : "";
+        return `<pivotField axis="${on}"${data}${multi} showAll="0"><items count="${shared[i]!.length + 1}">${items}<item t="default"/></items></pivotField>`;
       });
       place(def, element(defDoc, `<pivotFields count="${header.length}">${pf.join("")}</pivotFields>`));
       const fieldList = (name: string, xs: number[]) => (xs.length ? place(def, element(defDoc, `<${name} count="${xs.length}">${xs.map((x) => `<field x="${x}"/>`).join("")}</${name}>`)) : kid(def, name)?.remove());
@@ -237,13 +322,19 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
       // Excel lays out the items again when it refreshes on load.
       kid(def, "rowItems")?.remove();
       kid(def, "colItems")?.remove();
+      if (pages.length) place(def, element(defDoc, `<pageFields count="${pages.length}">${pages.map((i) => `<pageField fld="${i}"${single(i) === null ? "" : ` item="${single(i)}"`} hier="-1"/>`).join("")}</pageFields>`));
+      else kid(def, "pageFields")?.remove();
       const dataXml = layout.values.map((v) => `<dataField name="${escapeXml(valueName(header, { ...v, name: undefined }))}" fld="${v.field}"${v.fn === "sum" ? "" : ` subtotal="${v.fn}"`} baseField="0" baseItem="0"/>`);
       place(def, element(defDoc, `<dataFields count="${layout.values.length}">${dataXml.join("")}</dataFields>`));
       const loc = kid(def, "location")!;
       loc.setAttribute("ref", rangeName(location));
       loc.setAttribute("firstHeaderRow", "1");
-      loc.setAttribute("firstDataRow", String(!layout.cols.length ? 1 : layout.values.length > 1 ? 3 : 2));
+      loc.setAttribute("firstDataRow", String(headRows));
       loc.setAttribute("firstDataCol", "1");
+      for (const name of ["rowPageCount", "colPageCount"]) {
+        if (pages.length) loc.setAttribute(name, name === "rowPageCount" ? String(pages.length) : "1");
+        else loc.removeAttribute(name);
+      }
       pkg.touch(p.path);
     },
     () => {
@@ -257,6 +348,10 @@ export function refreshPivot(e: Edits, sheet: Sheet, p: Pivot, next?: PivotLayou
         return styles.get(fmt)!;
       };
       if (formats.some((f) => f && f !== "General")) s.wb.touchStyles();
+      pages.forEach((i, k) => {
+        s.setCell(p.top + k, c1, { value: header[i] });
+        s.setCell(p.top + k, c1 + 1, { value: showing(i) });
+      });
       grid.forEach((row, i) =>
         row.forEach((v, j) => {
           if (v === null) return;

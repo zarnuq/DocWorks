@@ -44,7 +44,8 @@ import { showFindPreview } from "../common/find-preview";
 import { findBar } from "../common/find-bar";
 import { addTable, CellRange, insertRow, setTableStyleId, TABLE_STYLES } from "../../domain/pptx/table";
 import { electronSpeller, notePasteKey, runEditCommand, type Speller, wantsPlainPaste } from "../common/spelling";
-import { looksLikeMarkdown, markdownToPlain } from "../../core/utils/markdown";
+import { looksLikeMarkdown, markdownImages } from "../../core/utils/markdown";
+import { vaultPicture, vaultPictures } from "../common/images";
 import { specialCharacters } from "../common/special-chars";
 import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
 import { EDITING_KEYS, editableFocused, FONTS, menuItem, pickColor, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
@@ -59,8 +60,8 @@ import { copyLink } from "../common/copy-link";
 import { deckToMarkdown } from "../../domain/pptx/outline";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
-import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtParts } from "../../domain/pptx/smartart";
-import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+import { addSmartArtItem, removeSmartArtItem, setSmartArtText, smartArtItems, smartArtLayout, smartArtParts } from "../../domain/pptx/smartart";
+import { DEFAULT_SETTINGS, DocWorksSettings, kindOfExtension, paperFor } from "../common/settings";
 import type { Commands } from "../common/commands";
 import { keyName, shortcutRows } from "../common/commands";
 import { caret, type Ribbon } from "../common/ribbon";
@@ -351,7 +352,7 @@ export class PptxView extends FileView {
   }
 
   canAcceptExtension(extension: string): boolean {
-    return extension === "pptx";
+    return kindOfExtension(extension) === "pptx";
   }
 
   // ---------------------------------------------------------------------------
@@ -2116,9 +2117,21 @@ export class PptxView extends FileView {
       e.preventDefault();
       const text = e.clipboardData?.getData("text/plain") ?? "";
       if (!looksLikeMarkdown(text)) insertPlainText(text);
-      else if (plain) insertPlainText(markdownToPlain(text));
+      else if (plain) insertPlainText(text);
       else if (e.clipboardData?.types.includes("text/html")) insertPlainText(text);
-      else insertMarkdown(target, text, rs.pxPerPt);
+      else {
+        // The note's vault pictures go on the slide, as pasted images do; ones that aren't found keep their name.
+        const source = this.file?.path ?? "";
+        const links = markdownImages(text).filter((link) => vaultPicture(this.app, source, link));
+        insertMarkdown(target, text, rs.pxPerPt, new Set(links));
+        if (links.length) {
+          const slideIdx = this.index;
+          void vaultPictures(this.app, source, links).then(async (files) => {
+            if (this.index !== slideIdx) return;
+            for (const file of files.values()) await this.insertImageFile(file).catch(() => undefined);
+          });
+        }
+      }
       // Programmatic edits fire no input event; send one so the change is committed.
       target.dispatchEvent(new Event("input", { bubbles: true }));
     }
@@ -2390,9 +2403,12 @@ export class PptxView extends FileView {
     const data = parts && doc.xml(parts.data);
     if (!parts || !data) return void new Notice("This diagram's data couldn't be found.");
     const items = smartArtItems(data);
+    // A hierarchy takes items at every level; rows and cycles at the top level.
+    const layout = smartArtLayout(data, parts.drawing ? doc.xml(parts.drawing) : null);
+    const tree = layout === "tree";
     const modal = new Modal(this.app);
     modal.titleEl.setText("Diagram text");
-    modal.contentEl.createDiv({ cls: "pptx-props-hint", text: "Edit each item's text, or add and remove top-level items." });
+    modal.contentEl.createDiv({ cls: "pptx-props-hint", text: tree ? "Edit each item's text, or add and remove items at any level." : layout === "radial" ? "Edit each item's text, or add and remove the items around the middle one." : "Edit each item's text, or add and remove top-level items." });
     const fields: HTMLTextAreaElement[] = [];
     // Typed text plus one structural change, as one undo step; the dialog then shows the new items.
     const apply = (change?: (data: Document, drawing: Document | null) => void) => {
@@ -2413,13 +2429,15 @@ export class PptxView extends FileView {
       field.value = item.text;
       field.setCssProps({ "--pptx-depth": String(item.depth) });
       fields.push(field);
-      if (item.depth) continue;
+      // A radial diagram changes round its middle item (the first); rows and cycles at the top level.
+      if (layout === "radial" ? item.depth !== 1 || items.slice(0, items.indexOf(item)).filter((i) => !i.depth).length !== 1 : item.depth && !tree) continue;
       const btn = (icon: string, label: string, fn: () => void) => {
         const b = row.createEl("button", { cls: "clickable-icon", attr: { "aria-label": label } });
         setIcon(b, icon);
         b.addEventListener("click", fn);
       };
       btn("plus", "Add item after", () => apply((d, dr) => void addSmartArtItem(d, dr, item.id, "Text")));
+      if (tree) btn("corner-down-right", "Add item below", () => apply((d, dr) => void addSmartArtItem(d, dr, item.id, "Text", true)));
       btn("trash-2", "Remove item", () => apply((d, dr) => removeSmartArtItem(d, dr, item.id)));
     }
     new Setting(modal.contentEl)

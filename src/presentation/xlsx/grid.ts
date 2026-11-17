@@ -15,6 +15,7 @@ import type { Sparkline } from "../../domain/xlsx/sparklines";
 import { OutlineAxis, OutlineGroup, outlineGroups, summaryIndex } from "../../domain/xlsx/outline";
 import { cellTextFont, cellTextLineHeight, CHECKBOX, Op, paint } from "./paint";
 import { isCheckbox } from "../../domain/xlsx/checkbox";
+import { luminance } from "../../domain/pptx/color";
 
 export const HEADER_W = 46;
 export const HEADER_H = 24;
@@ -110,12 +111,6 @@ export function editText(cell: Cell | undefined, numFmt: string, date1904: boole
   }
   if (/%/.test(numFmt.replace(/"[^"]*"/g, ""))) return numText(v * 100) + "%";
   return numText(v);
-}
-
-/** Relative luminance (0 black .. 1 white) of "#RRGGBB". */
-function luminance(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 interface Quadrant {

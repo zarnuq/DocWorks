@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
 import { App, localData, Menu, Modal, TFile, WorkspaceLeaf } from "./obsidian-stub";
 import { PptxView } from "../src/presentation/pptx/pptx-view";
-import { DEFAULT_SETTINGS, DocxView, DocWorksSettings } from "../src/presentation/docx/docx-view";
+import { DocxView } from "../src/presentation/docx/docx-view";
+import { DEFAULT_SETTINGS, type DocWorksSettings } from "../src/presentation/common/settings";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { PptxDocument } from "../src/infrastructure/pptx/pptx-document";
 import { readAnimations, readTransition } from "../src/domain/pptx/animation";
@@ -1941,15 +1942,71 @@ describe("DocxView Markdown paste", () => {
     expect(Array.from(back.body.getElementsByTagNameNS(W, "pStyle")).some((s) => s.getAttributeNS(W, "val") === "Heading2")).toBe(true);
   });
 
-  it("leaves HTML pastes to the editor and strips Markdown syntax from a plain-text paste", async () => {
+  it("pastes a note's vault pictures into the document and its math as equations", async () => {
+    const app = new App();
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    app.vault.readBinary = async (f: TFile) => (f.path.endsWith(".png") ? png.buffer : fixture("sample.docx").buffer) as ArrayBuffer;
+    const asked: string[] = [];
+    app.metadataCache.getFirstLinkpathDest = (link: string, source: string) => {
+      asked.push(`${link} from ${source}`);
+      return link === "ridge.png" ? new TFile("attachments/ridge.png") : null;
+    };
+    // jsdom loads no images: one that reports a size at once.
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      naturalWidth = 80;
+      naturalHeight = 40;
+      set src(_v: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    });
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, pageSize: "document" as const });
+    document.body.appendChild(view.containerEl);
+    await open(view, "notes/pics.docx");
+    const editor = (view as any).editor;
+    expect(paste(editor, { "text/plain": "See ![[ridge.png]] and $x^2$\n![[gone.png]]" })).toBe(true);
+    const found = () => {
+      const out: { type: string; attrs: any; text: string }[] = [];
+      editor.state.doc.descendants((n: any) => void (n.isInline && out.push({ type: n.type.name, attrs: n.attrs, text: n.text ?? "" })));
+      return out;
+    };
+    const pasted = () => found().find((n) => n.type === "image" && n.attrs.alt === "ridge.png");
+    await vi.waitFor(() => expect(pasted()).toBeTruthy());
+    vi.unstubAllGlobals();
+    expect(asked).toEqual(["ridge.png from notes/pics.docx", "gone.png from notes/pics.docx"]);
+    const image = pasted()!;
+    expect([image.attrs.width, image.attrs.height, image.attrs.alt]).toEqual([80, 40, "ridge.png"]);
+    const docx = (view as any).docx as DocxDocument;
+    expect(docx.rels(docx.mainPath).some((r) => r.id === image.attrs.rId && r.type === "image")).toBe(true);
+    expect(found().find((n) => n.type === "opaque")!.attrs.text).toBe("x^2");
+    // A picture that isn't in the vault keeps its name.
+    expect(found().some((n) => n.text.includes("gone.png"))).toBe(true);
+  });
+
+  it("still pastes the text when a picture can't be read", async () => {
+    const app = new App();
+    app.vault.readBinary = async (f: TFile) => {
+      if (f.path.endsWith(".png")) throw new Error("gone");
+      return fixture("sample.docx").buffer as ArrayBuffer;
+    };
+    app.metadataCache.getFirstLinkpathDest = () => new TFile("attachments/broken.png");
+    const view = new DocxView(new WorkspaceLeaf(app) as unknown as RealLeaf, { ...DEFAULT_SETTINGS, pageSize: "document" as const });
+    document.body.appendChild(view.containerEl);
+    await open(view, "notes/broken.docx");
+    const editor = (view as any).editor;
+    expect(paste(editor, { "text/plain": "## Kept heading\nSee ![[broken.png]] here" })).toBe(true);
+    await vi.waitFor(() => expect(editor.state.doc.textContent).toContain("Kept heading"));
+    expect(editor.state.doc.textContent).toContain("See broken.png here");
+  });
+
+  it("leaves HTML pastes and plain-text pastes (Ctrl+Shift+V) to the editor", async () => {
     const view = mount(DocxView, "sample.docx");
     await open(view, "plain.docx");
     const editor = (view as any).editor;
     expect(paste(editor, { "text/plain": "# H", "text/html": "<h1>H</h1>" })).toBeFalsy();
-    const pasted = vi.spyOn(editor, "pasteText").mockReturnValue(true);
     (await import("../src/presentation/common/spelling")).notePasteKey(new KeyboardEvent("keydown", { key: "V", ctrlKey: true, shiftKey: true }));
-    expect(paste(editor, { "text/plain": "## Plan\n- **first** [[Note|link]]" })).toBe(true);
-    expect(pasted).toHaveBeenCalledWith("Plan\nfirst link");
+    // Plain paste returns false so ProseMirror inserts raw text — no Markdown syntax is stripped.
+    expect(paste(editor, { "text/plain": "## Plan\n- **first** [[Note|link]]" })).toBeFalsy();
   });
 });
 

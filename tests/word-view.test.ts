@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFile as RealTFile, WorkspaceLeaf as RealLeaf } from "obsidian";
 import { NodeSelection, TextSelection } from "prosemirror-state";
 import { App, Menu, TFile, WorkspaceLeaf } from "./obsidian-stub";
-import { DEFAULT_SETTINGS, DocxView, DocWorksSettings } from "../src/presentation/docx/docx-view";
+import { DocxView } from "../src/presentation/docx/docx-view";
+import { DEFAULT_SETTINGS, type DocWorksSettings } from "../src/presentation/common/settings";
 import { WORD_COMMAND_IDS } from "../src/presentation/docx/word-ui";
 import { fixture } from "./helpers";
 

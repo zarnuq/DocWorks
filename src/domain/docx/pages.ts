@@ -67,12 +67,6 @@ export function sectionSetups(doc: PMNode, final: PageSetup, size: PageSize = "d
   return out;
 }
 
-/** Which header / footer page `page` shows, given the section's "different first page" and "different odd & even" options. */
-export function headerFooterType(page: number, firstPage: boolean, oddEven: boolean): "default" | "first" | "even" {
-  if (firstPage && page === 1) return "first";
-  return oddEven && page % 2 === 0 ? "even" : "default";
-}
-
 /** A line of a paragraph: its extent relative to the paragraph top, and the text position it starts at. */
 export interface Line {
   top: number;

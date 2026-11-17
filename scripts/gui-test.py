@@ -308,6 +308,163 @@ def test_pptx_title_edit():
     shot('pptx-after')
 
 
+def at(js, what=None):
+    """Screen centre of the element a JS expression finds (anywhere in the window: menus, dialogs)."""
+    return wait(lambda: ev(f"""(() => {{ const el = {js}; if (!el) return null; const r = el.getBoundingClientRect();
+        return r.width && r.height ? [r.x + r.width/2, r.y + r.height/2] : null; }})()"""), what or f'element {js[:70]}')
+
+
+def click_el(js, what=None):
+    click(*at(js, what))
+    desk('wait-idle')
+
+
+def by_text(selector, text):
+    return f'[...document.querySelectorAll({json.dumps(selector)})].find(e => e.textContent.trim() === {json.dumps(text)})'
+
+
+def indexed(path):
+    wait(lambda: ev(f'!!app.vault.getAbstractFileByPath({json.dumps(path)})'), f'{path} indexed')
+
+
+def select_range(ref):
+    x, y, *_ = center('.xlsx-name-box')
+    click(x, y)
+    desk('key', 'Ctrl+a')
+    desk('type', '--', ref)
+    desk('key', 'Return')
+    desk('wait-idle')
+
+
+def sheet_table(path, rows, first_row):
+    """Setup: a small table typed into the open workbook from column K (the fixtures leave it empty)."""
+    ev(f"""(() => {{ const v = app.workspace.getMostRecentLeaf().view; if (v.file.path !== {json.dumps(path)}) throw new Error("wrong file");
+        return v.change(() => {json.dumps(rows)}.forEach((r, i) => r.forEach((t, j) => v.edits.input(v.sheet, {first_row} + i, 10 + j, t)))); }})()""")
+    desk('wait-idle')
+
+
+def test_template_opens_and_stays_a_template():
+    """A .dotx opens in the document editor from the file explorer; an edit is saved and it is still a template."""
+    path = f'{RUN}/gui-template.dotx'
+    doc, tpl = 'wordprocessingml.document.main+xml', 'wordprocessingml.template.main+xml'
+    with zipfile.ZipFile(REPO / 'tests/fixtures/sample.docx') as src, zipfile.ZipFile(VAULT / path, 'w', zipfile.ZIP_DEFLATED) as out:
+        for info in src.infolist():
+            data = src.read(info)
+            if info.filename == '[Content_Types].xml':
+                assert doc.encode() in data
+                data = data.replace(doc.encode(), tpl.encode())
+            out.writestr(info, data)
+    indexed(path)
+    open_file(path, 'doc-works-docx-view')
+    x, y, right, _ = ev("""(() => { const p = [...document.querySelectorAll(".workspace-leaf.mod-active .ProseMirror p")]
+        .find(p => p.textContent.includes("after tab")); const r = p.getBoundingClientRect();
+        return [r.x, r.y + r.height/2, r.right - 4, r.y]; })()""")
+    click(right, y)
+    desk('key', 'End')
+    desk('type', '--', ' template-edit')
+    saved(path, lambda f: b'template-edit' in zipfile.ZipFile(f).read('word/document.xml'), 'the typed text')
+    types = read_zip(path, '[Content_Types].xml')
+    assert tpl.encode() in types and doc.encode() not in types, 'the saved file is no longer a template'
+    shot('template-after')
+
+
+def test_docx_markdown_paste_picture_and_math():
+    """Pasted Markdown with a vault picture and math: the picture goes into the package, the math is an equation."""
+    from PIL import Image
+    path, pic = f'{RUN}/sample.docx', f'{RUN}/gui-ridge.png'
+    Image.new('RGB', (120, 60), (40, 120, 200)).save(VAULT / pic)
+    indexed(pic)
+    open_file(path, 'doc-works-docx-view')
+    before = sum(1 for n in zipfile.ZipFile(VAULT / path).namelist() if n.startswith('word/media/') and not n.endswith('/'))
+    x, y, right, _ = ev("""(() => { const p = [...document.querySelectorAll(".workspace-leaf.mod-active .ProseMirror p")]
+        .find(p => p.textContent.includes("See example page")); const r = p.getBoundingClientRect();
+        return [r.x, r.y + r.height/2, r.right - 4, r.y]; })()""")
+    click(right, y)
+    desk('key', 'End')
+    desk('key', 'Return')
+    desk('clip', 'set', '--', 'Ridge ![[gui-ridge.png]] and $x^2 + 1$ end\n\n$$\n\\frac{a}{b}\n$$\n')
+    desk('key', 'Ctrl+v')
+
+    def check(file):
+        z = zipfile.ZipFile(file)
+        body = z.read('word/document.xml').decode()
+        media = sum(1 for n in z.namelist() if n.startswith('word/media/') and not n.endswith('/'))  # the zip may list the folder too
+        return (body, media) if 'Ridge ' in body and media > before else None
+    body, media = saved(path, check, 'the pasted picture')
+    assert media == before + 1, f'{media - before} pictures added, want 1'
+    assert body.count('<m:oMath>') + body.count('<m:oMath ') >= 2, 'no equations in the saved document'
+    assert '<m:oMathPara' in body, 'the display equation is not on its own line'
+    text = ''.join(t.text or '' for t in ET.fromstring(body.encode()).iter(f'{W}t'))
+    assert '$' not in text.split('Ridge ', 1)[1][:200], 'math left as $ text'
+    assert 'gui-ridge.png' not in text, 'the picture stayed as its name'
+    drawn = ev("""[...document.querySelectorAll(".workspace-leaf.mod-active .ProseMirror math")].length""")
+    assert drawn >= 2, f'{drawn} equations drawn'
+    shot('docx-paste-picture-math')
+
+
+def test_xlsx_pivot_filter():
+    """Insert a pivot table from a range, add a filter in its editor: a report filter above the table, saved."""
+    path = f'{RUN}/gui-pivot.xlsx'
+    shutil.copy2(REPO / 'tests/fixtures/libreoffice-budget.xlsx', VAULT / path)
+    indexed(path)
+    open_file(path, 'doc-works-xlsx-view')
+    sheet_table(path, [['Region', 'Product', 'Amount'], ['East', 'A', '10'], ['East', 'B', '20'], ['West', 'A', '5'], ['West', 'B', '15']], 40)
+    select_range('K41:M45')
+    click_el(by_text('.workspace-leaf.mod-active .dw-menu-btn', 'Insert'))
+    click_el(by_text('.menu .menu-item', 'Pivot table'))
+    wait(lambda: ev('document.querySelector(".modal .modal-title")?.textContent') == 'Pivot table editor', 'pivot editor')
+    shot('pivot-editor')
+    click_el('document.querySelector(".modal .xlsx-pivot-add-filter")')
+    # The new filter starts on Region (already the rows): pick Product with the keyboard.
+    field = 'document.querySelector(".modal select[aria-label=\'Filter field\']")'
+    ev(f'({field}.focus(), 1)')
+    desk('key', 'Down')
+    wait(lambda: ev(f'{field}.selectedOptions[0].textContent') == 'Product', 'filter field Product')
+    click_el('document.querySelector(".modal .xlsx-pivot-filter-status")')
+    click_el(by_text('.modal .xlsx-pivot-filter-items label', 'B') + '.querySelector("input")')
+    assert ev('document.querySelector(".modal .xlsx-pivot-filter-status").textContent') == 'Showing 1 of 2 items'
+    shot('pivot-filter')
+    click_el(by_text('.modal button.mod-cta', 'Done'))
+
+    def check(file):
+        z = zipfile.ZipFile(file)
+        table = next((n for n in z.namelist() if n.startswith('xl/pivotTables/pivotTable')), None)
+        return z.read(table).decode() if table and b'pageField ' in z.read(table) else None
+    definition = saved(path, check, 'the pivot table with its filter')
+    assert 'axis="axisPage"' in definition and 'rowPageCount="1"' in definition, definition[:400]
+    shown = ev("""(() => { const v = app.workspace.getMostRecentLeaf().view, s = v.sheet;
+        return [s.name, ...[0, 1, 2, 3, 4, 5].map(r => [s.at(r, 0)?.value ?? null, s.at(r, 1)?.value ?? null])]; })()""")
+    assert shown == ['Pivot Table 1', ['Product', 'A'], [None, None], ['Row Labels', 'Sum of Amount'], ['East', 10], ['West', 5], ['Grand Total', 15]], shown
+    shot('pivot-after')
+
+
+def test_xlsx_chart_in_note_embed():
+    """A sheet's chart is drawn in a note's embed of the workbook."""
+    path, note = f'{RUN}/gui-chart.xlsx', f'{RUN}/gui-chart-embed.md'
+    shutil.copy2(REPO / 'tests/fixtures/libreoffice-budget.xlsx', VAULT / path)
+    indexed(path)
+    open_file(path, 'doc-works-xlsx-view')
+    sheet_table(path, [['Region', 'Sales'], ['North', '10'], ['South', '20'], ['East', '15']], 0)
+    select_range('K1:L4')
+    click_el('document.querySelector(".workspace-leaf.mod-active button[aria-label=\'Insert chart\']")')
+    wait(lambda: ev('document.querySelector(".modal .modal-title")?.textContent') == 'Chart editor', 'chart editor')
+    desk('key', 'Escape')
+    saved(path, lambda f: any(n.startswith('xl/charts/chart') for n in zipfile.ZipFile(f).namelist()), 'the chart')
+    (VAULT / note).write_text('Chart below.\n\n![[gui-chart.xlsx]]\n')
+    indexed(note)
+    ev(f"""(() => {{ const f = app.vault.getAbstractFileByPath({json.dumps(note)});
+        const leaf = app.workspace.getLeavesOfType("file-explorer")[0];
+        app.workspace.revealLeaf(leaf); leaf.view.revealInFolder(f); return 1; }})()""")
+    desk('wait-idle')
+    click_el(f'document.querySelector(\'.nav-file-title[data-path={json.dumps(note)}]\')')
+    wait(lambda: ev('app.workspace.getMostRecentLeaf()?.view.file?.path') == note, 'the note open')
+    found = wait(lambda: ev("""(() => { const c = document.querySelector(".workspace-leaf.mod-active .dw-embed .xlsx-chart");
+        if (!c || !c.querySelector("svg")) return null; const r = c.getBoundingClientRect(), g = c.closest(".dw-embed-grid").getBoundingClientRect();
+        return [r.width, r.height, r.right <= g.right + 1 && r.bottom <= g.bottom + 1]; })()"""), 'the chart drawn in the embed', timeout=20)
+    assert found[0] > 100 and found[1] > 100 and found[2], f'chart box {found}: too small or outside the embedded grid'
+    shot('embed-chart')
+
+
 # ---------------------------------------------------------------- runner
 
 def setup():
@@ -330,6 +487,10 @@ def setup():
         ev('(app.plugins.disablePlugin("doc-works").then(() => app.plugins.enablePlugin("doc-works")), 1)')
     wait(lambda: ev('!!app.plugins.plugins["doc-works"]?._loaded'), 'plugin loaded')
     desk('obsidian-cli', 'dev:debug', 'on')  # capture console.error, not only uncaught errors
+    # One tab group, nothing open: panes left split by an earlier run halve the editor's width, which folds
+    # toolbar buttons away and changes the baselines' size. (The private Obsidian's workspace is its own.)
+    ev('''(() => { const leaves = []; app.workspace.iterateRootLeaves(l => leaves.push(l));
+        leaves.forEach(l => l.detach()); return leaves.length; })()''')
     (VAULT / RUN).mkdir(parents=True)
     fixtures = REPO / 'tests/fixtures'
     for name in ('sample.docx', 'sample.pptx', 'libreoffice-budget.xlsx'):

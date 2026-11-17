@@ -29,9 +29,9 @@ import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../commo
 
 import { FONTS, menuItem, pickColor, promptText, showValue, subMenu, Toolbar, shieldEditingKeys, addFileItems, ZOOMS, zoomLabel, editableFocused, EDITING_KEYS } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
-import { pickImage } from "../common/images";
+import { pickImage, vaultPictures } from "../common/images";
 import { electronSpeller, notePasteKey, runEditCommand, Speller, wantsPlainPaste } from "../common/spelling";
-import { looksLikeMarkdown, markdownToPlain } from "../../core/utils/markdown";
+import { looksLikeMarkdown, markdownImages } from "../../core/utils/markdown";
 import { markdownToDoc, pasteMarkdown } from "../../domain/docx/from-markdown";
 import { CellSelection } from "./cell-selection";
 import { specialCharacters } from "../common/special-chars";
@@ -60,16 +60,14 @@ import { TextBoxView } from "./docx-textbox-view";
 import { retainOrigins, suggestTransaction } from "../../domain/docx/suggestions";
 import { DocxRuler, outlineEntries } from "./docx-ruler";
 
-import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+import { DEFAULT_SETTINGS, DocWorksSettings, kindOfExtension, paperFor } from "../common/settings";
 import { caret, Ribbon } from "../common/ribbon";
 import { StatusBar } from "../common/status-bar";
 import { SaveStatus } from "../common/save-status";
-import type { Commands } from "../common/commands";
+import { keyName, shortcutRows, type Commands } from "../common/commands";
 import { showContextMenu, type CtxEntry } from "../common/context-menu";
-import { keyName, WORD_FILE_MENU, WORD_QAT, WORD_SHORTCUTS, wordShortcutSections, wordTabs, type WordCommandId } from "./word-ui";
+import { WORD_FILE_MENU, WORD_QAT, WORD_SHORTCUTS, wordTabs, type WordCommandId } from "./word-ui";
 import { parseElement } from "../../core/utils/xml";
-export { DEFAULT_SETTINGS };
-export type { DocWorksSettings };
 
 export const VIEW_TYPE_DOCX = "doc-works-docx-view";
 
@@ -273,7 +271,7 @@ export class DocxView extends FileView {
   }
 
   canAcceptExtension(extension: string): boolean {
-    return extension === "docx";
+    return kindOfExtension(extension) === "docx";
   }
 
   async onLoadFile(file: TFile): Promise<void> {
@@ -449,21 +447,35 @@ export class DocxView extends FileView {
         const plain = wantsPlainPaste();
         const data = event.clipboardData;
         const text = data?.getData("text/plain") ?? "";
-        if (!data || !looksLikeMarkdown(text) || view.state.selection instanceof CellSelection || inCodeBlock(view.state)) return false;
-        if (plain) return view.pasteText(markdownToPlain(text)), true;
+        if (plain || !data || !looksLikeMarkdown(text) || view.state.selection instanceof CellSelection || inCodeBlock(view.state)) return false;
         if (data.types.includes("text/html")) return false;
-        const pasted = markdownToDoc(text, {
-          // Each pasted numbered list counts from 1, not on from a list already in the document.
-          list: (kind) => {
-            const id = ctx.ensureList(kind);
-            if (kind !== "ordered") return id;
-            const restarted = docx.restartList(id);
-            ctx.styles = new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml());
-            return restarted;
-          },
-          image: () => null,
-        });
-        view.dispatch(pasteMarkdown(view.state, pasted).scrollIntoView().setMeta("uiEvent", "paste"));
+        const paste = (images: Map<string, Awaited<ReturnType<DocxView["imageAttrs"]>>>) => {
+          const pasted = markdownToDoc(text, {
+            // Each pasted numbered list counts from 1, not on from a list already in the document.
+            list: (kind) => {
+              const id = ctx.ensureList(kind);
+              if (kind !== "ordered") return id;
+              const restarted = docx.restartList(id);
+              ctx.styles = new DocxStyles(docx.stylesXml(), docx.numberingXml(), docx.themeXml());
+              return restarted;
+            },
+            image: (img) => images.get(img.getAttribute("src") ?? "") ?? null,
+          });
+          view.dispatch(pasteMarkdown(view.state, pasted).scrollIntoView().setMeta("uiEvent", "paste"));
+        };
+        // Pictures from the vault are read first (the paste then lands where the caret is by then).
+        const links = markdownImages(text);
+        if (!links.length) paste(new Map());
+        else
+          void (async () => {
+            const images = new Map<string, Awaited<ReturnType<DocxView["imageAttrs"]>>>();
+            for (const [link, file] of await vaultPictures(this.app, this.file?.path ?? "", links)) {
+              // One that can't be decoded keeps its name in the text.
+              const attrs = await this.imageAttrs(file).catch(() => null);
+              if (attrs) images.set(link, attrs);
+            }
+            if (this.editor === view) paste(images);
+          })();
         return true;
       },
       handleDrop: (view, event) => {
@@ -1240,7 +1252,7 @@ export class DocxView extends FileView {
   /** Help › Keyboard shortcuts: Word's keys with the Word interface, Google Docs' otherwise. */
   private shortcutsHelp(): void {
     const c = this.cmds;
-    shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...(this.settings.officeDocx && c ? wordShortcutSections((id) => c[id].label) : DOCS_SHORTCUTS)]);
+    shortcutsDialog(this.app, [...COMMON_SHORTCUTS, ...(this.settings.officeDocx && c ? [["Word shortcuts", shortcutRows(WORD_SHORTCUTS, (id) => c[id].label)] as [string, [string, string][]]] : DOCS_SHORTCUTS)]);
   }
 
   /** Word's Increase / Decrease Font Size: the next size in the list from the size at the cursor. */

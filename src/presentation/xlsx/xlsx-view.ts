@@ -1,4 +1,4 @@
-import { insertPivot, Pivot, pivotAt, readPivots, refreshPivot } from "../../domain/xlsx/pivot";
+import { insertPivot, Pivot, pivotAt, pivotItems, readPivots, refreshPivot } from "../../domain/xlsx/pivot";
 import { formulaSparklines, readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
 import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
@@ -38,7 +38,7 @@ import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../commo
 import { FONTS, menuItem, PaperTheme, pickColor, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
 import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
 import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
-import { DEFAULT_SETTINGS, DocWorksSettings, paperFor } from "../common/settings";
+import { DEFAULT_SETTINGS, DocWorksSettings, kindOfExtension, paperFor } from "../common/settings";
 import type { Commands } from "../common/commands";
 import { keyName, shortcutRows } from "../common/commands";
 import { caret, type Ribbon } from "../common/ribbon";
@@ -211,7 +211,7 @@ export class XlsxView extends FileView {
     return this.file?.basename ?? "Spreadsheet";
   }
   canAcceptExtension(extension: string): boolean {
-    return extension === "xlsx";
+    return kindOfExtension(extension) === "xlsx";
   }
 
   /** File › Properties: title, author, keywords... saved into the file. */
@@ -2095,7 +2095,8 @@ export class XlsxView extends FileView {
     modal.titleEl.setText("Pivot table editor");
     pivotForm(modal.contentEl, {
       fields: p.fields,
-      layout: { rows: p.rows, cols: p.cols, values: p.values },
+      layout: { rows: p.rows, cols: p.cols, values: p.values, filters: p.filters },
+      items: (field) => pivotItems(this.sheet, p, field),
       apply: (layout) => {
         if (this.change(() => refreshPivot(this.edits!, this.sheet, p, layout))) modal.close();
       },

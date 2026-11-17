@@ -265,42 +265,36 @@ export function validationForm(host: HTMLElement, o: ValidationFormOptions): voi
 interface PivotFormOptions {
   fields: string[];
   layout: PivotLayout;
+  /** A field's items, for its filter's checklist (left out: filters can't be edited). */
+  items?(field: number): (string | number | boolean)[];
   apply(layout: PivotLayout): void;
 }
 
 const PIVOT_FNS: [string, PivotFn][] = [["SUM", "sum"], ["COUNTA", "count"], ["AVERAGE", "average"], ["MAX", "max"], ["MIN", "min"]];
 
-/** Google's pivot table editor: row fields, a column field and values (field and summary). */
+/** Google's pivot table editor: row fields, column fields, values (field and summary) and filters (a field and the items it shows). */
 export function pivotForm(host: HTMLElement, o: PivotFormOptions): void {
   host.addClass("xlsx-rules");
-  const rows = new Set(o.layout.rows);
-  let col: number | null = o.layout.cols[0] ?? null;
+  const rows = new Set(o.layout.rows), cols = new Set(o.layout.cols);
   const values = o.layout.values.map((v) => ({ field: v.field, fn: v.fn }));
-  const rowBox = row(host, "Rows");
-  const boxes = o.fields.map((name, i) => {
-    const label = rowBox.createEl("label", { cls: "xlsx-pivot-field" });
-    const box = label.createEl("input", { type: "checkbox" });
-    box.checked = rows.has(i);
-    label.appendText(name);
-    box.addEventListener("change", () => {
-      if (box.checked) {
-        rows.add(i);
-        if (col === i) {
-          colSelect.value = "";
-          col = null;
-        }
-      } else rows.delete(i);
+  // A field is on one axis: ticking it on one unticks it on the other.
+  const axis = (title: string, own: Set<number>, other: Set<number>, others: () => HTMLInputElement[]) => {
+    const box = row(host, title);
+    return o.fields.map((name, i) => {
+      const label = box.createEl("label", { cls: "xlsx-pivot-field" });
+      const input = label.createEl("input", { type: "checkbox", attr: { "aria-label": `${title}: ${name}` } });
+      input.checked = own.has(i);
+      label.appendText(name);
+      input.addEventListener("change", () => {
+        if (!input.checked) return void own.delete(i);
+        own.add(i);
+        if (other.delete(i)) others()[i].checked = false;
+      });
+      return input;
     });
-    return box;
-  });
-  const colSelect = row(host, "Columns").createEl("select", { cls: "dropdown", attr: { "aria-label": "Column field" } });
-  colSelect.createEl("option", { text: "None", value: "" });
-  o.fields.forEach((name, i) => colSelect.createEl("option", { text: name, value: String(i) }));
-  colSelect.value = col === null ? "" : String(col);
-  colSelect.addEventListener("change", () => {
-    col = colSelect.value === "" ? null : Number(colSelect.value);
-    if (col !== null && rows.delete(col)) boxes[col].checked = false;
-  });
+  };
+  const rowBoxes: HTMLInputElement[] = axis("Rows", rows, cols, () => colBoxes);
+  const colBoxes: HTMLInputElement[] = axis("Columns", cols, rows, () => rowBoxes);
   const valueBox = row(host, "Values").createDiv({ cls: "xlsx-pivot-values" });
   const drawValues = () => {
     valueBox.empty();
@@ -321,16 +315,86 @@ export function pivotForm(host: HTMLElement, o: PivotFormOptions): void {
     });
     valueBox.createEl("button", { text: "Add value", cls: "xlsx-pivot-add" }).addEventListener("click", () => {
       // The first field not already in use; COUNTA works whatever the column holds (change it to SUM for numbers).
-      const used = new Set([...rows, ...(col === null ? [] : [col]), ...values.map((v) => v.field)]);
+      const used = new Set([...rows, ...cols, ...values.map((v) => v.field)]);
       const free = o.fields.findIndex((_, i) => !used.has(i));
       values.push({ field: free < 0 ? 0 : free, fn: "count" });
       drawValues();
     });
   };
   drawValues();
+  // Filters: one per field, showing the items left ticked.
+  const filters = (o.layout.filters ?? []).map((f) => ({ field: f.field, hidden: new Set(f.hidden) }));
+  // A source that can't be found (a named table, a renamed sheet) leaves the checklist empty; Done reports it.
+  const itemsOf = (field: number) => {
+    try {
+      return o.items?.(field) ?? [];
+    } catch {
+      return [];
+    }
+  };
+  const filterBox = row(host, "Filters").createDiv({ cls: "xlsx-pivot-values" });
+  const drawFilters = (open = -1) => {
+    filterBox.empty();
+    filters.forEach((f, k) => {
+      const line = filterBox.createDiv({ cls: "xlsx-pivot-value" });
+      const field = line.createEl("select", { cls: "dropdown", attr: { "aria-label": "Filter field" } });
+      o.fields.forEach((name, i) => (i === f.field || !filters.some((x) => x.field === i)) && field.createEl("option", { text: name, value: String(i) }));
+      field.value = String(f.field);
+      field.addEventListener("change", () => {
+        f.field = Number(field.value);
+        f.hidden.clear();
+        drawFilters();
+      });
+      const items = itemsOf(f.field);
+      // What the filter shows, in words (the items may be unreadable: then only whether any are hidden is known).
+      const shows = () => (!f.hidden.size ? "Showing all items" : items.length ? `Showing ${items.filter((v) => !f.hidden.has(v)).length} of ${items.length} items` : "Some items hidden");
+      const status = line.createEl("button", { cls: "xlsx-pivot-filter-status", text: shows(), attr: { "aria-expanded": String(open === k) } });
+      status.addEventListener("click", () => drawFilters(open === k ? -1 : k));
+      line.createEl("button", { text: "Remove", attr: { "aria-label": "Remove filter" } }).addEventListener("click", () => {
+        filters.splice(k, 1);
+        drawFilters();
+      });
+      if (open !== k) return;
+      // ponytail: a condition only ticks the items there are now; it isn't kept, so new values in the source show
+      // until the filter is edited again. Storing it means OOXML's pivot <filters>.
+      const cond = filterBox.createDiv({ cls: "xlsx-pivot-value" });
+      const kind = cond.createEl("select", { cls: "dropdown", attr: { "aria-label": "Condition" } });
+      for (const [text, value] of [["Text contains", "contains"], ["Text does not contain", "lacks"], ["Is equal to", "equal"], ["Greater than", "greater"], ["Less than", "less"]]) kind.createEl("option", { text, value });
+      const want = cond.createEl("input", { type: "text", attr: { "aria-label": "Condition value" } });
+      cond.createEl("button", { text: "Show matching", cls: "xlsx-pivot-filter-match" }).addEventListener("click", () => {
+        const text = want.value.trim().toLowerCase(), n = Number(want.value);
+        const match = (v: string | number | boolean) =>
+          kind.value === "contains" ? String(v).toLowerCase().includes(text)
+          : kind.value === "lacks" ? !String(v).toLowerCase().includes(text)
+          : kind.value === "equal" ? String(v).toLowerCase() === text
+          : typeof v === "number" && Number.isFinite(n) && (kind.value === "greater" ? v > n : v < n);
+        f.hidden = new Set(items.filter((v) => !match(v)));
+        drawFilters(k);
+      });
+      const list = filterBox.createDiv({ cls: "xlsx-pivot-filter-items" });
+      for (const v of items) {
+        const label = list.createEl("label", { cls: "xlsx-pivot-field" });
+        const box = label.createEl("input", { type: "checkbox" });
+        box.checked = !f.hidden.has(v);
+        label.appendText(String(v));
+        box.addEventListener("change", () => {
+          if (box.checked) f.hidden.delete(v);
+          else f.hidden.add(v);
+          status.setText(shows());
+        });
+      }
+    });
+    const free = o.fields.findIndex((_, i) => !filters.some((f) => f.field === i));
+    if (o.items && free >= 0) filterBox.createEl("button", { text: "Add filter", cls: "xlsx-pivot-add-filter" }).addEventListener("click", () => {
+      filters.push({ field: free, hidden: new Set() });
+      drawFilters();
+    });
+  };
+  drawFilters();
   const error = host.createDiv({ cls: "xlsx-rule-error" });
   host.createDiv({ cls: "xlsx-rule-buttons" }).createEl("button", { text: "Done", cls: "mod-cta" }).addEventListener("click", () => {
     if (!values.length) return void error.setText("Add at least one value.");
-    o.apply({ rows: o.fields.map((_, i) => i).filter((i) => rows.has(i)), cols: col === null ? [] : [col], values: values.map((v) => ({ ...v })) });
+    // Fields nest in the order they had, newly ticked ones last.
+    o.apply({ rows: [...rows], cols: [...cols], values: values.map((v) => ({ ...v })), filters: filters.map((f) => ({ field: f.field, hidden: [...f.hidden] })) });
   });
 }

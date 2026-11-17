@@ -2547,6 +2547,18 @@ textarea.pptx-notes {
   gap: 4px;
 }
 
+/* Pivot editor: a filter's checklist of items, under its line. */
+.xlsx-pivot-filter-items {
+  display: flex;
+  flex-direction: column;
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 4px 0 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
 .xlsx-rule-error {
   min-height: 1.2em;
   color: var(--text-error);

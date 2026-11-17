@@ -8,8 +8,8 @@ import { IndexedDbVersionStore, setVersionHistory, VersionHistory, versions } fr
 import { App, FileView, FuzzySuggestModal, normalizePath, Notice, Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { fromTemplate } from "./infrastructure/ooxml/doc-props";
 import { blankDocx, blankPptx, blankXlsx } from "./infrastructure/blank";
-import { DEFAULT_SETTINGS, DocWorksSettings, DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
-import { migrateSettings, type PaperSetting } from "./presentation/common/settings";
+import { DocxView, VIEW_TYPE_DOCX } from "./presentation/docx/docx-view";
+import { DEFAULT_SETTINGS, KIND_EXTENSIONS, kindOfExtension, migrateSettings, templateKind, type DocWorksSettings, type PaperSetting } from "./presentation/common/settings";
 import { PptxView, VIEW_TYPE_PPTX } from "./presentation/pptx/pptx-view";
 import { XlsxView, VIEW_TYPE_XLSX } from "./presentation/xlsx/xlsx-view";
 
@@ -53,16 +53,17 @@ export default class DocWorksPlugin extends Plugin {
     this.addSettingTab(new DocWorksSettingTab(this.app, this));
     // Earlier versions of files, kept in the app's storage (not the vault) before Doc Works saves over them.
     setVersionHistory(new VersionHistory(new IndexedDbVersionStore(`doc-works-history/${this.app.vault.getName()}`), () => ({ enabled: this.settings.history, days: this.settings.historyDays })));
-    const office = (f: unknown): f is TFile => f instanceof TFile && ["docx", "pptx", "xlsx"].includes(f.extension.toLowerCase());
+    const office = (f: unknown): f is TFile => f instanceof TFile && !!kindOfExtension(f.extension);
     this.registerEvent(this.app.vault.on("rename", (f, old) => office(f) && void versions?.renamed(old, f.path)));
     this.registerEvent(this.app.vault.on("delete", (f) => office(f) && void versions?.deleted(f.path)));
     this.registerView(VIEW_TYPE_DOCX, (leaf: WorkspaceLeaf) => new DocxView(leaf, this.settings, () => this.saveSettings()));
     this.registerView(VIEW_TYPE_PPTX, (leaf: WorkspaceLeaf) => new PptxView(leaf, this.settings));
     this.registerView(VIEW_TYPE_XLSX, (leaf: WorkspaceLeaf) => new XlsxView(leaf, this.settings));
     // File types switched off in the settings are left to Obsidian or another plugin.
-    if (this.settings.openDocx) this.claimExtension("docx", VIEW_TYPE_DOCX);
-    if (this.settings.openPptx) this.claimExtension("pptx", VIEW_TYPE_PPTX);
-    if (this.settings.openXlsx) this.claimExtension("xlsx", VIEW_TYPE_XLSX);
+    // Office's templates (.dotx / .potx / .xltx) open in the same editors and stay templates when saved.
+    if (this.settings.openDocx) for (const ext of KIND_EXTENSIONS.docx) this.claimExtension(ext, VIEW_TYPE_DOCX);
+    if (this.settings.openPptx) for (const ext of KIND_EXTENSIONS.pptx) this.claimExtension(ext, VIEW_TYPE_PPTX);
+    if (this.settings.openXlsx) for (const ext of KIND_EXTENSIONS.xlsx) this.claimExtension(ext, VIEW_TYPE_XLSX);
     // Previews in notes (![[deck.pptx#3]]) for the same file types.
     const kinds = (["docx", "pptx", "xlsx"] as const).filter((k) => this.settings[k === "docx" ? "openDocx" : k === "pptx" ? "openPptx" : "openXlsx"]);
     registerEmbeds(this, kinds);
@@ -102,7 +103,7 @@ export default class DocWorksPlugin extends Plugin {
       this.app.workspace.on("file-menu", (menu, file, source) => {
         if (file instanceof TFile && file.extension === "md")
           addNoteExportToMenu(menu, this.app, file);
-        if (file instanceof TFile && file.extension === "docx" && source !== "more-options")
+        if (file instanceof TFile && kindOfExtension(file.extension) === "docx" && source !== "more-options")
           addExportToMenu(menu, "Export to Markdown", () => void this.exportWordNote(file));
       })
     );
@@ -112,7 +113,7 @@ export default class DocWorksPlugin extends Plugin {
       name: "Export current document to Markdown",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
-        if (file?.extension !== "docx") return false;
+        if (!file || kindOfExtension(file.extension) !== "docx") return false;
         if (!checking) void this.exportWordNote(file);
         return true;
       },
@@ -210,10 +211,10 @@ export default class DocWorksPlugin extends Plugin {
   private pickTemplate(folder: TFolder): void {
     const root = normalizePath(this.settings.templatesFolder.trim());
     if (!root || root === "/") return void new Notice("Set a templates folder in the plugin settings first.");
-    const templates = this.app.vault.getFiles().filter((f) => f.path.startsWith(`${root}/`) && TEMPLATE_EXTS[f.extension.toLowerCase()]);
+    const templates = this.app.vault.getFiles().filter((f) => f.path.startsWith(`${root}/`) && templateKind(f.extension));
     if (!templates.length) return void new Notice(`No .docx, .pptx or .xlsx files in ${root}.`);
     new TemplatePicker(this.app, templates, (file) => {
-      const ext = TEMPLATE_EXTS[file.extension.toLowerCase()];
+      const ext = templateKind(file.extension)!;
       void this.createFile(ext, async () => fromTemplate(new Uint8Array(await this.app.vault.readBinary(file))), folder);
     }).open();
   }
@@ -228,9 +229,6 @@ export default class DocWorksPlugin extends Plugin {
     }
   }
 }
-
-/** Template file extensions and the kind of file each makes. */
-const TEMPLATE_EXTS: Record<string, string> = { docx: "docx", dotx: "docx", pptx: "pptx", potx: "pptx", xlsx: "xlsx", xltx: "xlsx" };
 
 class TemplatePicker extends FuzzySuggestModal<TFile> {
   constructor(app: App, private templates: TFile[], private choose: (file: TFile) => void) {

@@ -94,6 +94,34 @@ describe("embeds in notes", () => {
     done();
   });
 
+  it("draws a sheet's charts, widening a whole-sheet embed to hold them", async () => {
+    const { Workbook } = await import("../src/domain/xlsx/workbook-model");
+    const { XlsxWorkbook } = await import("../src/infrastructure/xlsx/xlsx-workbook");
+    const { Edits } = await import("../src/domain/xlsx/commands");
+    const { insertChart, sheetCharts } = await import("../src/domain/xlsx/charts");
+    const rows = [["Region", "Sales"], ["North", 10], ["South", 20]].map((r, i) => `<row r="${i + 1}">${r.map((v, c) => (typeof v === "string" ? `<c r="${"AB"[c]}${i + 1}" t="inlineStr"><is><t>${v}</t></is></c>` : `<c r="${"AB"[c]}${i + 1}"><v>${v}</v></c>`)).join("")}</row>`).join("");
+    const e = new Edits(Workbook.open(await XlsxWorkbook.load(await xlsx({ sheets: [sheetXml(rows), sheetXml("")], names: ["Data", "Empty"] }))));
+    insertChart(e, e.wb.sheets[0], { r1: 0, c1: 0, r2: 2, c2: 1 });
+    // A sheet holding nothing but a chart still shows it.
+    insertChart(e, e.wb.sheets[1], { r1: 0, c1: 0, r2: 0, c2: 0 });
+    const box = sheetCharts(e.wb, e.wb.sheets[0])[0].box;
+    const bytes = await e.wb.pkg.save();
+    const el = document.body.createDiv();
+    const done = await renderXlsxEmbed(el, bytes, "#Data");
+    expect(el.querySelector(".dw-embed-grid .xlsx-chart svg")).not.toBeNull();
+    const grid = el.querySelector<HTMLElement>(".dw-embed-grid")!;
+    expect(parseFloat(grid.style.getPropertyValue("--dw-grid-w"))).toBeGreaterThanOrEqual(box.x + box.w);
+    expect(parseFloat(grid.style.getPropertyValue("--dw-grid-h"))).toBeGreaterThanOrEqual(box.y + box.h);
+    done();
+    const empty = document.body.createDiv();
+    (await renderXlsxEmbed(empty, bytes, "#Empty"))();
+    expect(empty.querySelector(".dw-embed-grid .xlsx-chart")).not.toBeNull();
+    // A range embed shows only its cells: no widening.
+    const part = document.body.createDiv();
+    (await renderXlsxEmbed(part, bytes, "#Data!A1:B2"))();
+    expect(parseFloat(part.querySelector<HTMLElement>(".dw-embed-grid")!.style.getPropertyValue("--dw-grid-w"))).toBeLessThan(box.x);
+  });
+
   it("widens a whole-sheet embed so text running past the last used column isn't cut off", async () => {
     const { Workbook } = await import("../src/domain/xlsx/workbook-model");
     const { XlsxWorkbook } = await import("../src/infrastructure/xlsx/xlsx-workbook");

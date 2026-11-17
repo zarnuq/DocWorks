@@ -14,6 +14,7 @@ import type { Node as PMNode } from "prosemirror-model";
 import { DocxStyles } from "../../domain/docx/docx-styles";
 import { parseSlide } from "../../domain/pptx/slide-model";
 import { Edits } from "../../domain/xlsx/commands";
+import { chartModel, sheetCharts } from "../../domain/xlsx/charts";
 import { ConditionalFormats } from "../../domain/xlsx/conditional";
 import { sheetPictures } from "../../domain/xlsx/drawing";
 import { tableReference } from "../../domain/xlsx/tables";
@@ -25,10 +26,12 @@ import { DocxDocument } from "../../infrastructure/docx/docx-document";
 import { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { docxPlugins } from "../docx/docx-editor";
+import { renderChart } from "../pptx/chart-renderer";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { renderSlide } from "../pptx/slide-renderer";
 import { textWidthEm } from "../pptx/text-fit";
 import { Grid } from "../xlsx/grid";
+import { KIND_EXTENSIONS } from "./settings";
 
 /** Rows and columns an embedded sheet shows at most (the file opens for the rest). */
 const MAX_ROWS = 60, MAX_COLS = 20;
@@ -36,8 +39,8 @@ const MAX_ROWS = 60, MAX_COLS = 20;
 const MAX_RANGE_ROWS = 500, MAX_RANGE_COLS = 50;
 
 /** The cells an embed shows: the range asked for (up to MAX_RANGE_*), or the sheet's used area (up to MAX_*). */
-export function embedRange(sheet: Sheet, range: Rect | null): Rect | null {
-  const used = range ?? sheet.used();
+export function embedRange(sheet: Sheet, range: Rect | null, floating: { x: number; y: number; w: number; h: number }[] = []): Rect | null {
+  const used = range ?? sheet.used() ?? (floating.length ? { r1: 0, c1: 0, r2: 0, c2: 0 } : null);
   if (!used) return null;
   if (range) return { ...used, r2: Math.min(used.r2, used.r1 + MAX_RANGE_ROWS - 1), c2: Math.min(used.c2, used.c1 + MAX_RANGE_COLS - 1) };
   const r: Rect = { r1: 0, c1: 0, r2: Math.min(used.r2, MAX_ROWS - 1), c2: Math.min(used.c2, MAX_COLS - 1) };
@@ -55,7 +58,14 @@ export function embedRange(sheet: Sheet, range: Rect | null): Rect | null {
       }
       break;
     }
+  // Charts and pictures float over the cells: the embed reaches as far as they do.
+  let bottom = 0;
+  for (const f of floating) {
+    end = Math.max(end, f.x + f.w);
+    bottom = Math.max(bottom, f.y + f.h);
+  }
   while (r.c2 < MAX_COLS - 1 && sheet.colX(r.c2 + 1) < end) r.c2++;
+  while (r.r2 < MAX_ROWS - 1 && sheet.rowY(r.r2 + 1) < bottom) r.r2++;
   return r;
 }
 
@@ -144,9 +154,15 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
   const tabs = !target.range && visible.length > 1 ? el.createDiv({ cls: "dw-embed-tabs" }) : null;
   const draw = async () => {
     area.empty();
-    const r = embedRange(sheet, target.range);
-    if (!r) return void area.createDiv({ cls: "dw-muted", text: "This sheet is empty." });
     const pictures = sheetPictures(wb, sheet);
+    const charts = sheetCharts(wb, sheet).map((chart) => ({
+      key: chart.path,
+      ...chart.box,
+      // Points, as on slides: the chart's pixel size at 96 dpi.
+      draw: (host: HTMLElement) => renderChart(host, chartModel(wb, chart.path), { w: chart.box.w * 0.75, h: chart.box.h * 0.75 }),
+    }));
+    const r = embedRange(sheet, target.range, [...pictures, ...charts]);
+    if (!r) return void area.createDiv({ cls: "dw-muted", text: "This sheet is empty." });
     for (const p of pictures) if (!urls.has(p.image)) urls.set(p.image, blobUrl(await wb.pkg.media(p.image).catch(() => new Uint8Array()), p.image));
     const cf = new ConditionalFormats(sheet, (r, c, f) => edits.calc.evaluate(sheet, r, c, f));
     const sparks = [...readSparklines(sheet), ...formulaSparklines(sheet, (s, r, c, f) => edits.calc.evaluateArray(s, r, c, f))];
@@ -154,6 +170,7 @@ export async function renderXlsxEmbed(el: HTMLElement, bytes: ArrayBuffer | Uint
       sheet: () => sheet,
       pictures: () => pictures,
       imageUrl: (path) => urls.get(path) ?? null,
+      charts: () => charts,
       conditional: (row, col) => (cf.empty ? null : cf.at(row, col)),
       sparklines: () => sparks,
       isStale: () => false,
@@ -250,13 +267,16 @@ interface EmbedRegistry {
   unregisterExtension(ext: string): void;
 }
 
+/** Every extension of the kinds of file, with its kind (templates and macro-enabled files embed like documents). */
+export const embedExtensions = (kinds: Kind[]): [ext: string, kind: Kind][] => kinds.flatMap((kind) => KIND_EXTENSIONS[kind].map((ext): [string, Kind] => [ext, kind]));
+
 /** Register embeds for the file types Doc Works opens (the registry isn't in Obsidian's typings; skipped if absent). */
 export function registerEmbeds(plugin: Plugin, kinds: Kind[]): void {
   const registry = (plugin.app as unknown as { embedRegistry?: EmbedRegistry }).embedRegistry;
   if (!registry) return;
-  for (const kind of kinds) {
-    if (registry.isExtensionRegistered(kind)) continue;
-    registry.registerExtension(kind, (ctx, file, subpath) => new OfficeEmbed(plugin.app, ctx.containerEl, file, subpath, kind));
-    plugin.register(() => registry.unregisterExtension(kind));
+  for (const [ext, kind] of embedExtensions(kinds)) {
+    if (registry.isExtensionRegistered(ext)) continue;
+    registry.registerExtension(ext, (ctx, file, subpath) => new OfficeEmbed(plugin.app, ctx.containerEl, file, subpath, kind));
+    plugin.register(() => registry.unregisterExtension(ext));
   }
 }

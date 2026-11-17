@@ -49,7 +49,7 @@ describe("parseInline", () => {
   });
 
   it("turns wikilinks and embeds into their text, keeps unmatched and intraword markers", () => {
-    expect(parseInline("see [[Note#Head|alias]] and [[Other]] ![[pic.png]]")).toEqual([{ text: "see alias and Other pic.png" }]);
+    expect(parseInline("see [[Note#Head|alias]] and [[Other]] ![[Sub note]]")).toEqual([{ text: "see alias and Other Sub note" }]);
     expect(parseInline("snake_case_name 2*3 a ** b \\*lit\\*")).toEqual([{ text: "snake_case_name 2*3 a ** b *lit*" }]);
   });
 });
@@ -69,5 +69,45 @@ describe("markdownToPlain", () => {
   it("drops heading, bullet, task, quote and inline syntax but keeps numbers and line structure", () => {
     const md = "## Plan\n\n- **first** item\n  - [x] done [[Note|link]]\n2. [two](http://a)\n> quote ~~old~~\n---\n```\nraw **code**\n```\n| a | b |\n|---|---|\n| 1 | 2 |";
     expect(markdownToPlain(md)).toBe("Plan\n\nfirst item\ndone link\n2. two\nquote old\n\nraw **code**\na\tb\n1\t2");
+  });
+});
+
+describe("math and pictures", () => {
+  it("reads inline math, not prices, and display math as its own block", () => {
+    expect(parseInline("Mass $E = mc^2$ and $a_1$.")).toEqual([{ text: "Mass " }, { text: "E = mc^2", math: true }, { text: " and " }, { text: "a_1", math: true }, { text: "." }]);
+    expect(parseInline("It costs $5 and $10, or $ 3 $.")).toEqual([{ text: "It costs $5 and $10, or $ 3 $." }]);
+    expect(parseInline("inline $$x^2$$ too")).toEqual([{ text: "inline " }, { text: "x^2", math: true }, { text: " too" }]);
+    expect(parseMarkdown("Before\n$$\n\\frac{a}{b}\n= c\n$$\nAfter\n$$x+y$$")).toEqual([
+      { kind: "para", runs: [{ text: "Before" }] },
+      { kind: "math", latex: "\\frac{a}{b}\n= c" },
+      { kind: "para", runs: [{ text: "After" }] },
+      { kind: "math", latex: "x+y" },
+    ]);
+  });
+
+  it("reads vault pictures (embeds and relative links); web pictures and other embeds stay text", () => {
+    expect(parseInline("See ![[Ridge view.png|300]] here")).toEqual([{ text: "See " }, { text: "Ridge view.png", image: "Ridge view.png" }, { text: " here" }]);
+    expect(parseInline("![A map](attachments/map%20one.JPG)")).toEqual([{ text: "A map", image: "attachments/map one.JPG" }]);
+    expect(parseInline("![logo](https://example.com/logo.png) ![[Note]] ![[deck.pptx#2]]")).toEqual([{ text: "logo Note deck.pptx#2" }]);
+  });
+
+  it("treats unclosed $$ as a paragraph, not a math block that swallows remaining lines", () => {
+    const blocks = parseMarkdown("$$\nunclosed\nmore\ntext");
+    expect(blocks.every((b) => b.kind !== "math")).toBe(true);
+    expect(blocks.map((b) => b.kind)).toContain("para");
+    // A properly closed one still works.
+    const closed = parseMarkdown("$$\nok\n$$\nafter");
+    expect(closed[0]).toMatchObject({ kind: "math", latex: "ok" });
+    expect(closed[1]).toMatchObject({ kind: "para", runs: [{ text: "after" }] });
+  });
+
+  it("sees math as Markdown and keeps its source in plain text", () => {
+    expect(looksLikeMarkdown("so $x^2$ grows")).toBe(true);
+    expect(looksLikeMarkdown("$$\nx\n$$")).toBe(true);
+    expect(looksLikeMarkdown("costs $5 and $10")).toBe(false);
+    expect(looksLikeMarkdown("a fraction $\\frac{a}{b}$ here")).toBe(true);
+    // Shell and template variables aren't math: dollars alone don't make text Markdown.
+    for (const plain of ["export PATH=$HOME/bin:$PATH", "$HOME/$USER", "${A}${B}", "echo $MY_VAR and $OTHER_VAR"]) expect(looksLikeMarkdown(plain)).toBe(false);
+    expect(markdownToPlain("a $x^2$ b\n$$\ny\n$$\n![[pic.png]]")).toBe("a x^2 b\ny\npic.png");
   });
 });

@@ -4,6 +4,18 @@ import type { PageSize } from "../../domain/docx/pages";
 export type PaperSetting = "default" | "light" | "dark" | "obsidian";
 export type FileKind = "docx" | "pptx" | "xlsx";
 
+/**
+ * File extensions Doc Works opens, by the kind of file: documents, Office's templates of them, and macro-enabled
+ * ones (the macros are a part like any other we don't edit: kept as they are, never run).
+ */
+export const KIND_EXTENSIONS: Record<FileKind, string[]> = { docx: ["docx", "dotx", "docm"], pptx: ["pptx", "potx", "pptm"], xlsx: ["xlsx", "xltx", "xlsm"] };
+
+/** The kind of Office file an extension is ("dotx" is a document), or null. */
+export function kindOfExtension(ext: string): FileKind | null {
+  const e = ext.toLowerCase();
+  return (Object.keys(KIND_EXTENSIONS) as FileKind[]).find((k) => KIND_EXTENSIONS[k].includes(e)) ?? null;
+}
+
 export interface DocWorksSettings {
   /** "document": pages use the document's own size; "letter": always 8.5 x 11 in. */
   pageSize: PageSize;
@@ -51,6 +63,11 @@ export function migrateSettings(raw: Record<string, unknown> | null): DocWorksSe
   s.officePptx = rest.officePptx === true;
   s.officeXlsx = rest.officeXlsx === true;
   return s;
+}
+
+/** The kind of new file `ext` can start as a template: documents and templates, not macro-enabled files (their copy would be a .docx that still declares macros, which Office refuses). */
+export function templateKind(ext: string): FileKind | null {
+  return /m$/i.test(ext) ? null : kindOfExtension(ext);
 }
 
 /** The theme a view of `kind` opens with: its setting, or the view's own default. */

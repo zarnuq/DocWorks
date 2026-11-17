@@ -1,17 +1,32 @@
 /*
  * Markdown text (pasted from a note) as document content: the Markdown is drawn as the HTML Obsidian would make
- * and handed to the note export's converter, so pasted headings, lists, tasks, code and tables match an exported note.
+ * and handed to the note export's converter, so pasted headings, lists, tasks, code, tables, equations and vault
+ * pictures match an exported note.
  */
 import { Fragment, Node as PMNode, Slice } from "prosemirror-model";
 import { EditorState, Selection, Transaction } from "prosemirror-state";
-import { MdBlock, MdRun, parseMarkdown } from "../../core/utils/markdown";
+import { blockRuns, MdBlock, MdRun, parseMarkdown } from "../../core/utils/markdown";
 import { htmlToDoc } from "./from-html";
 import { attrsOf } from "./schema";
 
 type Ctx = Parameters<typeof htmlToDoc>[1];
 
-function appendRuns(el: HTMLElement, runs: MdRun[]): void {
+type Pictures = Map<string, ReturnType<Ctx["image"]>>;
+/** An equation as Obsidian's rendered math carries its source. */
+const mathEl = (parent: HTMLElement, tag: "span" | "div", latex: string) =>
+  parent.createEl(tag, { cls: ["math", tag === "div" ? "math-block" : "math-inline"] }).createEl("annotation" as "span", { text: latex, attr: { encoding: "application/x-tex" } });
+
+function appendAll(el: HTMLElement, runs: MdRun[], pictures: Pictures): void {
   for (const run of runs) {
+    if (run.math) {
+      mathEl(el, "span", run.text);
+      continue;
+    }
+    // A picture that couldn't be loaded keeps its name in the text.
+    if (run.image && pictures.get(run.image)) {
+      el.createEl("img", { attr: { src: run.image, alt: run.text } });
+      continue;
+    }
     let target = el;
     const wrap = (tag: keyof HTMLElementTagNameMap, attr?: Record<string, string>) => (target = target.createEl(tag, attr ? { attr } : undefined));
     if (run.href) wrap("a", { href: run.href });
@@ -25,11 +40,15 @@ function appendRuns(el: HTMLElement, runs: MdRun[]): void {
 }
 
 /** The blocks as the HTML Obsidian renders for them. */
-function markdownDom(blocks: MdBlock[]): HTMLElement {
+function markdownDom(blocks: MdBlock[], pictures: Pictures): HTMLElement {
+  const appendRuns = (el: HTMLElement, runs: MdRun[]) => appendAll(el, runs, pictures);
   const root = createDiv();
   let lists: { depth: number; el: HTMLElement }[] = [];
+  // The body of the callout the quote lines being read belong to.
+  let callout: HTMLElement | null = null;
   for (const b of blocks) {
-    if (b.kind !== "item") lists = [];
+    if (b.kind !== "item" && b.kind !== "blank") lists = [];
+    if (b.kind !== "quote") callout = null;
     switch (b.kind) {
       case "blank":
         break;
@@ -43,7 +62,15 @@ function markdownDom(blocks: MdBlock[]): HTMLElement {
         appendRuns(root.createEl(`h${b.level}` as "h1"), b.runs);
         break;
       case "quote":
-        appendRuns(root.createEl("blockquote").createEl("p"), b.runs);
+        if (b.callout) {
+          // As Obsidian renders a callout, which the note export's converter turns into its tagged box.
+          const box = root.createDiv({ cls: "callout", attr: { "data-callout": b.callout.type, "data-callout-fold": b.callout.fold } });
+          appendRuns(box.createDiv({ cls: "callout-title" }).createDiv({ cls: "callout-title-inner" }), b.runs);
+          callout = box.createDiv({ cls: "callout-content" });
+        } else appendRuns((callout ?? root.createEl("blockquote")).createEl("p"), b.runs);
+        break;
+      case "math":
+        mathEl(root, "div", b.latex);
         break;
       case "code":
         root.createEl("pre").createEl("code", { text: b.text, cls: b.lang ? `language-${b.lang}` : undefined });
@@ -77,9 +104,15 @@ function markdownDom(blocks: MdBlock[]): HTMLElement {
   return root;
 }
 
-/** Markdown text as a document (headings, lists, tasks, quotes, code boxes, tables, rules, inline marks). */
+/**
+ * Markdown text as a document (headings, lists, tasks, quotes, code boxes, tables, rules, inline marks, equations).
+ * `ctx.image` is asked once for each picture, with an <img> whose src is the link path.
+ */
 export function markdownToDoc(text: string, ctx: Ctx): PMNode {
-  return htmlToDoc(markdownDom(parseMarkdown(text)), ctx);
+  const blocks = parseMarkdown(text);
+  const pictures: Pictures = new Map();
+  for (const run of blocks.flatMap(blockRuns)) if (run.image && !pictures.has(run.image)) pictures.set(run.image, ctx.image(createEl("img", { attr: { src: run.image, alt: run.text } })));
+  return htmlToDoc(markdownDom(blocks, pictures), { ...ctx, image: (img) => pictures.get(img.getAttribute("src") ?? "") ?? null });
 }
 
 const plainParagraph = (n: PMNode | null) => n?.type.name === "paragraph" && !attrsOf<{ style: string | null; numId: string | null }>(n).style && !n.attrs.numId;

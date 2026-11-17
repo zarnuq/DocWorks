@@ -4,7 +4,6 @@
  * supplies a command for every id in WORD_COMMAND_IDS.
  */
 import type { Control, Preview, Tab } from "../common/ribbon";
-import type { ShortcutSection } from "../common/shortcuts";
 
 /** Value controls the view provides (the font box, colours…) and the tests of the contextual tabs. */
 export interface WordControls {
@@ -178,15 +177,3 @@ export const WORD_SHORTCUTS: [key: string, id: WordCommandId][] = [
   ["Mod-f", "FindDialog"], ["Mod-h", "ReplaceDialog"],
   ["Alt-=", "EquationInsert"],
 ];
-
-/** "Mod-Shift-l" → "Ctrl+Shift+L", as Help › Keyboard Shortcuts writes keys. */
-export function keyName(key: string): string {
-  return key.split("-").map((p) => (p === "Mod" ? "Ctrl" : p.length === 1 ? p.toUpperCase() : p)).join("+");
-}
-
-/** Help › Keyboard Shortcuts for the Word interface, captions from the view's commands. */
-export function wordShortcutSections(label: (id: WordCommandId) => string): ShortcutSection[] {
-  const rows = new Map<WordCommandId, string[]>();
-  for (const [key, id] of WORD_SHORTCUTS) rows.set(id, [...(rows.get(id) ?? []), keyName(key)]);
-  return [["Word shortcuts", [...rows].map(([id, keys]) => [label(id), keys.join(", ")])]];
-}

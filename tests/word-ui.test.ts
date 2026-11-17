@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { controlIds, type Tab } from "../src/presentation/common/ribbon";
-import { WORD_COMMAND_IDS, WORD_FILE_MENU, WORD_NESTED, WORD_QAT, WORD_SHORTCUTS, wordShortcutSections, wordTabs, type WordControls } from "../src/presentation/docx/word-ui";
+import { WORD_COMMAND_IDS, WORD_FILE_MENU, WORD_NESTED, WORD_QAT, WORD_SHORTCUTS, wordTabs, type WordControls } from "../src/presentation/docx/word-ui";
+import { shortcutRows } from "../src/presentation/common/commands";
 
 const controls: WordControls = {
   fonts: ["Calibri", "Arial"],
@@ -106,7 +107,7 @@ describe("Word's shortcuts", () => {
   });
 
   it("are listed for Help › Keyboard Shortcuts with Ctrl+ names", () => {
-    const rows = wordShortcutSections((id) => id).flatMap(([, list]) => list);
+    const rows = shortcutRows(WORD_SHORTCUTS, (id) => id);
     expect(rows).toContainEqual(["AlignCenter", "Ctrl+E"]);
     expect(rows).toContainEqual(["Superscript", "Ctrl+Shift+="]);
     expect(rows).toContainEqual(["ClearFormatting", "Ctrl+Space"]);

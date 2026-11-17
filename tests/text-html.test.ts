@@ -287,6 +287,23 @@ describe("insertMarkdown", () => {
     expect(read().map((p) => [p.runs.map((r) => r.text).join(""), p.bullet])).toEqual([["T", null], ["x", "•"]]);
   });
 
+  it("keeps math as its source and leaves vault pictures out of the text (the view puts them on the slide)", () => {
+    renderParagraphs(host, [para([])], PX_PER_PT);
+    select(host.firstChild!, 0, host.firstChild!, 0);
+    insertMarkdown(host, "- so $x^2$ grows\n![[ridge.png]]\n$$\na+b\n$$\n- see ![[ridge.png]] here and ![[gone.png]]", PX_PER_PT, new Set(["ridge.png"]));
+    // A picture the view couldn't find keeps its name.
+    expect(read().map((p) => p.runs.map((r) => r.text).join(""))).toEqual(["so $x^2$ grows", "a+b", "see  here and gone.png"]);
+  });
+
+  it("does not fall through to plain text when all blocks are pictures the view handles", () => {
+    renderParagraphs(host, [para([run("before")])], PX_PER_PT);
+    const text = host.querySelector("span")!.firstChild!;
+    select(text, 6, text, 6);
+    insertMarkdown(host, "![[photo.png]]", PX_PER_PT, new Set(["photo.png"]));
+    // The picture is inserted separately by the view; no filename should appear in the text.
+    expect(read().map((p) => p.runs.map((r) => r.text).join(""))).toEqual(["before"]);
+  });
+
   it("gives an empty paragraph the first pasted line's bullet", () => {
     renderParagraphs(host, [para([])], PX_PER_PT);
     select(host.firstChild!, 0, host.firstChild!, 0);

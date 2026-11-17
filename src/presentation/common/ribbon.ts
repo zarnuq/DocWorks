@@ -6,7 +6,8 @@
 import { Menu, setIcon, type MenuItem } from "obsidian";
 import { AppStorage, Cmd, Commands, tooltip } from "./commands";
 import { rovingToolbar } from "./keyboard";
-import { pickColor } from "./toolbar";
+import { pickColor, showBelow } from "./toolbar";
+import { luminance } from "../../domain/pptx/color";
 
 export type Control =
   | { kind: "large" | "small" | "icon"; id: string }
@@ -32,13 +33,6 @@ export function caret(parent: HTMLElement): HTMLElement {
   const c = parent.createSpan({ cls: "dw-rb-caret" });
   setIcon(c, "chevron-down");
   return c;
-}
-
-/** Relative luminance of #RRGGBB, 0 (black) to 1 (white). */
-function luminance(hex: string): number {
-  const n = parseInt(hex.slice(1), 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 export interface Group {
@@ -69,10 +63,6 @@ export interface RibbonOptions {
   qat?: { defaults: string[]; choices: string[] };
 }
 
-function showBelow(menu: Menu, anchor: HTMLElement): void {
-  const r = anchor.getBoundingClientRect();
-  menu.showAtPosition({ x: r.left, y: r.bottom });
-}
 
 type Stack = Extract<Control, { items: Control[] }>;
 const isStack = (c: Control): c is Stack => c.kind === "column" || c.kind === "row";
@@ -175,8 +165,8 @@ export class Ribbon {
       // Next frame: fitting changes the ribbon's own size, which inside the callback reports a ResizeObserver loop.
       let frame = 0;
       const ro = new ResizeObserver(() => {
-        cancelAnimationFrame(frame);
-        frame = requestAnimationFrame(() => this.fit());
+        window.cancelAnimationFrame(frame);
+        frame = window.requestAnimationFrame(() => this.fit());
       });
       ro.observe(this.root);
       this.abort.signal.addEventListener("abort", () => ro.disconnect());

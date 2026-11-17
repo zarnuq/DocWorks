@@ -1,5 +1,5 @@
 import { App, Component, finishRenderMath, MarkdownRenderer, parseLinktext, resolveSubpath, TFile } from "obsidian";
-import { ExportPicture, officeEmbedForExport, OFFICE_EXTENSIONS } from "./office-export";
+import { ExportPicture, officeEmbedForExport, OFFICE_KINDS_OF } from "./office-export";
 
 const stripProperties = (markdown: string) => markdown.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
 const decode = (link: string) => { try { return decodeURIComponent(link); } catch { return link; } };
@@ -60,7 +60,7 @@ export async function renderNoteForExport(app: App, file: TFile, component: Comp
         warnings.add("Some note embeds were unavailable; their names were kept in the document.");
         continue;
       }
-      if (target && OFFICE_EXTENSIONS.has(target.extension.toLowerCase())) {
+      if (target && OFFICE_KINDS_OF(target.name)) {
         const content = await officeEmbedForExport(app, target, anchor, component, pictures).catch(() => null);
         if (content) replace(embed, content);
         else {

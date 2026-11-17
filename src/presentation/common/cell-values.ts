@@ -9,6 +9,7 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetTy
 import { Workbook } from "../../domain/xlsx/workbook-model";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { sheetTarget } from "./embeds";
+import { kindOfExtension } from "./settings";
 
 export interface CellRef {
   path: string;
@@ -47,7 +48,7 @@ function workbook(app: App, file: TFile): Promise<Workbook> {
 export async function renderCellValue(app: App, el: HTMLElement, ref: CellRef, sourcePath: string): Promise<void> {
   const file = app.metadataCache.getFirstLinkpathDest(ref.path, sourcePath);
   let text: string | null = null, error = "";
-  if (!file || file.extension.toLowerCase() !== "xlsx") error = `${ref.path} not found`;
+  if (!file || kindOfExtension(file.extension) !== "xlsx") error = `${ref.path} not found`;
   else {
     try {
       text = cellValue(await workbook(app, file), ref.subpath);
@@ -147,7 +148,7 @@ export function registerCellValues(plugin: Plugin): void {
   plugin.registerEditorExtension(Prec.highest(cellValuesPlugin(app)));
   // A saved workbook: Live Preview draws its cells again (reading view children follow the file themselves).
   plugin.registerEvent(app.vault.on("modify", (f) => {
-    if (!(f instanceof TFile) || f.extension.toLowerCase() !== "xlsx") return;
+    if (!(f instanceof TFile) || kindOfExtension(f.extension) !== "xlsx") return;
     version++;
     app.workspace.iterateAllLeaves((leaf) => (leaf.view as { editor?: { cm?: EditorView } }).editor?.cm?.dispatch({}));
   }));

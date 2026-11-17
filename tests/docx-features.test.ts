@@ -12,7 +12,7 @@ import { writeBody } from "../src/domain/docx/docx-writer";
 import { paragraphProps, readDocx } from "../src/domain/docx/docx-reader";
 import { DocxDocument } from "../src/infrastructure/docx/docx-document";
 import { readSample, W } from "./helpers";
-import { headerFooterType, layoutPages, pageSetup, TopBlock, Unit } from "../src/domain/docx/pages";
+import { layoutPages, pageSetup, TopBlock, Unit } from "../src/domain/docx/pages";
 import { acceptRevisions, rejectRevisions, revisions } from "../src/domain/docx/revisions";
 import { countWords, findKey, findRanges, replaceAllCmd, replaceRangeCmd, setFind } from "../src/presentation/docx/docx-find";
 
@@ -528,12 +528,6 @@ describe("headers and footers", () => {
     expect([back.differentFirstPage(), back.differentOddEven()]).toEqual([false, false]);
     // The parts stay, as in Word and Google Docs, ready if the option comes back on.
     expect(back.headerFooter("header", "first")).not.toBeNull();
-  });
-
-  it("picks the header a page shows: first page, even pages, then the default", () => {
-    expect([1, 2, 3].map((p) => headerFooterType(p, true, true))).toEqual(["first", "even", "default"]);
-    expect([1, 2].map((p) => headerFooterType(p, false, true))).toEqual(["default", "even"]);
-    expect([1, 2].map((p) => headerFooterType(p, true, false))).toEqual(["first", "default"]);
   });
 
   it("edits header text through the normal reader and writer", async () => {

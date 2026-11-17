@@ -6,6 +6,7 @@
 import { ItemView, Keymap, TFile, WorkspaceLeaf } from "obsidian";
 import { officeText, searchText, TextPart } from "../../infrastructure/office-text";
 import { rememberSearch } from "./find-bar";
+import { kindOfExtension } from "./settings";
 
 export const VIEW_TYPE_SEARCH = "doc-works-search";
 /** Results shown per file before "n more". */
@@ -72,7 +73,7 @@ export class OfficeSearchView extends ItemView {
     this.status.setText("");
     if (!query.trim()) return;
     const kinds = this.kinds();
-    const files = this.app.vault.getFiles().filter((f) => kinds.includes(f.extension.toLowerCase())).sort((a, b) => a.path.localeCompare(b.path));
+    const files = this.app.vault.getFiles().filter((f) => kinds.includes(kindOfExtension(f.extension) ?? "")).sort((a, b) => a.path.localeCompare(b.path));
     let total = 0, found = 0;
     for (const [i, file] of files.entries()) {
       if (files.length > 5) this.status.setText(`Searching ${i + 1} of ${files.length}…`);
@@ -109,7 +110,7 @@ export class OfficeSearchView extends ItemView {
     if (cached && cached.mtime === file.stat.mtime) return cached.parts;
     let parts: TextPart[] = [];
     try {
-      parts = await officeText(file.extension.toLowerCase() as "docx", await this.app.vault.readBinary(file), { properties: true });
+      parts = await officeText(kindOfExtension(file.extension)!, await this.app.vault.readBinary(file), { properties: true });
     } catch (err) {
       console.warn(`[doc-works] couldn't read ${file.path} for search`, err);
     }
