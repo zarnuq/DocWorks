@@ -35,6 +35,7 @@ export const Platform = { isDesktopApp: true, isMobile: false, isMacOS: false };
 
 export class App {
   scope = new Scope();
+  keymap = { scopes: [] as Scope[], pushScope(s: Scope) { this.scopes.push(s); }, popScope(s: Scope) { this.scopes = this.scopes.filter((x) => x !== s); } };
   workspace = { getActiveViewOfType: (_type: unknown): unknown => null, trigger: (_name: string, ..._args: unknown[]) => {} };
   fileManager = { generateMarkdownLink: (f: TFile, _source: string, subpath = "") => `[[${f.basename}.${f.extension}${subpath}]]` };
   loadLocalStorage(key: string): unknown {
@@ -139,6 +140,7 @@ export class Modal {
 }
 
 export class FuzzySuggestModal<T> extends Modal {
+  setPlaceholder(_p: string) {}
   getItems(): T[] { return []; }
   getItemText(_item: T): string { return ""; }
   onChooseItem(_item: T): void {}
@@ -157,7 +159,7 @@ export class Setting {
   setDesc(desc?: string) { if (desc) this.settingEl.createDiv({ cls: "setting-item-description", text: desc }); return this; }
   setHeading() { return this; }
   private control(cb: Fn, kind = "text") {
-    const input = kind === "select" ? this.settingEl.createEl("select") : this.settingEl.createEl("input", { type: kind });
+    const input = kind === "select" ? this.settingEl.createEl("select") : kind === "textarea" ? this.settingEl.createEl("textarea") : this.settingEl.createEl("input", { type: kind });
     const c: any = {
       setValue: (value: any) => { if (kind === "checkbox") (input as HTMLInputElement).checked = value; else input.value = String(value); return c; },
       onChange: (fn: Fn) => { input.addEventListener("change", () => fn(kind === "checkbox" ? (input as HTMLInputElement).checked : kind === "range" ? Number(input.value) : input.value)); return c; },
@@ -173,11 +175,11 @@ export class Setting {
   addDropdown(cb: Fn) { return this.control(cb, "select"); }
   addSlider(cb: Fn) { return this.control(cb, "range"); }
   addText(cb: Fn) { return this.control(cb); }
-  addTextArea(cb: Fn) { return this.control(cb); }
+  addTextArea(cb: Fn) { return this.control(cb, "textarea"); }
   addColorPicker(cb: Fn) { return this.control(cb, "color"); }
   addButton(cb: Fn) {
     const el = this.settingEl.createEl("button");
-    const b: any = { setButtonText: (text: string) => { el.textContent = text; return b; }, setCta: () => b, onClick: (fn: () => void) => { el.addEventListener("click", fn); return b; } };
+    const b: any = { buttonEl: el, setButtonText: (text: string) => { el.textContent = text; return b; }, setCta: () => b, setDisabled: (d: boolean) => { el.disabled = d; return b; }, onClick: (fn: () => void) => { el.addEventListener("click", fn); return b; } };
     cb(b); return this;
   }
 }

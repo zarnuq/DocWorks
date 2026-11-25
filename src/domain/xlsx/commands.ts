@@ -64,6 +64,11 @@ export class Edits {
   private redoStack: Transaction[] = [];
   /** Called after an edit, undo or redo with the sheets whose structure was reloaded. */
   onReload: (() => void) | null = null;
+  /**
+   * Asked once an edit has run, before its results are worked out, with the cells it changed itself (not the
+   * formulas that follow); throwing undoes the edit. Not asked for structural edits.
+   */
+  beforeCommit: ((cells: Iterable<{ sheet: Sheet; row: number; col: number }>) => void) | null = null;
   /** Update derived row sizes in the same transaction as text, format and formula-result changes. */
   onCellsChanged: ((cells: Iterable<Change>) => void) | null = null;
 
@@ -85,6 +90,7 @@ export class Edits {
     this.wb.journal = tx;
     try {
       const changes = fn();
+      if (tx.cells.size && !tx.parts.size) this.beforeCommit?.(tx.cells.values());
       if (changes.length) this.calc.recalc(changes);
       if (tx.cells.size) this.onCellsChanged?.(tx.cells.values());
     } catch (err) {

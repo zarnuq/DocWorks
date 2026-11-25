@@ -304,3 +304,140 @@ describe("Slideshow links to slides", () => {
     show.close();
   });
 });
+
+describe("laser pointer and pen", () => {
+  let show: Slideshow;
+  const overlay = () => document.querySelector<HTMLElement>(".dw-show")!;
+  const stage = () => overlay().querySelector<HTMLElement>(".dw-show-slide")!;
+  const keyWith = (k: string, init: KeyboardEventInit = {}) => overlay().dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...init }));
+  const pointer = (type: string, x: number, y: number) => stage().dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true }));
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    show = new Slideshow(deck(), 0, () => undefined);
+    show.open();
+    // jsdom lays nothing out: the slide is 800 x 450 at the window's top left.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, x: 0, y: 0, toJSON: () => ({}) });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    show?.close();
+  });
+
+  it("L turns the laser on and off; the dot follows the mouse", () => {
+    keyWith("l");
+    expect(show.tool).toBe("laser");
+    expect(overlay().classList.contains("is-laser")).toBe(true);
+    overlay().dispatchEvent(new PointerEvent("pointermove", { clientX: 120, clientY: 80, bubbles: true }));
+    const dot = overlay().querySelector<HTMLElement>(".dw-show-laser")!;
+    expect(dot.style.getPropertyValue("--dw-laser-x")).toBe("120px");
+    expect(dot.style.getPropertyValue("--dw-laser-y")).toBe("80px");
+    keyWith("L");
+    expect(show.tool).toBe("none");
+  });
+
+  it("with the laser on a click still advances", () => {
+    keyWith("l");
+    stage().click();
+    expect(show.index).toBe(1);
+    expect(show.tool).toBe("laser");
+    expect(overlay().classList.contains("is-laser")).toBe(true);
+  });
+
+  it("Ctrl+P is the pen (plain P stays presenter view); a drag draws a stroke and doesn't advance", () => {
+    keyWith("p", { ctrlKey: true });
+    expect(show.tool).toBe("pen");
+    expect(overlay().classList.contains("is-presenter")).toBe(false);
+    pointer("pointerdown", 80, 45);
+    pointer("pointermove", 400, 225);
+    pointer("pointerup", 400, 225);
+    stage().click();
+    expect(show.index).toBe(0);
+    const path = stage().querySelector(".dw-show-ink path")!;
+    expect(path.getAttribute("d")).toMatch(/^M\d/);
+  });
+
+  it("ink belongs to its slide and comes back when the show returns to it", () => {
+    keyWith("p", { ctrlKey: true });
+    pointer("pointerdown", 10, 10);
+    pointer("pointermove", 50, 50);
+    pointer("pointerup", 50, 50);
+    keyWith("ArrowRight");
+    expect(stage().querySelector(".dw-show-ink")).toBeNull();
+    keyWith("ArrowLeft");
+    expect(stage().querySelectorAll(".dw-show-ink path")).toHaveLength(1);
+  });
+
+  it("ink survives a switch to presenter view (it's stored relative to the slide)", () => {
+    keyWith("p", { ctrlKey: true });
+    pointer("pointerdown", 400, 225);
+    pointer("pointermove", 800, 450);
+    pointer("pointerup", 800, 450);
+    keyWith("p");
+    expect(overlay().classList.contains("is-presenter")).toBe(true);
+    expect(overlay().querySelectorAll(".dw-show-current .dw-show-ink path")).toHaveLength(1);
+  });
+
+  it("E erases the slide's ink", () => {
+    keyWith("p", { ctrlKey: true });
+    pointer("pointerdown", 10, 10);
+    pointer("pointerup", 10, 10);
+    expect(stage().querySelector(".dw-show-ink")).not.toBeNull();
+    keyWith("e");
+    expect(stage().querySelector(".dw-show-ink")).toBeNull();
+  });
+
+  it("a stroke outside the slide isn't started", () => {
+    keyWith("p", { ctrlKey: true });
+    overlay().dispatchEvent(new PointerEvent("pointerdown", { clientX: 900, clientY: 500, button: 0, bubbles: true }));
+    expect(stage().querySelector(".dw-show-ink")).toBeNull();
+  });
+
+  it("Escape puts the tool down first, then ends the show", () => {
+    keyWith("l");
+    keyWith("Escape");
+    expect(show.tool).toBe("none");
+    expect(overlay()).not.toBeNull();
+    keyWith("Escape");
+    expect(document.querySelector(".dw-show")).toBeNull();
+  });
+
+  it("the tools bar has Laser, Pen and Erase; the active tool is marked", () => {
+    const buttons = () => Array.from(overlay().querySelectorAll<HTMLButtonElement>(".dw-show-tools button"));
+    expect(buttons().map((b) => b.textContent)).toEqual(["Laser", "Pen", "Erase"]);
+    buttons()[1].click();
+    expect(show.tool).toBe("pen");
+    expect(show.index).toBe(0);
+    expect(buttons()[1].classList.contains("is-active")).toBe(true);
+    keyWith("ArrowRight");
+    expect(buttons()[1].classList.contains("is-active")).toBe(true);
+  });
+});
+
+describe("strokePath", () => {
+  it("scales fractions to the slide", async () => {
+    const { strokePath } = await import("../src/presentation/pptx/slideshow");
+    expect(strokePath([[0, 0], [0.5, 1]], 200, 100)).toBe("M0.0 0.0 L100.0 100.0");
+  });
+});
+
+describe("leaving fullscreen", () => {
+  it("with a tool in hand puts it down and keeps the show; without one ends it", () => {
+    document.body.innerHTML = "";
+    const show = new Slideshow(deck(), 0, () => undefined);
+    show.open();
+    const o = document.querySelector<HTMLElement>(".dw-show")!;
+    const fullscreen = (el: Element | null) => {
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => el });
+      document.dispatchEvent(new Event("fullscreenchange"));
+    };
+    fullscreen(o);
+    show.setTool("pen");
+    fullscreen(null);
+    expect(show.tool).toBe("none");
+    expect(document.querySelector(".dw-show")).not.toBeNull();
+    fullscreen(o);
+    fullscreen(null);
+    expect(document.querySelector(".dw-show")).toBeNull();
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => null });
+  });
+});

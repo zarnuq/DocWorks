@@ -35,6 +35,16 @@ export function nextVisible(hidden: boolean[], from: number, dir: 1 | -1): numbe
 const NEXT = new Set(["ArrowRight", "ArrowDown", "PageDown", " ", "Enter", "n", "N"]);
 const PREV = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace"]);
 const pad = (n: number) => String(n).padStart(2, "0");
+const SVG = "http://www.w3.org/2000/svg";
+
+/** A pen stroke, as fractions of the slide's width and height (so it survives a resize or presenter view). */
+type Stroke = [x: number, y: number][];
+export type ShowTool = "none" | "laser" | "pen";
+
+/** SVG path data of a stroke drawn on a w x h slide. */
+export function strokePath(stroke: Stroke, w: number, h: number): string {
+  return stroke.map(([x, y], i) => `${i ? "L" : "M"}${(x * w).toFixed(1)} ${(y * h).toFixed(1)}`).join(" ");
+}
 
 export class Slideshow {
   private overlay: HTMLElement | null = null;
@@ -54,6 +64,12 @@ export class Slideshow {
   private stage: HTMLElement | null = null;
   private mediaIndex = -1;
   private effectsCache = new Map<number, SlideEffects>();
+  /** Laser pointer (Google's L) or pen (PowerPoint's Ctrl+P). */
+  tool: ShowTool = "none";
+  /** Pen strokes per slide, kept until the show ends. */
+  private ink = new Map<number, Stroke[]>();
+  private drawing: Stroke | null = null;
+  private pointingTimer: number | null = null;
 
   constructor(private deck: ShowDeck, public index: number, private onExit: (index: number) => void) {}
 
@@ -67,8 +83,11 @@ export class Slideshow {
         const to = linkTarget(link, this.index, this.deck.slidePaths ?? []);
         if (to !== null) this.goTo(to);
       } else if (link) window.open(link);
-      else if (!target.closest("button, audio, video, .dw-show-notes")) this.next();
+      else if (this.tool !== "pen" && !target.closest("button, audio, video, .dw-show-notes, .dw-show-tools")) this.next();
     });
+    o.addEventListener("pointermove", this.onPointerMove);
+    o.addEventListener("pointerdown", this.onPointerDown);
+    o.addEventListener("pointerup", this.onPointerUp);
     o.addEventListener("wheel", (e) => (e.deltaY > 0 ? this.next() : this.prev()), { passive: true });
     document.addEventListener("fullscreenchange", this.onFullscreenChange);
     window.addEventListener("resize", this.redraw);
@@ -96,6 +115,7 @@ export class Slideshow {
     if (!this.overlay) return;
     this.stop();
     if (this.timer) window.clearInterval(this.timer);
+    if (this.pointingTimer) window.clearTimeout(this.pointingTimer);
     document.removeEventListener("fullscreenchange", this.onFullscreenChange);
     window.removeEventListener("resize", this.redraw);
     if (document.fullscreenElement === this.overlay) void document.exitFullscreen?.().catch(() => undefined);
@@ -196,7 +216,18 @@ export class Slideshow {
     if (k === "Enter" && this.typed) {
       this.goTo(Number(this.typed) - 1);
       this.typed = "";
-    } else if (k === "Escape") this.close();
+    } else if (k === "Escape") {
+      // Escape puts a pen or pointer down first, as in PowerPoint.
+      if (this.tool !== "none") this.setTool("none");
+      else this.close();
+    } else if ((k === "l" || k === "L") && !e.altKey) this.setTool(this.tool === "laser" ? "none" : "laser");
+    else if ((k === "p" || k === "P") && (e.ctrlKey || e.metaKey)) {
+      // In Obsidian a scope the editor pushes may have taken it already (it's the command palette key there).
+      if (e.defaultPrevented) return;
+      e.stopPropagation();
+      this.setTool(this.tool === "pen" ? "none" : "pen");
+    }
+    else if (k === "e" || k === "E") this.eraseInk();
     else if (k === "p" || k === "P") {
       this.presenter = !this.presenter;
       this.redraw();
@@ -209,10 +240,113 @@ export class Slideshow {
     this.typed = "";
   };
 
+  setTool(tool: ShowTool): void {
+    this.tool = tool;
+    this.drawing = null;
+    const o = this.overlay;
+    if (!o) return;
+    o.classList.toggle("is-laser", tool === "laser");
+    o.classList.toggle("is-pen", tool === "pen");
+    o.querySelectorAll<HTMLElement>(".dw-show-tools button[data-tool]").forEach((b) => b.classList.toggle("is-active", b.dataset.tool === tool));
+  }
+
+  /** E: the current slide's ink goes. */
+  eraseInk(): void {
+    this.ink.delete(this.index);
+    this.drawInk();
+  }
+
+  /** The slide as drawn in the current stage (null on the end screen). */
+  private slideBox(): DOMRect | null {
+    const slide = this.stage?.querySelector<HTMLElement>(":scope > .pptx-slide:not(.dw-show-leaving)") ?? this.stage;
+    const r = slide?.getBoundingClientRect();
+    return r && r.width && r.height ? r : null;
+  }
+
+  private onPointerMove = (e: PointerEvent) => {
+    const o = this.overlay;
+    if (!o) return;
+    // Moving the mouse shows the pointer and the tools for a moment.
+    o.classList.add("is-pointing");
+    if (this.pointingTimer) window.clearTimeout(this.pointingTimer);
+    this.pointingTimer = window.setTimeout(() => o.classList.remove("is-pointing"), 2500);
+    const dot = o.querySelector<HTMLElement>(".dw-show-laser");
+    dot?.setCssProps({ "--dw-laser-x": `${e.clientX}px`, "--dw-laser-y": `${e.clientY}px` });
+    if (this.drawing) {
+      const r = this.slideBox();
+      if (r) this.drawing.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);
+      this.drawInk();
+    }
+  };
+
+  private onPointerDown = (e: PointerEvent) => {
+    if (this.tool !== "pen" || e.button !== 0 || (e.target as HTMLElement).closest(".dw-show-tools, button, .dw-show-notes")) return;
+    const r = this.slideBox();
+    if (!r || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+    this.drawing = [[(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]];
+    const strokes = this.ink.get(this.index) ?? [];
+    strokes.push(this.drawing);
+    this.ink.set(this.index, strokes);
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+    this.drawInk();
+  };
+
+  private onPointerUp = () => {
+    this.drawing = null;
+  };
+
+  /** Draw the current slide's ink over it. */
+  private drawInk(): void {
+    const slide = this.stage?.querySelector<HTMLElement>(":scope > .pptx-slide:not(.dw-show-leaving)") ?? this.stage;
+    if (!slide || !this.stage) return;
+    let svg = this.stage.querySelector<SVGSVGElement>(":scope > .dw-show-ink");
+    const strokes = this.ink.get(this.index) ?? [];
+    if (!strokes.length) return void svg?.remove();
+    const w = slide.offsetWidth || this.stage.offsetWidth;
+    const h = slide.offsetHeight || this.stage.offsetHeight;
+    if (!svg) {
+      svg = document.createElementNS(SVG, "svg");
+      svg.classList.add("dw-show-ink");
+      this.stage.appendChild(svg);
+    }
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.replaceChildren(...strokes.map((stroke) => {
+      const path = document.createElementNS(SVG, "path");
+      path.setAttribute("d", strokePath(stroke.length > 1 ? stroke : [stroke[0], stroke[0]], w, h));
+      path.setAttribute("stroke-width", String(Math.max(2, w / 300)));
+      return path;
+    }));
+  }
+
+  /** Laser dot and the tools bar, over whatever is drawn. */
+  private drawTools(o: HTMLElement): void {
+    o.createDiv({ cls: "dw-show-laser" });
+    const bar = o.createDiv({ cls: "dw-show-tools" });
+    const button = (text: string, title: string, run: () => void, tool?: ShowTool) => {
+      const b = bar.createEl("button", { text, attr: { "aria-label": title, title } });
+      if (tool) b.dataset.tool = tool;
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        run();
+        o.focus();
+      });
+    };
+    button("Laser", "Laser pointer (L)", () => this.setTool(this.tool === "laser" ? "none" : "laser"), "laser");
+    button("Pen", "Pen (Ctrl+P)", () => this.setTool(this.tool === "pen" ? "none" : "pen"), "pen");
+    button("Erase", "Erase ink on this slide (E)", () => this.eraseInk());
+    this.setTool(this.tool);
+  }
+
   private onFullscreenChange = () => {
     // The browser eats Escape to leave fullscreen; treat that as ending the show.
+    // With a pen or pointer in hand that Escape puts it down instead; the show goes on in the window.
     if (document.fullscreenElement === this.overlay) this.wasFullscreen = true;
-    else if (this.wasFullscreen) this.close();
+    else if (this.wasFullscreen) {
+      this.wasFullscreen = false;
+      if (this.tool !== "none") this.setTool("none");
+      else this.close();
+    }
   };
 
   private tick = () => {
@@ -261,6 +395,7 @@ export class Slideshow {
     if (!this.presenter) {
       if (this.ended) o.createDiv({ cls: "dw-show-end", text: "End of slide show. Click to exit." });
       else { this.drawStage(o.createDiv({ cls: "dw-show-slide" }), this.fit(W, H), old); restoreMedia(); }
+      this.drawTools(o);
       return;
     }
 
@@ -290,6 +425,7 @@ export class Slideshow {
     side.createDiv({ cls: `dw-show-notes${notes ? "" : " is-empty"}`, text: notes || "No notes for this slide." });
     restoreMedia();
     next.querySelectorAll<HTMLMediaElement>("audio,video").forEach(media=>{media.autoplay=false;media.pause();media.controls=false;});
+    this.drawTools(o);
     this.tick();
   };
 
@@ -300,5 +436,6 @@ export class Slideshow {
     const fresh = stage.querySelector<HTMLElement>(".pptx-slide");
     const t = this.effects().transition;
     if (old && fresh && t) playTransition(stage, old, fresh, t);
+    this.drawInk();
   }
 }

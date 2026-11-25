@@ -15,6 +15,8 @@ import type { ParaInput } from "../../domain/pptx/slide-edit";
 import { fontStack, letterSpacing } from "./text-fit";
 import { EMU_PER_PT } from "../../core/utils/xml";
 import { markdownToPlain, MdBlock, MdRun, parseMarkdown } from "../../core/utils/markdown";
+import { DOMSerializer } from "prosemirror-model";
+import { mathSpec } from "../../domain/docx/math";
 
 const CSS_ALIGN: Record<Align, string> = { l: "left", ctr: "center", r: "right", just: "justify" };
 const FROM_CSS_ALIGN: Record<string, Align> = { left: "l", start: "l", center: "ctr", right: "r", end: "r", justify: "just" };
@@ -121,6 +123,15 @@ export function renderParagraphs(
     p.dataset.spacing = JSON.stringify({ lnSpc: para.lnSpc ?? null, spcBef: para.spcBef ?? null, spcAft: para.spcAft ?? null });
 
     for (const run of para.runs) {
+      if (run.math) {
+        // An equation: drawn as MathML, edited through the equation dialog.
+        const span = p.createSpan({ cls: "pptx-math" });
+        span.dataset.math = "";
+        span.contentEditable = "false";
+        styleRun(span, runPatch(run), pxPerPt);
+        span.appendChild(DOMSerializer.renderSpec(document, mathSpec(run.math)).dom);
+        continue;
+      }
       if (run.field !== undefined) {
         const span = p.createSpan({ text: fieldText(run, opts) });
         span.dataset.field = run.field;

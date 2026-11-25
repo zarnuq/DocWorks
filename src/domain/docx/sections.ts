@@ -116,3 +116,54 @@ export function sectionBreaks(doc: PMNode): Set<PMNode> {
   });
   return out;
 }
+
+/** A section's line numbering (w:lnNumType). */
+export interface LineNumbers {
+  /** Number shown on the first line (Word stores it less one). */
+  start: number;
+  /** Only every n-th number is shown. */
+  countBy: number;
+  restart: "newPage" | "newSection" | "continuous";
+}
+
+export function lineNumbersOf(sectPr: string | null): LineNumbers | null {
+  const el = sectPr ? child(parseElement(sectPr), "lnNumType") : null;
+  if (!el) return null;
+  const restart = el.getAttributeNS(NS.w, "restart");
+  return {
+    start: (Number(el.getAttributeNS(NS.w, "start") ?? 0) || 0) + 1,
+    countBy: Math.max(1, Number(el.getAttributeNS(NS.w, "countBy") ?? 1) || 1),
+    restart: restart === "newSection" || restart === "continuous" ? restart : "newPage",
+  };
+}
+
+/** Set or (with null) remove a section's line numbering. */
+export function withLineNumbers(sectPr: string, ln: LineNumbers | null): string {
+  if (!ln) return child(parseElement(sectPr), "lnNumType") ? withChild(sectPr, "lnNumType", null) : sectPr;
+  return withChild(sectPr, "lnNumType", (doc) => {
+    const el = doc.createElementNS(NS.w, "w:lnNumType");
+    el.setAttributeNS(NS.w, "w:countBy", String(ln.countBy));
+    if (ln.start > 1) el.setAttributeNS(NS.w, "w:start", String(ln.start - 1));
+    el.setAttributeNS(NS.w, "w:restart", ln.restart);
+    return el;
+  });
+}
+
+/**
+ * The number drawn beside each line (null = none) as Word counts them: lines of sections without numbering are
+ * skipped, numbering restarts on each page / section as the section says, and only multiples of countBy show.
+ */
+export function lineNumberLabels(lines: { page: number; section: number; ln: LineNumbers | null }[]): (number | null)[] {
+  let n = 0;
+  let page = -1;
+  let section = -1;
+  return lines.map((l) => {
+    if (!l.ln) return null;
+    const newSection = l.section !== section;
+    if ((newSection && (l.ln.restart !== "continuous" || section < 0)) || (l.ln.restart === "newPage" && l.page !== page)) n = l.ln.start;
+    else n++;
+    page = l.page;
+    section = l.section;
+    return n % l.ln.countBy === 0 ? n : null;
+  });
+}

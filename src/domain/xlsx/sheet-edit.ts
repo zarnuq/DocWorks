@@ -139,6 +139,10 @@ function shiftSheet(e: Edits, sheet: Sheet, axis: "row" | "col", at: number, cou
     else p?.setAttribute("count", String(sheet.all(p, tag).length));
   }
   for (const cf of sheet.all(root, "conditionalFormatting")) if (!shiftAttr(cf, "sqref", o)) cf.remove();
+  // Protected ranges (no count attribute on their wrapper).
+  const protectedRanges = child(sheet, "protectedRanges");
+  for (const el of sheet.all(protectedRanges, "protectedRange")) if (!shiftAttr(el, "sqref", o)) el.remove();
+  if (protectedRanges && !sheet.all(protectedRanges, "protectedRange").length) protectedRanges.remove();
   // Excel 2010 ranges (sparkline cells, conditional formats): what loses its range goes, with emptied wrappers.
   for (const ref of Array.from(sheet.doc.getElementsByTagNameNS(XM, "sqref"))) {
     const out = shiftSqref(ref.textContent ?? "", o);

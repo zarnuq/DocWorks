@@ -2,6 +2,7 @@ import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, escapeXml, EMU_PER_PX, insertInOrder, parseElement } from "../../core/utils/xml";
 import { attrsOf, CellAttrs, docxSchema as schema, ImageAttrs, LinkAttrs, ParagraphAttrs, TableAttrs, TableBorders, XmlAttrs } from "./schema";
 import { placementAttrs, placementOf, setPlacement } from "./drawing";
+import { chipElement, chipUnchanged, type ChipAttrs } from "./chips";
 import { bordersOf, cropOf, HIGHLIGHTS, Origin, Origins, paragraphProps, runMarks, vMergeOf, w, wVal } from "./docx-reader";
 
 export interface WriteContext {
@@ -419,6 +420,7 @@ class Writer {
   private inlineNode(node: PMNode): Element {
     if (node.type === schema.nodes.opaque) return this.import(attrsOf<XmlAttrs>(node).xml);
     if (node.type === schema.nodes.image) return this.image(node);
+    if (node.type === schema.nodes.chip) return this.chip(node);
 
     const r = this.el("r");
     const rPr = this.runProps(node.marks);
@@ -438,6 +440,28 @@ class Writer {
       });
     }
     return r;
+  }
+
+  /** A smart chip's content control: as it was when nothing changed, else with its value and text rewritten. */
+  private chip(node: PMNode): Element {
+    const a = attrsOf<ChipAttrs>(node);
+    const own = (marks: readonly Mark[]) => marks.filter((m) => m.type !== schema.marks.link && m.type !== schema.marks.insertion);
+    if (chipUnchanged(a)) {
+      const original = this.import(a.xml);
+      const run = original.getElementsByTagNameNS(NS.w, "r")[0];
+      const was = runMarks(w(run, "rPr"));
+      const now = own(node.marks);
+      if (was.length === now.length && was.every((m, i) => m.eq(now[i]))) return original;
+    }
+    return chipElement(this.owner, a, (text) => {
+      const r = this.el("r");
+      const rPr = this.runProps(node.marks);
+      if (rPr) r.appendChild(rPr);
+      const t = r.appendChild(this.el("t"));
+      if (/^\s|\s$/.test(text)) t.setAttributeNS(NS.xml, "xml:space", "preserve");
+      t.textContent = text;
+      return r;
+    });
   }
 
   /** Original w:rPr with only the modeled properties that changed rewritten. */

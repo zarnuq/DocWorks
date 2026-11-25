@@ -289,6 +289,20 @@ export const docxSchema = new Schema({
       },
     },
 
+    /** Smart chip: a date picker or dropdown content control (see chips.ts). */
+    chip: {
+      group: "inline",
+      inline: true,
+      atom: true,
+      selectable: true,
+      attrs: { kind: { default: "date" }, xml: { default: "" }, text: { default: "" }, date: { default: null }, format: { default: "MMM d, yyyy" }, options: { default: [] }, tag: { default: "" } },
+      leafText: (node) => node.attrs.text as string,
+      toDOM: (node) => {
+        const kind = node.attrs.kind as string;
+        return ["span", { class: `docx-chip docx-chip-${kind}`, contenteditable: "false", "data-chip": kind }, node.attrs.text as string || " "];
+      },
+    },
+
     /** Run-level content we don't edit (bookmarks, fields, footnote refs, symbols...). */
     opaque: {
       group: "inline",

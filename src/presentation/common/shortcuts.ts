@@ -22,7 +22,11 @@ export const COMMON_SHORTCUTS: ShortcutSection[] = [
   ]],
 ];
 
+/** The Google layouts' menu search box (the Office layout has none). */
+const MENU_SEARCH: ShortcutSection = ["Menus", [["Search the menus", "Alt+/"]]];
+
 export const DOCS_SHORTCUTS: ShortcutSection[] = [
+  MENU_SEARCH,
   ["Text formatting", [
     ["Bold", "Ctrl+B"],
     ["Italic", "Ctrl+I"],
@@ -50,6 +54,7 @@ export const DOCS_SHORTCUTS: ShortcutSection[] = [
 ];
 
 export const SLIDES_SHORTCUTS: ShortcutSection[] = [
+  MENU_SEARCH,
   ["Objects", [
     ["Duplicate", "Ctrl+D"],
     ["Group", "Ctrl+G"],
@@ -81,11 +86,15 @@ export const SLIDES_SHORTCUTS: ShortcutSection[] = [
     ["First / last slide", "Home, End"],
     ["Go to slide", "Number, then Enter"],
     ["Presenter view", "P"],
-    ["Stop presenting", "Esc"],
+    ["Laser pointer", "L"],
+    ["Pen", "Ctrl+P"],
+    ["Erase ink on the slide", "E"],
+    ["Stop presenting (with a pen or pointer: put it down)", "Esc"],
   ]],
 ];
 
 export const SHEETS_SHORTCUTS: ShortcutSection[] = [
+  MENU_SEARCH,
   ["Moving and selecting", [
     ["Move", "Arrow keys"],
     ["To the edge of the data", "Ctrl+Arrow keys"],
@@ -150,6 +159,11 @@ export function shortcutsDialog(app: App, sections: ShortcutSection[]): void {
 }
 
 /** Ctrl+/ opens the list, as in Google's editors. */
+/** Google's Alt+/: the toolbar's "Menus" box. `focus` is false when there's none (Office layout), and the key passes on. */
+export function registerMenuSearchKey(scope: Scope, focus: () => boolean): void {
+  scope.register(["Alt"], "/", () => (focus() ? false : true));
+}
+
 export function registerShortcutsKey(scope: Scope, open: () => void): void {
   scope.register(["Mod"], "/", () => {
     open();

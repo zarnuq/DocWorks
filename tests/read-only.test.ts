@@ -50,7 +50,7 @@ describe("read-only setting", () => {
     expect(menuTitles(view, "Edit")).toEqual(["Copy", "Select all", "Copy link to heading", "Create note from selection", "---", "Find and replace"]);
     expect(menuTitles(view, "View")).toEqual(["Page view", "Outline", "Linked from", "Zoom", "---", "Light", "Dark"]);
     expect(menuTitles(view, "View", "Zoom").length).toBeGreaterThan(3);
-    expect(menuTitles(view, "Tools")).toEqual(["Word count", "Find and replace"]);
+    expect(menuTitles(view, "Tools")).toEqual(["Word count", "Compare documents", "Find and replace"]);
     const labels = toolbarLabels(view);
     expect(labels).toContain("Zoom");
     expect(labels).toContain("Page view");

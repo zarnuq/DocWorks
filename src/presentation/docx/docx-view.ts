@@ -35,17 +35,19 @@ import { looksLikeMarkdown, markdownImages } from "../../core/utils/markdown";
 import { markdownToDoc, pasteMarkdown } from "../../domain/docx/from-markdown";
 import { CellSelection } from "./cell-selection";
 import { specialCharacters } from "../common/special-chars";
-import { COMMON_SHORTCUTS, DOCS_SHORTCUTS, registerShortcutsKey, shortcutsDialog } from "../common/shortcuts";
+import { COMMON_SHORTCUTS, DOCS_SHORTCUTS, registerMenuSearchKey, registerShortcutsKey, shortcutsDialog } from "../common/shortcuts";
 import { recrop, Wrap } from "../../domain/docx/drawing";
 import { readWatermark, setWatermark, TextWatermark, Watermark } from "../../domain/docx/watermark";
 import { directFormat, updateStyleToMatch } from "../../domain/docx/style-edit";
 import { fontStack } from "../../core/utils/fonts";
 import { IMAGE_MIME } from "../../core/utils/images";
-import { cmd, commentRanges, docxPlugins, inCodeBlock, EditorContext, PaintFormat, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
+import { atTrigger, cmd, commentRanges, docxPlugins, inCodeBlock, EditorContext, PaintFormat, footnoteIds, linkHref, pageNumberNode, refreshText, styleRenderedParagraphs } from "./docx-editor";
 import { loadEmbeddedFonts } from "../pptx/embedded-fonts";
 import { pageAt, pagesKey, pagesPlugin, printPages, refreshSectionWidths, repaginate, sectionWidthsPlugin } from "./docx-pages";
+import { lineNumbersPlugin } from "./line-numbers";
+import { lineNumbersOf, LineNumbers } from "../../domain/docx/sections";
+import { BUILDING_BLOCKS, BuildingBlock } from "../../domain/docx/building-blocks";
 import { rewrap, wrapBothSidesPlugin } from "./docx-wrap";
-import { latexToOmml, mathSpec } from "../../domain/docx/math";
 import { canExportPdf, renderPdf } from "../common/pdf";
 import { ExportFormat, exportDialog, writeExport } from "../common/export-dialog";
 import { exportDocxToMarkdown, MARKDOWN_FORMAT } from "../common/export-markdown";
@@ -68,6 +70,16 @@ import { keyName, shortcutRows, type Commands } from "../common/commands";
 import { showContextMenu, type CtxEntry } from "../common/context-menu";
 import { WORD_FILE_MENU, WORD_QAT, WORD_SHORTCUTS, wordTabs, type WordCommandId } from "./word-ui";
 import { parseElement } from "../../core/utils/xml";
+import { citationChip, DEFAULT_DATE_FORMAT, dropdownOptions, formatDate, isoDay, newChip, type ChipAttrs } from "../../domain/docx/chips";
+import { citationsDialog } from "../common/citations-dialog";
+import { compareDialog } from "../common/compare-dialog";
+import { comparisonName, compareBodies } from "../../domain/docx/compare";
+import { equationDialog } from "../common/equation-dialog";
+import { dateDialog, dropdownDialog } from "../common/chip-dialogs";
+import { FilePicker } from "../common/file-picker";
+
+/** Word's line numbering choices (Layout › Line Numbers), as in Google's Tools › Line numbers. */
+const LINE_NUMBERING: [LineNumbers["restart"], string][] = [["newPage", "Restart Each Page"], ["newSection", "Restart Each Section"], ["continuous", "Continuous"]];
 
 export const VIEW_TYPE_DOCX = "doc-works-docx-view";
 
@@ -85,13 +97,6 @@ const STYLES: [string, string][] = [
   ["Heading 3", "Heading3"],
   ["Heading 4", "Heading4"],
   ["Quote", "Quote"],
-];
-
-/** Equation palette rows: label, LaTeX to insert. */
-const EQUATION_PALETTE: [string, string][][] = [
-  [["a/b", "\\frac{}{}"], ["√", "\\sqrt{}"], ["ⁿ√", "\\sqrt[]{}"], ["xⁿ", "^{}"], ["xₙ", "_{}"], ["∑", "\\sum_{}^{}{}"], ["∫", "\\int_{}^{}{}"], ["lim", "\\lim_{}{}"], ["( )", "\\left(\\right)"], ["[ ]", "\\left[\\right]"], ["x̂", "\\hat{}"], ["x̄", "\\overline{}"], ["vec", "\\vec{}"], ["▦", "\\begin{matrix}{}&\\\\&\\end{matrix}"]],
-  [["α", "\\alpha "], ["β", "\\beta "], ["γ", "\\gamma "], ["δ", "\\delta "], ["ε", "\\varepsilon "], ["θ", "\\theta "], ["λ", "\\lambda "], ["μ", "\\mu "], ["π", "\\pi "], ["σ", "\\sigma "], ["φ", "\\varphi "], ["ω", "\\omega "], ["Δ", "\\Delta "], ["Σ", "\\Sigma "], ["Ω", "\\Omega "]],
-  [["±", "\\pm "], ["×", "\\times "], ["÷", "\\div "], ["·", "\\cdot "], ["∞", "\\infty "], ["∂", "\\partial "], ["∇", "\\nabla "], ["≤", "\\leq "], ["≥", "\\geq "], ["≠", "\\neq "], ["≈", "\\approx "], ["≡", "\\equiv "], ["∈", "\\in "], ["⊂", "\\subset "], ["∪", "\\cup "], ["∩", "\\cap "], ["∀", "\\forall "], ["∃", "\\exists "], ["→", "\\to "], ["⇒", "\\Rightarrow "], ["⇔", "\\Leftrightarrow "]],
 ];
 
 const PAGE_VIEW_KEY = "doc-works-page-view";
@@ -216,6 +221,7 @@ export class DocxView extends FileView {
       return false;
     });
     registerShortcutsKey(this.scope, () => this.shortcutsHelp());
+    registerMenuSearchKey(this.scope, () => !!this.toolbar?.focusSearch());
     this.scope.register(["Mod"], "h", () => {
       this.openFind();
       return false;
@@ -372,7 +378,7 @@ export class DocxView extends FileView {
       : { "Mod-k": () => (void this.editLink(), true), "Mod-Alt-m": () => (void this.addComment(), true), "Mod-Shift-8": cmd.toggleList(ctx, "bullet"), "Mod-Shift-7": cmd.toggleList(ctx, "ordered") };
     this.editor = new EditorView(host, {
       attributes: { role: "textbox", "aria-labelledby": host.createDiv({ cls: "dw-sr-only", text: "Document content", attr: { id: `docx-content-name-${Math.random().toString(36).slice(2)}` } }).id, "aria-multiline": "true" },
-      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, keys), this.pagesPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize), readOnlyPlugin(() => this.settings.readOnly)] }),
+      state: EditorState.create({ doc, plugins: [...docxPlugins(ctx, keys), this.pagesPlugin(), lineNumbersPlugin(), wrapBothSidesPlugin(), sectionWidthsPlugin(() => (this.pageView ? this.setup : null), () => this.finalSetup, () => this.settings.pageSize), readOnlyPlugin(() => this.settings.readOnly)] }),
       editable: () => !this.settings.readOnly,
       nodeViews: {
         image: (node, view, getPos) =>
@@ -420,6 +426,16 @@ export class DocxView extends FileView {
         }
         return false;
       },
+      // Google's @ menu: smart chips for an @ typed at the start of a word.
+      handleTextInput: (_view, _from, _to, text) => {
+        if (text === "@" && !this.settings.readOnly) window.setTimeout(() => this.atMenu(), 0);
+        return false;
+      },
+      handleClickOn: (_view, _pos, node, nodePos, event) => {
+        if (node.type !== schema.nodes.chip || node.attrs.kind === "citation" || this.settings.readOnly) return false;
+        this.chipClicked(nodePos, event);
+        return true;
+      },
       handleDOMEvents: {
         // Paint format: the selection made with the mouse takes the copied formatting.
         mouseup: (view) => {
@@ -433,7 +449,11 @@ export class DocxView extends FileView {
           const a = (event.target as HTMLElement).closest<HTMLAnchorElement>("a.docx-link");
           if (!a || !(event.ctrlKey || event.metaKey)) return false;
           event.preventDefault();
-          if (/^https?:|^mailto:/.test(a.getAttribute("href") ?? "")) window.open(a.getAttribute("href")!);
+          const href = a.getAttribute("href") ?? "";
+          // A file chip: the vault file, in a new tab.
+          const file = /^obsidian:\/\/open\?/.test(href) ? new URLSearchParams(href.slice(href.indexOf("?") + 1)).get("file") : null;
+          if (file) void this.app.workspace.openLinkText(file, "", true);
+          else if (/^https?:|^mailto:/.test(href)) window.open(href);
           return true;
         },
         blur: () => {
@@ -856,6 +876,8 @@ export class DocxView extends FileView {
       menuItem(mn, "Footnote", () => void this.addFootnote());
       menuItem(mn, "Comment", () => void this.addComment());
       menuItem(mn, "Link", () => void this.editLink());
+      subMenu(mn, "Smart chips", (s) => this.chipItems(s));
+      subMenu(mn, "Building blocks", (s) => this.buildingBlockItems(s));
       subMenu(mn, "Table of contents", (s) => {
         menuItem(s, "Insert table of contents", () => {
           this.docx?.prepareToc();
@@ -898,6 +920,9 @@ export class DocxView extends FileView {
     tb.menu("Tools", (mn) => {
       menuItem(mn, "Paint format", () => this.startPainting(false));
       menuItem(mn, "Word count", () => this.wordCountDialog());
+      menuItem(mn, "Line numbers", () => this.lineNumbersDialog());
+      menuItem(mn, "Compare documents", () => void this.compareDocuments());
+      menuItem(mn, "Citations", () => this.citations());
       menuItem(mn, "Find and replace", () => this.openFind());
     });
     tb.menu("Help", (mn) => menuItem(mn, "Keyboard shortcuts", () => this.shortcutsHelp()));
@@ -1158,6 +1183,11 @@ export class DocxView extends FileView {
       SymbolInsert: { label: "Symbol", icon: "omega", run: () => specialCharacters(this.app, (ch) => this.editor?.dispatch(this.editor.state.tr.insertText(ch).scrollIntoView())) },
       WatermarkGallery: { label: "Watermark", icon: "droplet", run: () => this.watermarkDialog() },
       TableColumnsGallery: { label: "Columns", icon: "columns-2", run: () => this.columnsDialog() },
+      LineNumbersMenu: { label: "Line Numbers", icon: "list-ordered", menu: menu([
+        ["None", run(cmd.setLineNumbers(null))],
+        ...LINE_NUMBERING.map(([restart, label]) => [label, () => run(cmd.setLineNumbers({ ...(this.lineNumbers() ?? { start: 1, countBy: 1 }), restart }))()] as [string, () => void]),
+        ["Line Numbering Options…", () => this.lineNumbersDialog()],
+      ]) },
       BreaksGallery: { label: "Breaks", icon: "separator-horizontal", menu: menu([
         ["Page", run(cmd.insertPageBreak)], ["Column", run(cmd.insertColumnBreak)],
         ["Next Page", run(cmd.insertSectionBreak("nextPage"))], ["Continuous", run(cmd.insertSectionBreak("continuous"))],
@@ -1494,6 +1524,139 @@ export class DocxView extends FileView {
     const all = countWords(doc).words;
     const label = (n: number) => `${n.toLocaleString()} ${n === 1 ? "word" : "words"}`;
     return selection.empty ? label(all) : `${countWords(doc, selection.from, selection.to).words.toLocaleString()} of ${label(all)}`;
+  }
+
+  /** Google's building blocks, for Insert › Building blocks and the @ menu (`at`: the typed @ they replace). */
+  private buildingBlockItems(m: Menu, at?: number): void {
+    const icons: Record<BuildingBlock, string> = { meeting: "notebook-pen", email: "mail", roadmap: "milestone", review: "clipboard-check", assets: "folder-open", launch: "rocket" };
+    for (const [kind, label] of BUILDING_BLOCKS) {
+      menuItem(m, label, () => {
+        if (!this.editor || !this.ctx) return;
+        cmd.insertBuildingBlock(kind, this.ctx, isoDay(), at)(this.editor.state, this.editor.dispatch);
+        this.editor.focus();
+      }, { icon: icons[kind] });
+    }
+  }
+
+  /** Google's smart chips, for Insert › Smart chips and the @ menu (`at`: the typed @ they replace). */
+  private chipItems(m: Menu, at?: number): void {
+    const insert = (command: Command) => {
+      if (!this.editor) return;
+      command(this.editor.state, this.editor.dispatch);
+      this.editor.focus();
+    };
+    const day = (days: number) => () => insert(cmd.insertChip(newChip("date", { date: isoDay(days) }), at));
+    menuItem(m, "Today", day(0), { icon: "calendar" });
+    menuItem(m, "Tomorrow", day(1), { icon: "calendar-plus" });
+    menuItem(m, "Yesterday", day(-1), { icon: "calendar-minus" });
+    menuItem(m, "Date…", () => void dateDialog(this.app, isoDay(), DEFAULT_DATE_FORMAT).then((d) => d && insert(cmd.insertChip(newChip("date", d), at))), { icon: "calendar-days" });
+    m.addSeparator();
+    menuItem(m, "Dropdown…", () => void dropdownDialog(this.app, []).then((items) => {
+      const options = items ? dropdownOptions(items) : [];
+      if (options.length) insert(cmd.insertChip(newChip("dropdown", { options: options.map((o) => o.text) }), at));
+    }), { icon: "circle-chevron-down" });
+    menuItem(m, "File…", () => {
+      const vault = encodeURIComponent(this.app.vault.getName());
+      new FilePicker(this.app, this.app.vault.getFiles(), (f) => insert(cmd.insertLinkedText(f.basename, `obsidian://open?vault=${vault}&file=${encodeURIComponent(f.path)}`, at)), "Link a file from the vault").open();
+    }, { icon: "file" });
+    menuItem(m, "Person…", () => void promptText(this.app, "Email address", "").then((email) => {
+      const address = email?.trim();
+      if (!address) return;
+      if (!/^[^\s@]+@[^\s@]+$/.test(address)) return void new Notice("That isn't an email address.");
+      insert(cmd.insertLinkedText(address, `mailto:${address}`, at));
+    }), { icon: "user" });
+  }
+
+  /** Google's Tools › Compare documents: a new "Comparison of A and B" with the differences as suggestions, opened in a tab. */
+  private async compareDocuments(): Promise<void> {
+    const file = this.file;
+    if (!file) return;
+    const others = this.app.vault.getFiles().filter((f) => f !== file && kindOfExtension(f.extension) === "docx");
+    if (!others.length) return void new Notice("No other document of this kind is in the vault.");
+    const choice = await compareDialog(this.app, others, this.settings.author);
+    if (!choice) return;
+    // The file as it is now, edits included.
+    await this.autosave.flush();
+    try {
+      const [base, other] = await Promise.all([file, choice.file].map(async (f) => DocxDocument.load(new Uint8Array(await this.app.vault.readBinary(f)))));
+      const { changes } = compareBodies(base.body, other.body, { author: choice.author, date: new Date().toISOString().replace(/\.\d+Z$/, "Z") });
+      if (!changes) return void new Notice("No differences found.");
+      const folder = file.parent?.path && file.parent.path !== "/" ? `${file.parent.path}/` : "";
+      const name = comparisonName(file.name, choice.file.name);
+      let path = `${folder}${name}`;
+      for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) path = `${folder}${name.replace(/\.docx$/, ` ${n}.docx`)}`;
+      const created = await this.app.vault.createBinary(path, (await base.save()).slice().buffer);
+      await this.app.workspace.getLeaf("tab").openFile(created);
+    } catch (e) {
+      new Notice(`Couldn't compare: ${(e as Error).message}`);
+    }
+  }
+
+  /** Google's Tools › Citations: sources kept in Word's bibliography part, citations and the list updated with them. */
+  private citations(): void {
+    const docx = this.docx;
+    if (!docx || !this.editor) return;
+    const run = (command: Command) => {
+      if (!this.editor) return false;
+      const done = command(this.editor.state, this.editor.dispatch);
+      this.editor.focus();
+      return done;
+    };
+    citationsDialog(this.app, {
+      ...docx.sources(),
+      save: (style, sources) => {
+        docx.setSources(style, sources);
+        this.autosave.markDirty();
+        if (this.editor) cmd.restyleCitations(sources, style)(this.editor.state, this.editor.dispatch);
+      },
+      cite: (source) => void run(cmd.insertChip(citationChip(source, docx.sources().style))),
+      bibliography: () => {
+        const { style, sources } = docx.sources();
+        if (!run(cmd.insertBibliography(sources, style))) new Notice("Add a source first.");
+      },
+    });
+  }
+
+  /** The @ menu at the caret, while the @ just typed is still there. */
+  private atMenu(): void {
+    const editor = this.editor;
+    const at = editor ? atTrigger(editor.state) : null;
+    if (!editor || at === null) return;
+    const menu = new Menu();
+    this.chipItems(menu, at);
+    menu.addSeparator();
+    this.buildingBlockItems(menu, at);
+    const box = editor.coordsAtPos(at);
+    menu.showAtPosition({ x: box.left, y: box.bottom });
+  }
+
+  /** A chip was clicked: a date picker, or the dropdown's items. */
+  private chipClicked(pos: number, event: MouseEvent): void {
+    const editor = this.editor;
+    const node = editor?.state.doc.nodeAt(pos);
+    if (!editor || node?.type !== schema.nodes.chip) return;
+    const a = attrsOf<ChipAttrs>(node);
+    const set = (attrs: Partial<ChipAttrs>) => {
+      if (!this.editor) return;
+      cmd.setChip(pos, attrs)(this.editor.state, this.editor.dispatch);
+      this.editor.focus();
+    };
+    if (a.kind === "date") {
+      void dateDialog(this.app, a.date ?? isoDay(), a.format, "Done").then((d) => d && set({ ...d, text: formatDate(d.date, d.format) }));
+      return;
+    }
+    const menu = new Menu();
+    for (const o of a.options) menuItem(menu, o.text, () => set({ text: o.text }), { checked: o.text === a.text });
+    menu.addSeparator();
+    menuItem(menu, "Edit options…", () => void dropdownDialog(this.app, a.options.map((o) => o.text), "Done").then((items) => {
+      if (!items) return;
+      const options = dropdownOptions(items);
+      if (!options.length) return;
+      // Items keep their value; new ones are their own.
+      const kept = options.map((o) => a.options.find((x) => x.text === o.text) ?? o);
+      set({ options: kept, text: kept.some((o) => o.text === a.text) ? a.text : kept[0].text });
+    }), { icon: "pencil" });
+    menu.showAtMouseEvent(event);
   }
 
   private async editLink(): Promise<void> {
@@ -2397,6 +2560,49 @@ export class DocxView extends FileView {
 
 
   /** Google Docs' Format › Columns: number, spacing and a line between. */
+  /** The document's line numbering: the first section's that has any. */
+  private lineNumbers(): LineNumbers | null {
+    const doc = this.editor?.state.doc;
+    if (!doc) return null;
+    let found: LineNumbers | null = null;
+    doc.descendants((node) => {
+      if (!found && node.type.name === "paragraph" && node.attrs.sectPr) found = lineNumbersOf(node.attrs.sectPr as string);
+      return !found && node.type.name !== "paragraph";
+    });
+    return found ?? lineNumbersOf(doc.attrs.sectPr as string | null);
+  }
+
+  /** Tools › Line numbers, as Google's: on or off for the whole document, and when the count starts again. */
+  private lineNumbersDialog(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const now = this.lineNumbers();
+    let show = !!now;
+    const ln: LineNumbers = now ?? { start: 1, countBy: 1, restart: "newPage" };
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Line numbers");
+    new Setting(modal.contentEl).setName("Show line numbers").addToggle((t) => t.setValue(show).onChange((v) => (show = v)));
+    new Setting(modal.contentEl).setName("Numbering").addDropdown((d) =>
+      d
+        .addOptions(Object.fromEntries(LINE_NUMBERING.map(([restart, label]) => [restart, label.charAt(0) + label.slice(1).toLowerCase()])))
+        .setValue(ln.restart)
+        .onChange((v) => (ln.restart = v as LineNumbers["restart"]))
+    );
+    new Setting(modal.contentEl)
+      .addButton((b) =>
+        b
+          .setButtonText("Apply")
+          .setCta()
+          .onClick(() => {
+            cmd.setLineNumbers(show ? ln : null)(editor.state, editor.dispatch);
+            modal.close();
+            editor.focus();
+          })
+      )
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.open();
+  }
+
   private columnsDialog(): void {
     const editor = this.editor;
     if (!editor) return;
@@ -2475,53 +2681,11 @@ export class DocxView extends FileView {
   private equationDialog(pos: number | null): void {
     const editor = this.editor;
     if (!editor) return;
-    const modal = new Modal(this.app);
-    modal.titleEl.setText(pos === null ? "Insert equation" : "Edit equation");
-    modal.modalEl.addClass("docx-equation-modal");
-    const input = modal.contentEl.createEl("textarea", {
-      cls: "docx-equation-input",
-      attr: { rows: "3", spellcheck: "false", placeholder: "Type LaTeX, e.g. \\frac{a}{b}, x^2, \\alpha, \\sum_{i=1}^{n}" },
+    void equationDialog(this.app, pos === null ? null : (cmd.equationAt(editor.state, pos) ?? "")).then((latex) => {
+      if (latex === null || !this.editor) return;
+      cmd.setEquation(pos, latex)(this.editor.state, this.editor.dispatch);
+      this.editor.focus();
     });
-    input.value = pos === null ? "" : (cmd.equationAt(editor.state, pos) ?? "");
-    const preview = modal.contentEl.createDiv({ cls: "docx-equation-preview" });
-    const draw = () => preview.replaceChildren(DOMSerializer.renderSpec(document, mathSpec(latexToOmml(input.value))).dom);
-    input.addEventListener("input", draw);
-    // Symbols and structures, as in Google Docs' equation toolbar; the cursor lands in the first empty box.
-    const insert = (text: string) => {
-      const at = input.selectionStart;
-      input.setRangeText(text, at, input.selectionEnd, "end");
-      const box = text.indexOf("{}");
-      if (box >= 0) input.setSelectionRange(at + box + 1, at + box + 1);
-      input.focus();
-      draw();
-    };
-    const palette = modal.contentEl.createDiv({ cls: "docx-equation-palette" });
-    for (const row of EQUATION_PALETTE) {
-      const line = palette.createDiv({ cls: "docx-equation-row" });
-      for (const [label, text] of row) line.createEl("button", { text: label, attr: { "aria-label": text.trim() } }).addEventListener("click", () => insert(text));
-    }
-    const apply = (latex: string) => {
-      cmd.setEquation(pos, latex)(editor.state, editor.dispatch);
-      modal.close();
-      editor.focus();
-    };
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        apply(input.value);
-      }
-    });
-    const buttons = new Setting(modal.contentEl).addButton((b) =>
-      b
-        .setButtonText(pos === null ? "Insert" : "Save")
-        .setCta()
-        .onClick(() => apply(input.value))
-    );
-    if (pos !== null) buttons.addButton((b) => b.setButtonText("Delete").onClick(() => apply("")));
-    buttons.addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
-    modal.open();
-    draw();
-    input.focus();
   }
 
   private setPageView(on: boolean): void {

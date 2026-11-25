@@ -16,6 +16,7 @@ the host desktop. Screenshots and results.json go to the printed folder.
 """
 import hashlib
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -217,7 +218,7 @@ def test_docx_type_bold_undo_redo():
 
 
 def test_docx_markdown_paste():
-    """Markdown from the (private) clipboard: Ctrl+V converts, Ctrl+Shift+V pastes plain."""
+    """Markdown from the (private) clipboard: Ctrl+V converts, Ctrl+Shift+V pastes the raw text as-is."""
     path = f'{RUN}/sample.docx'
     open_file(path, 'doc-works-docx-view')
     x, y, right, _ = ev('''(() => { const p = [...document.querySelectorAll(".workspace-leaf.mod-active .ProseMirror p")]
@@ -241,13 +242,13 @@ def test_docx_markdown_paste():
             out.append((''.join(t.text or '' for t in p.iter(f'{W}t')), style.get(f'{W}val') if style is not None else None,
                         p.find(f'{W}pPr/{W}numPr') is not None, bold))
         return out
-    got = saved(path, lambda f: (lambda ps: ps if any(t == 'plain pasted' for t, *_ in ps) else None)(paras(f)),
+    got = saved(path, lambda f: (lambda ps: ps if any(t == '**plain** pasted' for t, *_ in ps) else None)(paras(f)),
                 'pasted paragraphs')
     by_text = {t: rest for t, *rest in got}
     assert (by_text.get('Pasted heading') or [''])[0].startswith('Heading'), by_text.get('Pasted heading')
     assert by_text.get('item one', [None, False])[1] and by_text.get('item two', [None, False])[1], 'list items'
-    assert not by_text['plain pasted'][2], 'Ctrl+Shift+V kept bold'
-    assert not any('**' in t or t.startswith('## ') for t in by_text), 'Markdown syntax left in the text'
+    assert not by_text['**plain** pasted'][2], 'Ctrl+Shift+V made bold'
+    assert not any('**' in t or t.startswith('## ') for t in by_text if t != '**plain** pasted'), 'Markdown syntax left in the text'
     shot('docx-paste-after')
 
 
@@ -402,6 +403,78 @@ def test_docx_markdown_paste_picture_and_math():
     shot('docx-paste-picture-math')
 
 
+def test_xlsx_protected_range():
+    """Data › Protected sheets and ranges: protect the selection; typing there shows "Heads up!", OK saves the edit."""
+    path = f'{RUN}/libreoffice-budget.xlsx'
+    open_file(path, 'doc-works-xlsx-view')
+    select_range('H40:H41')
+    menu_path('Data', 'Protected sheets and ranges…')
+    type_into('document.querySelector(\'.modal input[aria-label="New description"]\')', 'Locked totals')
+    click_el(by_text('.modal button', 'Add'))
+    desk('key', 'Escape')
+    select_range('H40')
+    desk('type', '--', '42')
+    desk('key', 'Return')
+    wait(lambda: ev('[...document.querySelectorAll(".modal-title")].some(t => t.textContent === "Heads up!") ? 1 : 0'), 'warning')
+    shot('xlsx-protected-warning')
+    click_el(by_text('.modal button', 'OK'))
+
+    def protected(file):
+        z = zipfile.ZipFile(file)
+        xml = z.read('xl/worksheets/sheet1.xml').decode()
+        return 'name="Locked totals"' in xml and 'sqref="H40:H41"' in xml and re.search(r'<c r="H40"[^>]*>(<f>[^<]*</f>)?<v>42</v>', xml)
+    saved(path, protected, 'H40 = 42 and the protected range')
+
+
+def test_xlsx_named_function():
+    """Data › Named functions: create SQUARE(x) in the form, use it in a cell; saved as an Excel LAMBDA name."""
+    path = f'{RUN}/libreoffice-budget.xlsx'
+    open_file(path, 'doc-works-xlsx-view')
+    menu_path('Data', 'Named functions…')
+    click_el(by_text('.modal button', 'Add new function'))
+    type_into(setting_input('Function name'), 'SQUARE')
+    type_into(setting_input('Argument placeholders'), 'x')
+    type_into(setting_input('Formula definition'), '=x*x')
+    click_el(by_text('.modal button', 'Create'))
+    desk('key', 'Escape')
+    select_range('H42')
+    desk('type', '--', '=SQUARE(7)')
+    desk('key', 'Return')
+
+    def used(file):
+        z = zipfile.ZipFile(file)
+        book = z.read('xl/workbook.xml').decode()
+        sheet = z.read('xl/worksheets/sheet1.xml').decode()
+        return ('<definedName name="SQUARE">_xlfn.LAMBDA(_xlpm.x,_xlpm.x*_xlpm.x)</definedName>' in book
+                and re.search(r'<c r="H42"[^>]*><f>SQUARE\(7\)</f><v>49</v>', sheet))
+    saved(path, used, 'SQUARE defined and H42 = 49')
+
+
+def test_xlsx_slicer():
+    """Data › Add a slicer on a plain range: Make table, then a click on "West" filters the table; saved as Excel's slicer."""
+    path = f'{RUN}/libreoffice-budget.xlsx'
+    open_file(path, 'doc-works-xlsx-view')
+    sheet_table(path, [['Region', 'Sales'], ['East', '1'], ['West', '2'], ['East', '3']], 9)
+    select_range('K11')
+    menu_path('Data', 'Add a slicer')
+    click_el(by_text('.modal button', 'Make table'))
+    click_el(by_text('.workspace-leaf.mod-active .xlsx-slicer-item', 'West'), 'slicer item West')
+    wait(lambda: ev('[...document.querySelectorAll(".workspace-leaf.mod-active .xlsx-slicer-item.is-selected")].map(b => b.textContent).join()') == 'West', 'West chosen')
+    shot('xlsx-slicer')
+
+    def slicer(file):
+        z = zipfile.ZipFile(file)
+        names = z.namelist()
+        tables = [n for n in names if n.startswith('xl/tables/') and n.endswith('.xml')]
+        if not tables or not any(n.startswith('xl/slicerCaches/') for n in names) or not any(n.startswith('xl/slicers/') for n in names):
+            return None
+        table = z.read(tables[0]).decode()
+        sheet = z.read('xl/worksheets/sheet1.xml').decode()
+        return ('<filter val="West"/>' in table and 'ref="K10:L13"' in table
+                and re.search(r'<row r="11"[^>]*hidden="1"', sheet) and re.search(r'<row r="13"[^>]*hidden="1"', sheet))
+    saved(path, slicer, 'table filtered to West with a slicer')
+
+
 def test_xlsx_pivot_filter():
     """Insert a pivot table from a range, add a filter in its editor: a report filter above the table, saved."""
     path = f'{RUN}/gui-pivot.xlsx'
@@ -463,6 +536,249 @@ def test_xlsx_chart_in_note_embed():
         return [r.width, r.height, r.right <= g.right + 1 && r.bottom <= g.bottom + 1]; })()"""), 'the chart drawn in the embed', timeout=20)
     assert found[0] > 100 and found[1] > 100 and found[2], f'chart box {found}: too small or outside the embedded grid'
     shot('embed-chart')
+
+
+def menu_path(menu, *titles):
+    """Open a menu in the active editor's menu row and click through its items, as a user."""
+    click_el(by_text('.workspace-leaf.mod-active .dw-menu-btn', menu), f'menu {menu}')
+    for title in titles:
+        click_el(by_text('.menu .menu-item-title', title), f'menu item {title}')
+
+
+def setting_input(name):
+    """The input of the dialog setting called `name`."""
+    return (f'[...document.querySelectorAll(".modal .setting-item")].find(s => s.querySelector(".setting-item-name")'
+            f'?.textContent === {json.dumps(name)})?.querySelector("input, textarea, select")')
+
+
+def type_into(js, text):
+    click_el(js)
+    desk('key', 'Ctrl+a')
+    desk('type', '--', text)
+
+
+def body_of(file):
+    return ET.fromstring(zipfile.ZipFile(file).read('word/document.xml'))
+
+
+def caret_after(text):
+    """Click at the end of the paragraph holding `text` and move to its end."""
+    x, y, right, _ = ev(f'''(() => {{ const p = [...document.querySelectorAll(".workspace-leaf.mod-active .ProseMirror p")]
+        .find(p => p.textContent.includes({json.dumps(text)})); const r = p.getBoundingClientRect();
+        return [r.x, r.y + r.height/2, r.right - 4, r.y]; }})()''')
+    click(right, y)
+    desk('key', 'End')
+
+
+def test_menu_search_alt_slash():
+    """Alt+/ focuses Google's "Menus" box; typing and Enter run the item (Insert › Break › Page break)."""
+    path = f'{RUN}/sample.docx'
+    open_file(path, 'doc-works-docx-view')
+    count = lambda f: sum(1 for br in body_of(f).iter(f'{W}br') if br.get(f'{W}type') == 'page')
+    before = count(VAULT / path)
+    caret_after('See example page')
+    desk('key', 'Alt+slash')
+    wait(lambda: ev('document.activeElement?.closest(".dw-menu-search") ? 1 : 0'), 'menu search focused')
+    desk('type', '--', 'page break')
+    wait(lambda: ev('document.querySelector(".dw-menu-search-results .is-selected .dw-menu-search-title")?.textContent') == 'Page break',
+         'Page break first')
+    shot('menu-search')
+    desk('key', 'Return')
+    saved(path, lambda f: count(f) == before + 1, 'one more page break')
+    assert ev('document.activeElement?.closest(".ProseMirror") ? 1 : 0'), 'focus back in the document'
+
+
+def test_docx_smart_chip_from_at():
+    """Typing @ at a word start opens the chip menu; Today becomes a Word date picker, the @ gone."""
+    path = f'{RUN}/sample.docx'
+    open_file(path, 'doc-works-docx-view')
+    caret_after('after tab')
+    desk('type', '--', ' due @')
+    click_el(by_text('.menu .menu-item-title', 'Today'), 'chip menu')
+    today = time.strftime('%Y-%m-%d')
+
+    def chip(file):
+        for sdt in body_of(file).iter(f'{W}sdt'):
+            date = sdt.find(f'{W}sdtPr/{W}date')
+            if date is not None and date.get(f'{W}fullDate', '').startswith(today):
+                return sdt
+        return None
+    saved(path, chip, "today's date chip")
+    text = ''.join(t.text or '' for p in body_of(VAULT / path).iter(f'{W}p') for t in p.iter(f'{W}t') if 'after tab' in ''.join(x.text or '' for x in p.iter(f'{W}t')))
+    assert '@' not in text, text
+    shot('docx-chip')
+
+
+def test_docx_building_block():
+    """@ on an empty line, Review tracker: a table below with a status dropdown; a click on it picks "Approved"."""
+    path = f'{RUN}/sample.docx'
+    open_file(path, 'doc-works-docx-view')
+    caret_after('after tab')
+    desk('key', 'Return')
+    desk('type', '--', '@')
+    click_el(by_text('.menu .menu-item-title', 'Review tracker'), 'building block in the @ menu')
+    desk('type', '--', 'Ada')
+    click_el('document.querySelector(".workspace-leaf.mod-active .ProseMirror td .docx-chip-dropdown")', 'status chip')
+    click_el(by_text('.menu .menu-item-title', 'Approved'), 'status choice')
+
+    def tracker(file):
+        tbl = next((t for t in body_of(file).iter(f'{W}tbl')
+                    if [''.join(x.text or '' for x in c.iter(f'{W}t')) for c in t.find(f'{W}tr').iter(f'{W}tc')] == ['Reviewer', 'Status', 'Notes']), None)
+        if tbl is None:
+            return None
+        row = [''.join(x.text or '' for x in c.iter(f'{W}t')) for c in tbl.findall(f'{W}tr')[1].iter(f'{W}tc')]
+        return row if row[:2] == ['Ada', 'Approved'] else None
+    saved(path, tracker, 'tracker row "Ada | Approved"')
+    text = [''.join(t.text or '' for t in p.iter(f'{W}t')) for p in body_of(VAULT / path).find(f'{W}body').findall(f'{W}p')]
+    assert '@' not in ''.join(text), text
+    shot('docx-building-block')
+
+
+def test_docx_citation():
+    """Tools › Citations: add a source with the keyboard, cite it, insert the bibliography."""
+    path = f'{RUN}/sample.docx'
+    open_file(path, 'doc-works-docx-view')
+    caret_after('after tab')
+    menu_path('Tools', 'Citations')
+    click_el(by_text('.modal button', 'Add citation source'))
+    type_into(setting_input('Contributors'), 'Ann Smith')
+    type_into(setting_input('Title'), 'The Long Road')
+    type_into(setting_input('Year'), '2020')
+    click_el(by_text('.modal button', 'Add source'))
+    wait(lambda: ev('[...document.querySelectorAll(".modal .setting-item-name")].some(e => e.textContent === "The Long Road")'), 'source listed')
+    shot('citations-dialog')
+    click_el(by_text('.modal button', 'Cite'))
+    menu_path('Tools', 'Citations')
+    click_el(by_text('.modal button', 'Insert bibliography'))
+
+    def check(file):
+        z = zipfile.ZipFile(file)
+        xml = z.read('word/document.xml').decode()
+        sources = [n for n in z.namelist() if n.startswith('customXml/item') and 'Props' not in n]
+        return ('CITATION Smi20' in xml and '(Smith, 2020)' in xml and 'BIBLIOGRAPHY' in xml and 'References' in xml
+                and any(b'The Long Road' in z.read(n) for n in sources))
+    saved(path, check, 'citation, bibliography and source part')
+    shot('docx-citation')
+
+
+def test_docx_compare_documents():
+    """Tools › Compare documents makes "Comparison of sample and other.docx" with tracked changes and opens it."""
+    other = VAULT / RUN / 'other.docx'
+    with zipfile.ZipFile(VAULT / RUN / 'sample.docx') as src, zipfile.ZipFile(other, 'w', zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == 'word/document.xml':
+                data = data.replace(b'Before break', b'Before the big break')
+            dst.writestr(item, data)
+    indexed(f'{RUN}/other.docx')
+    open_file(f'{RUN}/sample.docx', 'doc-works-docx-view')
+    menu_path('Tools', 'Compare documents')
+    click_el(by_text('.modal button', 'Choose…'))
+    wait(lambda: ev('document.activeElement?.matches(".prompt-input") ? 1 : 0'), 'file picker')
+    desk('type', '--', 'gui other.docx')
+    desk('wait-idle')
+    desk('key', 'Return')
+    click_el(by_text('.modal button', 'Compare'))
+    result = f'{RUN}/Comparison of sample and other.docx'
+    wait(lambda: ev('app.workspace.getMostRecentLeaf()?.view.file?.path') == result, 'comparison opened', timeout=30)
+
+    def changes(file):
+        body = body_of(file)
+        ins = [''.join(t.text or '' for t in e.iter(f'{W}t')) for e in body.iter(f'{W}ins')]
+        return 'the big ' in ''.join(ins) or 'the big' in ''.join(ins)
+    saved(result, changes, 'inserted "the big"')
+    shot('docx-compare')
+
+
+def test_docx_line_numbers():
+    """Tools › Line numbers: numbers drawn in the left margin beside each line, restarting on each page; saved as w:lnNumType."""
+    path = f'{RUN}/sample.docx'
+    open_file(path, 'doc-works-docx-view')
+    menu_path('Tools', 'Line numbers')
+    click_el('[...document.querySelectorAll(".modal .setting-item")].find(s => s.querySelector(".setting-item-name")'
+             '?.textContent === "Show line numbers")?.querySelector(".checkbox-container")', 'Show line numbers toggle')
+    click_el(by_text('.modal button', 'Apply'))
+
+    def numbering(file):
+        sect = [e for e in body_of(file).find(f'{W}body') if e.tag == f'{W}sectPr'][-1]
+        ln = sect.find(f'{W}lnNumType')
+        return ln is not None and ln.get(f'{W}restart') == 'newPage'
+    saved(path, numbering, 'w:lnNumType restart="newPage"')
+    got = wait(lambda: ev('''(() => { const pm = document.querySelector(".workspace-leaf.mod-active .ProseMirror");
+        const nums = [...pm.querySelectorAll(".docx-line-number")].map(n => { const r = n.getBoundingClientRect(); return [n.textContent, r.right, r.top + r.height/2]; });
+        const paras = [...pm.querySelectorAll("p, h1, h2, h3, h4, h5, h6")].filter(p => !p.closest(".docx-page-gap, .docx-page-first, .docx-page-last, td")).map(p => { const r = p.getBoundingClientRect(); return [r.left, r.top, r.bottom]; });
+        const pages = pm.querySelectorAll(".docx-page-space").length + 1;
+        return nums.length ? { nums, paras, pages } : null; })()'''), 'line numbers drawn')
+    nums, paras, pages = got['nums'], got['paras'], got['pages']
+    assert nums[0][0] == '1', nums[:3]
+    assert sum(1 for n in nums if n[0] == '1') == pages, (pages, [n[0] for n in nums])
+    for label, right, middle in nums:
+        beside = [p for p in paras if p[1] <= middle <= p[2]]
+        assert beside, f'number {label} beside no paragraph'
+        assert right <= beside[0][0] - 20, f'number {label} not in the left margin ({right} vs text at {beside[0][0]})'
+    shot('docx-line-numbers')
+
+
+def test_pptx_laser_and_pen():
+    """In the slideshow: L shows the laser dot at the mouse, Ctrl+P draws ink with a drag, E erases it, Esc twice ends."""
+    open_file(f'{RUN}/sample.pptx', 'doc-works-pptx-view')
+    click_el(by_text('.workspace-leaf.mod-active button', '▶ Present'), 'Present button')
+    wait(lambda: ev('document.querySelector(".dw-show .dw-show-slide .pptx-slide") ? 1 : 0'), 'slideshow open')
+    desk('wait-idle')
+    box = ev('(() => { const r = document.querySelector(".dw-show .dw-show-slide").getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()')
+    x, y, w, h = box
+    desk('key', 'l')
+    desk('move', str(int(x + w * 0.3)), str(int(y + h * 0.4)))
+    desk('move', str(int(x + w * 0.3) + 5), str(int(y + h * 0.4) + 5))
+    dot = wait(lambda: ev('''(() => { const d = document.querySelector(".dw-show.is-laser .dw-show-laser"); if (!d) return null;
+        const r = d.getBoundingClientRect(); return r.width ? [r.x + r.width/2, r.y + r.height/2] : null; })()'''), 'laser dot')
+    assert abs(dot[0] - (x + w * 0.3 + 5)) < 4 and abs(dot[1] - (y + h * 0.4 + 5)) < 4, (dot, box)
+    shot('pptx-laser')
+    desk('key', 'Ctrl+p')
+    wait(lambda: ev('document.querySelector(".dw-show.is-pen") ? 1 : 0'), 'pen on (not the command palette)')
+    assert not ev('document.querySelector(".prompt") ? 1 : 0'), 'Ctrl+P opened the command palette'
+    desk('drag', str(int(x + w * 0.2)), str(int(y + h * 0.2)), str(int(x + w * 0.7)), str(int(y + h * 0.6)))
+    d = wait(lambda: ev('document.querySelector(".dw-show-ink path")?.getAttribute("d") ?? null'), 'ink stroke')
+    assert d.count('L') >= 1, d
+    assert ev('document.querySelector(".dw-show .dw-show-slide") ? 1 : 0'), 'show closed'
+    count = ev('document.querySelectorAll(".dw-show-ink path").length')
+    assert count == 1, count
+    shot('pptx-pen')
+    desk('key', 'e')
+    wait(lambda: ev('document.querySelector(".dw-show-ink") ? 0 : 1'), 'ink erased')
+    desk('key', 'Escape')
+    wait(lambda: ev('document.querySelector(".dw-show.is-pen") ? 0 : 1'), 'pen put down')
+    assert ev('document.querySelector(".dw-show") ? 1 : 0'), 'first Escape ended the show'
+    desk('key', 'Escape')
+    wait(lambda: ev('document.querySelector(".dw-show") ? 0 : 1'), 'show ended')
+
+
+def test_pptx_equation():
+    """Insert › Equation types LaTeX into the dialog; a double-click edits it; both saved as PowerPoint math."""
+    path = f'{RUN}/sample.pptx'
+    open_file(path, 'doc-works-pptx-view')
+    menu_path('Insert', 'Equation')
+    wait(lambda: ev('document.activeElement?.matches(".docx-equation-input") ? 1 : 0'), 'equation input')
+    desk('type', '--', 'x^2+1')
+    click_el(by_text('.modal button', 'Insert'))
+    A14 = '{http://schemas.microsoft.com/office/drawing/2010/main}'
+    M = '{http://schemas.openxmlformats.org/officeDocument/2006/math}'
+
+    def maths(file):
+        slide = ET.fromstring(zipfile.ZipFile(file).read('ppt/slides/slide1.xml'))
+        return [''.join(t.text or '' for t in m.iter(f'{M}t')) for m in slide.iter(f'{A14}m')]
+    saved(path, lambda f: maths(f) == ['x2+1'], 'equation x^2+1')
+    wait(lambda: ev('document.querySelector(".workspace-leaf.mod-active .pptx-stage .pptx-math math") ? 1 : 0'), 'math drawn')
+    x, y = at('document.querySelector(".workspace-leaf.mod-active .pptx-stage .pptx-math")', 'drawn equation')
+    desk('move', str(round(x)), str(round(y)))
+    desk('click', 'left')
+    desk('click', 'left')
+    wait(lambda: ev('document.activeElement?.matches(".docx-equation-input") ? 1 : 0'), 'edit dialog')
+    desk('key', 'Ctrl+a')
+    desk('type', '--', 'y_1')
+    click_el(by_text('.modal button', 'Save'))
+    saved(path, lambda f: maths(f) == ['y1'], 'equation y_1')
+    shot('pptx-equation')
 
 
 # ---------------------------------------------------------------- runner

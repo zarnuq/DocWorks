@@ -33,6 +33,26 @@ export interface EvalContext {
   value(sheet: Sheet, row: number, col: number): Scalar;
   /** A defined name's formula, as seen from `sheet`. */
   name(name: string, sheet: Sheet): Node | null;
+  /** Inside a named function (a name defined as LAMBDA): its parameters' values. */
+  locals?: Map<string, Value>;
+  /** How many named functions deep the evaluation is (recursion stops at MAX_DEPTH). */
+  depth?: number;
+}
+
+const MAX_DEPTH = 100;
+/** A LAMBDA parameter as written in the file (_xlpm.x) or typed (x). */
+export const paramKey = (name: string) => name.replace(/^_xlpm\./i, "").toLowerCase();
+const isLambda = (n: Node | null): n is Extract<Node, { type: "call" }> => n?.type === "call" && n.name === "LAMBDA";
+
+/** Call a named function: its LAMBDA's body with the parameters bound to the arguments (evaluated by the caller). */
+function applyLambda(def: Extract<Node, { type: "call" }>, args: Node[], ctx: EvalContext): Value {
+  const params = def.args.slice(0, -1);
+  const body = def.args[def.args.length - 1];
+  if (!body || params.some((p) => p.type !== "name") || args.length !== params.length) return err("#VALUE!");
+  if ((ctx.depth ?? 0) >= MAX_DEPTH) return err("#NUM!");
+  const locals = new Map<string, Value>();
+  params.forEach((p, i) => locals.set(paramKey((p as { name: string }).name), evalNode(args[i], ctx)));
+  return evalNode(body, { ...ctx, locals, depth: (ctx.depth ?? 0) + 1 });
 }
 
 const err = (code: string): ErrorValue => ({ error: code });
@@ -209,7 +229,11 @@ function evalInner(node: Node, ctx: EvalContext): Value {
       return { kind: "range", sheet, rect: node.range };
     }
     case "name": {
+      const local = ctx.locals?.get(paramKey(node.name));
+      if (local !== undefined) return local;
       const def = ctx.name(node.name, ctx.sheet);
+      // A named function used without calling it.
+      if (isLambda(def)) return err("#CALC!");
       return evalInner(def ?? tableReference(ctx.wb, ctx.sheet, ctx.row, ctx.col, node.name), ctx);
     }
     case "un": {
@@ -234,7 +258,11 @@ function evalInner(node: Node, ctx: EvalContext): Value {
     }
     case "call": {
       const fn = FUNCTIONS[node.name];
-      if (!fn) throw new Unsupported(node.name);
+      if (!fn) {
+        const def = ctx.name(node.name, ctx.sheet);
+        if (isLambda(def)) return applyLambda(def, node.args, ctx);
+        throw new Unsupported(node.name);
+      }
       const args = node.args.map((a) => () => evalInner(a, ctx));
       return fn(args, ctx, node.args);
     }
@@ -456,6 +484,8 @@ function regex(pattern: string, flags = ""): RegExp {
 }
 
 const FUNCTIONS: Record<string, Fn> = {
+  // A LAMBDA on its own in a cell is a function, not a value (named functions call theirs).
+  LAMBDA: () => err("#CALC!"),
   // Google Sheets: work the argument out over whole ranges (arithmetic and lifted functions go element by element).
   ARRAYFORMULA: (a, c, nodes) => (arity(a, 1), evalInner(nodes[0], { ...c, arrays: true })),
   // Google's export of its own functions: IFERROR(__xludf.DUMMYFUNCTION("REGEXMATCH(...)"), cached result).
@@ -907,6 +937,9 @@ function lookup(a: Thunk[], c: EvalContext, horizontal: boolean): Value {
   if (i < 0) return err("#N/A");
   return (horizontal ? table[n - 1][i] : table[i][n - 1]) ?? null;
 }
+
+/** Whether `name` is a function this evaluator knows (named functions can't take one of these names). */
+export const isBuiltinFunction = (name: string) => Object.prototype.hasOwnProperty.call(FUNCTIONS, name.toUpperCase());
 
 /** Evaluate a parsed formula to the value a cell shows (single values; ranges show their top-left cell). */
 export function evaluate(node: Node, ctx: EvalContext): Scalar {

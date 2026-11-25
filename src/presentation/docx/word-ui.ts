@@ -33,7 +33,7 @@ export const WORD_COMMAND_IDS = [
   "PageBreakInsertWord", "TableInsertGallery", "PictureInsertFromFile", "ShapesInsertGallery", "ChartInsert", "HyperlinkInsert",
   "ReviewNewComment", "HeaderInsertGallery", "FooterInsertGallery", "TextBoxInsert", "HorizontalLineInsert", "EquationInsert", "SymbolInsert",
   "WatermarkGallery",
-  "TableColumnsGallery", "BreaksGallery", "ColumnBreakInsert", "SectionBreakNextPage", "SectionBreakContinuous", "TextWrapGallery",
+  "TableColumnsGallery", "LineNumbersMenu", "BreaksGallery", "ColumnBreakInsert", "SectionBreakNextPage", "SectionBreakContinuous", "TextWrapGallery",
   "TableOfContentsInsert", "TableOfContentsUpdate", "FootnoteInsert", "CreateNoteFromSelection", "CopyLinkToHeading", "CompanionNote", "LinkedFrom",
   "WordCount", "ReviewDeleteComment", "ShowComments", "ReviewTrackChanges", "ReviewingPane", "ReviewAcceptAll", "ReviewRejectAll",
   "ReviewCompareMenu", "VersionHistory",
@@ -105,7 +105,7 @@ export function wordTabs(c: WordControls): Tab[] {
       { id: "pageBackground", label: "Page Background", icon: "droplet", controls: [L("WatermarkGallery")] },
     ] },
     { id: "layout", label: "Layout", groups: [
-      { id: "pageSetup", label: "Page Setup", icon: "file-text", controls: [L("TableColumnsGallery"), col(S("BreaksGallery"))] },
+      { id: "pageSetup", label: "Page Setup", icon: "file-text", controls: [L("TableColumnsGallery"), col(S("BreaksGallery"), S("LineNumbersMenu"))] },
       { id: "paragraph", label: "Paragraph", icon: "pilcrow", launcher: "ParagraphDialog", controls: [L("ParagraphDialog")] },
       { id: "arrange", label: "Arrange", icon: "layers", controls: [L("TextWrapGallery")] },
     ] },

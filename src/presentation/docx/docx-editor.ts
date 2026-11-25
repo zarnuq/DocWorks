@@ -14,8 +14,10 @@ import { DocxStyles, lineHeight } from "../../domain/docx/docx-styles";
 import { fontStack } from "../../core/utils/fonts";
 import { letterSpacing, textWidthEm, textMetricsRevision } from "../pptx/text-fit";
 import { pageAt } from "./docx-pages";
-import { Columns, DEFAULT_SECTPR, ONE_COLUMN, regroup, sections, sectionType, withColumns, withType } from "../../domain/docx/sections";
+import { Columns, DEFAULT_SECTPR, LineNumbers, ONE_COLUMN, regroup, sections, sectionType, withColumns, withLineNumbers, withType } from "../../domain/docx/sections";
+import { BuildingBlock, buildingBlock } from "../../domain/docx/building-blocks";
 import { latexToOmml, ommlToLatex } from "../../domain/docx/math";
+import { bibliographyEntry, bibliographyTitle, citationText, sortSources, type CitationStyle, type Source } from "../../domain/docx/citations";
 import type { ListKind } from "../../infrastructure/docx/docx-document";
 import { findPlugin } from "./docx-find";
 import { CellSelection, cellBefore, cellSelectionPlugin } from "./cell-selection";
@@ -219,6 +221,38 @@ function insertBlockAfter(node: PMNode, enter = false): Command {
   };
 }
 
+/**
+ * Insert blocks below the caret's block, or in place of it when it's an empty paragraph (`at`: a typed @ that asked for
+ * them, removed first). The caret goes to the end of the first block's text.
+ */
+function insertBlocks(nodes: PMNode[], at?: number): Command {
+  return (state, dispatch) => {
+    const tr = state.tr;
+    if (at !== undefined) tr.delete(at, at + 1);
+    const $from = tr.doc.resolve(at ?? state.selection.from);
+    const depth = $from.depth > 1 && $from.node(1).type === schema.nodes.columns ? 2 : 1;
+    if ($from.depth < depth) return false;
+    if (!dispatch) return true;
+    const block = $from.node(depth);
+    const replace = block.type === schema.nodes.paragraph && block.content.size === 0 && !block.attrs.sectPr;
+    const from = replace ? $from.before(depth) : $from.after(depth);
+    tr.replaceWith(from, replace ? $from.after(depth) : from, nodes);
+    // In a table, the first empty cell (below its headers); otherwise the end of the first block's text.
+    let caret = from + nodes[0].nodeSize - 1;
+    if (nodes[0].type === schema.nodes.table) {
+      let found = -1;
+      nodes[0].descendants((n, pos) => {
+        if (found < 0 && n.type === schema.nodes.paragraph && n.content.size === 0) found = from + 1 + pos + 1;
+        return found < 0;
+      });
+      if (found >= 0) caret = found;
+    }
+    tr.setSelection(TextSelection.near(tr.doc.resolve(caret), -1));
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
+
 /** Start and end of the link mark run around `pos` inside its paragraph. */
 function linkExtent(state: EditorState, pos: number): { from: number; to: number } | null {
   const $pos = state.doc.resolve(pos);
@@ -321,6 +355,21 @@ function tocNode(state: EditorState): PMNode {
     }),
     para(null, [run(`<w:fldChar w:fldCharType="end"/>`)]),
   ]);
+}
+
+/** The list of sources: Word's BIBLIOGRAPHY field in a Bibliographies content control, titled, sorted, hanging indents. */
+function bibliographyNode(sources: Source[], style: CitationStyle, xml?: string): PMNode {
+  const run = (inner: string) => opaqueXml(`<w:r xmlns:w="${NS_W}">${inner}</w:r>`);
+  const shell = xml ?? `<w:sdt xmlns:w="${NS_W}"><w:sdtPr><w:id w:val="${1 + Math.floor(Math.random() * 0x7ffffffe)}"/><w:docPartObj><w:docPartGallery w:val="Bibliographies"/><w:docPartUnique/></w:docPartObj></w:sdtPr></w:sdt>`;
+  const sorted = sortSources(sources);
+  const entries = sorted.map((source, i) => {
+    const text = bibliographyEntry(source, style).map((seg) => schema.text(seg.text, seg.italic ? [schema.marks.italic.create()] : []));
+    const begin = i === 0 ? [run(`<w:fldChar w:fldCharType="begin"/>`), run(`<w:instrText xml:space="preserve"> BIBLIOGRAPHY </w:instrText>`), run(`<w:fldChar w:fldCharType="separate"/>`)] : [];
+    const end = i === sorted.length - 1 ? [run(`<w:fldChar w:fldCharType="end"/>`)] : [];
+    // Half-inch hanging indent, as every style asks.
+    return schema.nodes.paragraph.create({ indent: 1, firstLine: -36 }, [...begin, ...text, ...end]);
+  });
+  return schema.nodes.sdt.create({ kind: "bibliography", xml: shell }, [schema.nodes.paragraph.create({ style: "Heading1" }, schema.text(bibliographyTitle(style))), ...entries]);
 }
 
 // -----------------------------------------------------------------------------
@@ -442,6 +491,22 @@ function insertSectionBreak(type: "nextPage" | "continuous"): Command {
   };
 }
 
+/** Tools › Line numbers, as in Google Docs: every section gets `ln` (null = none). */
+function setLineNumbers(ln: LineNumbers | null): Command {
+  return (state, dispatch) => {
+    if (!dispatch) return true;
+    const tr = state.tr;
+    state.doc.descendants((node, pos) => {
+      if (node.type === schema.nodes.paragraph && node.attrs.sectPr) tr.setNodeMarkup(pos, undefined, { ...node.attrs, sectPr: withLineNumbers(node.attrs.sectPr as string, ln) });
+      return node.type !== schema.nodes.paragraph;
+    });
+    const final = state.doc.attrs.sectPr as string | null;
+    if (final || ln) tr.setDocAttribute("sectPr", withLineNumbers(final ?? DEFAULT_SECTPR, ln));
+    dispatch(tr);
+    return true;
+  };
+}
+
 /** Split copies of a paragraph that ends a section both carry its w:sectPr; only the last one ends the section. */
 function sectionDedupe(): Plugin {
   return new Plugin({
@@ -480,7 +545,94 @@ export interface PaintFormat {
   para: Record<string, unknown> | null;
 }
 
+/** Where the @ just typed sits when it starts a word (Google's smart chip menu); null otherwise. */
+export function atTrigger(state: EditorState): number | null {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.parentOffset < 1) return null;
+  const before = $from.parent.textBetween(Math.max(0, $from.parentOffset - 2), $from.parentOffset, undefined, "\ufffc");
+  if (!before.endsWith("@") || (before.length === 2 && !/\s/.test(before[0]))) return null;
+  return $from.pos - 1;
+}
+
+/** Marks for content inserted at the caret: its formatting, without links, fields or tracked-change marks. */
+function caretMarks(state: EditorState): readonly Mark[] {
+  const marks = state.storedMarks ?? state.selection.$from.marks();
+  return marks.filter((m) => ![schema.marks.link, schema.marks.field, schema.marks.insertion].includes(m.type));
+}
+
+/** Insert `node` at the caret, replacing the @ at `at` when it is still right before the caret. */
+function insertAtCaret(state: EditorState, node: PMNode, at?: number): Transaction {
+  const tr = state.tr;
+  const { from } = state.selection;
+  if (at !== undefined && at + 1 === from && state.doc.textBetween(at, from) === "@") tr.delete(at, from);
+  tr.replaceSelectionWith(node, false);
+  return tr;
+}
+
 export const cmd = {
+  /** A smart chip at the caret (replacing the typed @ at `at`). */
+  insertChip:
+    (attrs: object, at?: number): Command =>
+    (state, dispatch) => {
+      dispatch?.(insertAtCaret(state, schema.nodes.chip.create(attrs, null, caretMarks(state)), at).scrollIntoView());
+      return true;
+    },
+
+  /** Insert › Building blocks (`at`: the @ typed to ask for it). */
+  insertBuildingBlock: (kind: BuildingBlock, ctx: EditorContext, today: string, at?: number): Command =>
+    // Only meeting notes have lists: don't add list definitions the other blocks don't use.
+    insertBlocks(buildingBlock(kind, kind === "meeting" ? { taskList: ctx.ensureList("task"), bulletList: ctx.ensureList("bullet"), today } : { taskList: "", bulletList: "", today }), at),
+
+  /** The list of `sources` after the caret's paragraph (Google's "Insert bibliography"). */
+  insertBibliography:
+    (sources: Source[], style: CitationStyle): Command =>
+    (state, dispatch) => (sources.length ? insertBlockAfter(bibliographyNode(sources, style))(state, dispatch) : false),
+
+  /** Every citation of a known source and every bibliography rewritten for `style` and the sources as they are now. */
+  restyleCitations:
+    (sources: Source[], style: CitationStyle): Command =>
+    (state, dispatch) => {
+      const byTag = new Map(sources.map((s) => [s.tag, s]));
+      const tr = state.tr;
+      state.doc.descendants((node, pos) => {
+        if (node.type === schema.nodes.chip && node.attrs.kind === "citation") {
+          const source = byTag.get(node.attrs.tag as string);
+          const text = source ? citationText(source, style) : null;
+          if (text !== null && text !== node.attrs.text) tr.setNodeMarkup(tr.mapping.map(pos), undefined, { ...node.attrs, text });
+          return false;
+        }
+        if (node.type === schema.nodes.sdt && node.attrs.kind === "bibliography") {
+          const next = sources.length ? bibliographyNode(sources, style, node.attrs.xml as string) : null;
+          if (next && !next.content.eq(node.content)) tr.replaceWith(tr.mapping.map(pos), tr.mapping.map(pos + node.nodeSize), next);
+          return false;
+        }
+        return true;
+      });
+      if (!tr.docChanged) return false;
+      dispatch?.(tr);
+      return true;
+    },
+
+  /** Change the chip at `pos`. */
+  setChip:
+    (pos: number, attrs: object): Command =>
+    (state, dispatch) => {
+      const node = state.doc.nodeAt(pos);
+      if (node?.type !== schema.nodes.chip) return false;
+      dispatch?.(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs }));
+      return true;
+    },
+
+  /** `text` linked to `href` at the caret (Google's file and people chips), replacing the typed @ at `at`. */
+  insertLinkedText:
+    (text: string, href: string, at?: number): Command =>
+    (state, dispatch) => {
+      const link = schema.marks.link.create({ href, rId: null, anchor: null });
+      const tr = insertAtCaret(state, schema.text(text, [...caretMarks(state), link]), at);
+      dispatch?.(tr.setStoredMarks(caretMarks(state)).scrollIntoView());
+      return true;
+    },
+
   /** Google Docs' paint format, first click: the formatting at the cursor (or the selection's start). */
   copyFormat(state: EditorState): PaintFormat {
     const { $from, empty } = state.selection;
@@ -537,6 +689,7 @@ export const cmd = {
   setColumns,
   columnsAt,
   insertSectionBreak,
+  setLineNumbers,
   insertColumnBreak: ((state, dispatch) => {
     if (dispatch) dispatch(state.tr.replaceSelectionWith(opaqueXml(`<w:r xmlns:w="${NS_W}"><w:br w:type="column"/></w:r>`)).scrollIntoView());
     return true;

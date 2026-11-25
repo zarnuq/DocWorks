@@ -48,6 +48,98 @@
   user-select: none;
 }
 
+/* Google's "Menus" box (Alt+/), first in the toolbar row: search every menu item. */
+.dw-menu-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--size-2-2);
+  height: var(--input-height);
+  padding: 0 var(--size-4-3);
+  border-radius: var(--radius-l);
+  background: var(--background-primary);
+  color: var(--text-muted);
+}
+
+.dw-menu-search:focus-within {
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.dw-menu-search-icon {
+  display: flex;
+  --icon-size: var(--icon-s);
+}
+
+.dw-toolbar .dw-menu-search input {
+  width: 6.5em;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--font-ui-small);
+  transition: width 120ms ease;
+}
+
+.dw-toolbar .dw-menu-search input:focus {
+  width: 14em;
+  box-shadow: none;
+}
+
+.dw-menu-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* Narrow panes: just the magnifier until it's used. */
+.is-narrow .dw-toolbar .dw-menu-search input:not(:focus) {
+  width: 0;
+}
+
+.is-narrow .dw-menu-search {
+  padding: 0 var(--size-4-2);
+}
+
+.dw-menu-search-results {
+  position: fixed;
+  left: var(--dw-menu-search-left);
+  top: var(--dw-menu-search-top);
+  min-width: 320px;
+  max-width: min(480px, calc(100vw - 32px));
+  max-height: 60vh;
+  overflow-y: auto;
+  z-index: var(--layer-menu);
+}
+
+.dw-menu-search-item {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.dw-menu-search-item-icon {
+  display: flex;
+  flex: none;
+  width: var(--icon-s);
+  color: var(--text-muted);
+  --icon-size: var(--icon-s);
+}
+
+.dw-menu-search-title {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.dw-menu-search-path {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+.dw-menu-search-item.is-disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
 /* The right-most group (the document's editing mode) sits against the end area, as in Google Docs. */
 .dw-toolbar > .dw-push {
   margin-left: auto;
@@ -3724,4 +3816,205 @@ textarea.pptx-notes {
 .is-mobile.is-floating-nav .dw-root,
 .is-mobile.is-floating-nav .pptx-editor-root {
   padding-bottom: calc(var(--navbar-height) + var(--navbar-bottom-offset));
+}
+
+/* Smart chips (date pickers and dropdowns): Google's grey pill. */
+.docx-chip {
+  display: inline-block;
+  padding: 0 0.45em;
+  border-radius: 1em;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  line-height: 1.35;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.docx-chip:hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.docx-chip.ProseMirror-selectednode {
+  outline: 2px solid var(--interactive-accent);
+}
+
+.docx-chip-dropdown::after {
+  content: " ▾";
+  opacity: 0.6;
+}
+
+/* In-text citations read as text, as in Google Docs. */
+.docx-chip-citation {
+  padding: 0;
+  background: none;
+  cursor: text;
+}
+
+.docx-chip-citation:hover {
+  background: none;
+}
+
+/* Line numbers (page view): a zero-height layer at the top left of the text area, numbers right-aligned before the text. */
+.docx-line-numbers {
+  display: none;
+}
+
+.is-paged .docx-line-numbers {
+  display: block;
+  position: relative;
+  height: 0;
+  user-select: none;
+  pointer-events: none;
+}
+
+.docx-line-number {
+  position: absolute;
+  top: var(--docx-ln-top);
+  right: calc(100% - var(--docx-ln-end));
+  height: var(--docx-ln-height);
+  line-height: var(--docx-ln-height);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Slideshow laser pointer, pen and the tools bar that shows while the mouse moves. */
+.dw-show.is-pointing {
+  cursor: default;
+}
+
+.dw-show.is-pen,
+.dw-show.is-pen.is-pointing {
+  cursor: crosshair;
+}
+
+.dw-show.is-laser,
+.dw-show.is-laser.is-pointing {
+  cursor: none;
+}
+
+.dw-show-laser {
+  display: none;
+  position: fixed;
+  z-index: 2;
+  left: var(--dw-laser-x, -100px);
+  top: var(--dw-laser-y, -100px);
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: #ff2a2a;
+  box-shadow: 0 0 8px 3px rgba(255, 42, 42, 0.6);
+  pointer-events: none;
+}
+
+.dw-show.is-laser .dw-show-laser {
+  display: block;
+}
+
+.dw-show-ink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+  fill: none;
+  stroke: #e81123;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dw-show-tools {
+  position: fixed;
+  left: var(--size-4-4);
+  bottom: var(--size-4-4);
+  z-index: 3;
+  display: flex;
+  gap: var(--size-4-1);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.dw-show.is-pointing .dw-show-tools,
+.dw-show.is-presenter .dw-show-tools,
+.dw-show-tools:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dw-show-tools button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Table slicers: drawn in a chart box (moved and resized like one). */
+.xlsx-slicer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+  color: #202124;
+  font-size: 12px;
+}
+
+.xlsx-slicer-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.xlsx-slicer-caption {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.xlsx-slicer .xlsx-slicer-clear {
+  padding: 0 6px;
+  height: 20px;
+  box-shadow: none;
+  background: transparent;
+  color: #5f6368;
+  cursor: pointer;
+}
+
+.xlsx-slicer .xlsx-slicer-clear:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.xlsx-slicer-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.xlsx-slicer .xlsx-slicer-item {
+  flex-shrink: 0;
+  justify-content: flex-start;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #dadce0;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #5f6368;
+  box-shadow: none;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xlsx-slicer .xlsx-slicer-item.is-selected {
+  background: #d2e3fc;
+  border-color: #8ab4f8;
+  color: #202124;
 }

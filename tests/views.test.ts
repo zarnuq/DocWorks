@@ -1343,7 +1343,7 @@ describe("PptxView menus", () => {
     expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Find and replace"]);
     expect(view.contentEl.querySelector('.dw-toolbar [aria-label^="Insert link"]')).not.toBeNull();
     expect(menuTitles(view, "View")).toEqual(["Present", "Present from start", "Grid view", "Format panel", "Comments", "Linked from", "Zoom", "Light", "Dark"]);
-    expect(menuTitles(view, "Insert")).toEqual(["Text box", "Image", "Audio or video", "Shape", "Table", "Chart", "Link", "Field", "Special characters", "Comment", "New slide"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Text box", "Image", "Audio or video", "Shape", "Table", "Chart", "Link", "Field", "Special characters", "Equation", "Comment", "New slide"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Align", "Line spacing", "Character spacing", "Bulleted list", "Numbered list", "Clear formatting"]);
     expect(menuTitles(view, "Arrange")).toEqual(["Order", "Align", "Distribute", "Group", "Ungroup"]);
     const slide = menuTitles(view, "Slide");
@@ -1677,9 +1677,9 @@ describe("DocxView menus", () => {
     expect(menuTitles(view, "File")).toEqual(["Export…"]);
     expect(menuTitles(view, "Edit")).toEqual(["Undo", "Redo", "Cut", "Copy", "Paste", "Paste without formatting", "Select all", "Copy link to heading", "Create note from selection", "Delete", "Find and replace"]);
     expect(menuTitles(view, "View")).toEqual(["Editing", "Suggesting", "Page view", "Ruler", "Outline", "Review panel", "Linked from", "Zoom", "Light", "Dark"]);
-    expect(menuTitles(view, "Insert")).toEqual(["Image", "Table", "Drawing", "Chart", "Equation", "Special characters", "Horizontal line", "Break", "Footnote", "Comment", "Link", "Table of contents", "Header & footer", "Watermark"]);
+    expect(menuTitles(view, "Insert")).toEqual(["Image", "Table", "Drawing", "Chart", "Equation", "Special characters", "Horizontal line", "Break", "Footnote", "Comment", "Link", "Smart chips", "Building blocks", "Table of contents", "Header & footer", "Watermark"]);
     expect(menuTitles(view, "Format")).toEqual(["Text", "Paragraph style", "Align", "Line spacing", "Paragraph…", "Columns…", "Bulleted list", "Numbered list", "Clear formatting"]);
-    expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Word count", "Find and replace"]);
+    expect(menuTitles(view, "Tools")).toEqual(["Paint format", "Word count", "Line numbers", "Compare documents", "Citations", "Find and replace"]);
     await view.onUnloadFile(file);
   });
 

@@ -5,6 +5,7 @@ import { OoxmlPackage, parseXml, relsPathOf } from "../ooxml/ooxml-package";
 import { wVal } from "../../domain/docx/docx-reader";
 import { numberingLevel } from "../../domain/docx/docx-styles";
 import { deobfuscateFont } from "../fonts/odttf";
+import { BIB_NS, readSources, writeSources, type CitationStyle, type Source } from "../../domain/docx/citations";
 
 export type ListKind = "bullet" | "ordered" | "task";
 
@@ -348,6 +349,34 @@ export class DocxDocument extends OoxmlPackage {
     const variable = Array.from(vars.children).find(e => wVal(e, "name") === name) ?? vars.appendChild(vars.ownerDocument.createElementNS(NS.w, "w:docVar"));
     variable.setAttributeNS(NS.w, "w:name", name);
     variable.setAttributeNS(NS.w, "w:val", value);
+  }
+
+  /** Word's bibliography sources part: a customXml item of the main document whose root is b:Sources. */
+  private sourcesPath(): string | null {
+    return this.rels(this.mainPath).find((r) => r.type === "customXml" && this.xml(r.target)?.documentElement.namespaceURI === BIB_NS)?.target ?? null;
+  }
+
+  /** The citation style and sources Word's References tab shares. */
+  sources(): { style: CitationStyle; sources: Source[] } {
+    const path = this.sourcesPath();
+    return readSources(path ? this.xml(path) : null);
+  }
+
+  /** Store the sources (and style), creating Word's customXml item with its properties part when missing. */
+  setSources(style: CitationStyle, sources: Source[]): void {
+    let path = this.sourcesPath();
+    const xml = writeSources(path ? this.xml(path) : null, style, sources);
+    if (path) {
+      this.putXml(path, parseXml(xml)!);
+      return;
+    }
+    path = this.nextPartPath("customXml/item", ".xml");
+    const props = path.replace("item", "itemProps");
+    const guid = `{${crypto.randomUUID().toUpperCase()}}`;
+    this.putXml(path, parseXml(xml)!, "application/xml");
+    this.putXml(props, parseXml(`<ds:datastoreItem xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml" ds:itemID="${guid}"><ds:schemaRefs><ds:schemaRef ds:uri="${BIB_NS}"/></ds:schemaRefs></ds:datastoreItem>`)!, "application/vnd.openxmlformats-officedocument.customXmlProperties+xml");
+    this.addRel(path, "customXmlProps", props);
+    this.addRel(this.mainPath, "customXml", path);
   }
 
   /** A part related from the main document, created from `rootXml` if missing. */

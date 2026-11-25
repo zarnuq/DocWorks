@@ -175,7 +175,8 @@ function textBox(parent: HTMLElement, shape: ShapeModel, pxPerPt: number, scale:
   const phType = shape.placeholder ? (shape.el.getElementsByTagNameNS(shape.el.namespaceURI, "ph")[0]?.getAttribute("type") ?? "body") : null;
   if (phType && !NO_PROMPT.has(phType)) textEl.dataset.prompt = "";
   textEl.classList.toggle("is-empty", t.paras.every((p) => p.runs.length === 0));
-  if (opts.editable && !shape.inherited) {
+  // Equations are edited in the equation dialog: typing round them would lose the math.
+  if (opts.editable && !shape.inherited && !shape.equation) {
     textEl.contentEditable = "true";
     textEl.spellcheck = true;
   }

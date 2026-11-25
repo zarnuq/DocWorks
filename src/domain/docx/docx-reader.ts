@@ -2,6 +2,7 @@ import { Mark, Node as PMNode } from "prosemirror-model";
 import { NS, kid, EMU_PER_PX } from "../../core/utils/xml";
 import { regroup } from "./sections";
 import { placementOf } from "./drawing";
+import { chipAttrs } from "./chips";
 import { docxSchema as schema, Align, TabStop } from "./schema";
 
 export interface ReadContext {
@@ -246,7 +247,7 @@ class Reader {
 
   private sdt(el: Element): PMNode {
     const gallery = wVal(w(el, "sdtPr")?.getElementsByTagNameNS(NS.w, "docPartGallery")[0]);
-    const kind = gallery?.includes("Table of Contents") ? "toc" : "other";
+    const kind = gallery?.includes("Table of Contents") ? "toc" : gallery?.includes("Bibliograph") ? "bibliography" : "other";
     const shell = el.cloneNode(true) as Element;
     w(shell, "sdtContent")?.remove();
     return this.keyed(el, (key) => schema.nodes.sdt.create({ key, kind, xml: xmlOf(shell) }, this.blocks(w(el, "sdtContent")!)));
@@ -280,6 +281,11 @@ class Reader {
         const anchor = wVal(el, "anchor");
         const href = (rId && this.ctx.hyperlinkHref(rId)) ?? null;
         this.inline(el, [...marks, schema.marks.link.create({ rId, anchor, href })], out);
+      } else if (el.namespaceURI === NS.w && local === "sdt" && chipAttrs(el)) {
+        // A date picker or dropdown: a smart chip, formatted as its first run.
+        const runs = Array.from(w(el, "sdtContent")?.getElementsByTagNameNS(NS.w, "r") ?? []);
+        const run = runs.find((r) => w(r, "t")) ?? runs[0];
+        out.push(schema.nodes.chip.create(chipAttrs(el), null, [...marks, ...runMarks(w(run, "rPr"))]));
       } else if (el.namespaceURI === NS.w && local === "sdt") {
         const content = w(el, "sdtContent");
         if (content) this.inline(content, marks, out);

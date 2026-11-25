@@ -1002,7 +1002,15 @@ export class Grid {
         box = resize ? { ...box, w: Math.max(60, ch.w + dx), h: Math.max(40, ch.h + dy) } : { ...box, x: Math.max(0, ch.x + dx), y: Math.max(0, ch.y + dy) };
         chartEl!.setCssProps({ "--x": `${left + box.x - ch.x}px`, "--y": `${top + box.y - ch.y}px`, "--w": `${box.w}px`, "--h": `${box.h}px` });
       }, () => {
-        if (!moved) return;
+        // A press that didn't move is a click on the chart (the drag took the pointer, so the click event's target
+        // isn't inside it): handled here, with the press's own target.
+        if (!moved) {
+          if (!picture) {
+            this.chartDragged = true;
+            this.host.chartMenu?.(key, e);
+          }
+          return;
+        }
         this.chartDragged = true;
         if (picture) this.host.movePicture?.(key, box);
         else this.host.moveChart?.(key, box);

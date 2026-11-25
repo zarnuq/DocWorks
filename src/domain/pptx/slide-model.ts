@@ -10,6 +10,7 @@ import { cellRect, readTable, TableCell, TableModel } from "./table";
 import { Crop, readCrop } from "./slide-edit";
 import { cNvPrOf, linkAttrs, readLink } from "./links";
 import { PictureAdjust, readAdjust } from "./picture-adjust";
+import { A14, isEquation, shownBranch } from "./equation";
 
 export type { GeomPath, Rect } from "./geometry";
 
@@ -44,6 +45,8 @@ export interface Run extends RunProps {
   text: string;
   /** a:fld type ("slidenum", "datetime1"...) for field runs. */
   field?: string;
+  /** An equation (a14:m): its OMML, m:oMath or m:oMathPara. */
+  math?: string;
 }
 
 /** Spacing as a fraction of single line spacing, or in points. */
@@ -132,6 +135,8 @@ export interface ShapeModel {
   link: string | null;
   /** Pictures: transparency, brightness, contrast and recolor. */
   adjust?: PictureAdjust;
+  /** Its text holds PowerPoint math (edited as an equation, not as text). */
+  equation?: boolean;
 }
 
 export interface SlideModel {
@@ -308,6 +313,8 @@ export function readParagraphs(txBody: Element, style: TextStyle): Para[] {
         runs.push(run);
       } else if (child.localName === "br") {
         runs.push({ ...runProps(kid(child, "rPr", NS.a), level.defaults, style), text: "\n" });
+      } else if (child.localName === "m" && child.namespaceURI === A14 && child.firstElementChild) {
+        runs.push({ ...level.defaults, text: "", math: new XMLSerializer().serializeToString(child.firstElementChild) });
       }
     }
     const endSz = runProps(kid(p, "endParaRPr", NS.a), level.defaults, style).sz;
@@ -486,8 +493,9 @@ class SlideParser {
   private walk(tree: Element, part: string, t: Transform, grouped: boolean, inherited: boolean): void {
     for (const el of Array.from(tree.children)) {
       if (el.localName === "AlternateContent") {
-        const fallback = Array.from(el.children).find((c) => c.localName === "Fallback");
-        if (fallback) this.walk(fallback, part, t, grouped, inherited);
+        // PowerPoint's equations are drawn from their math, anything else from its Fallback.
+        const shown = shownBranch(el);
+        if (shown?.parentElement) this.walk(shown.parentElement, part, t, grouped, inherited);
         continue;
       }
       if (el.namespaceURI !== NS.p && el.namespaceURI !== NS.dsp) continue;
@@ -518,6 +526,7 @@ class SlideParser {
       } else if (el.localName === "sp" || el.localName === "cxnSp" || el.localName === "pic" || el.localName === "graphicFrame") {
         const shape = this.shape(el, part, inherited);
         if (shape) {
+          if (shape.text && isEquation(el)) shape.equation = true;
           shape.rect = applyTransform(shape.rect, t);
           shape.grouped = grouped;
           this.shapes.push(shape);

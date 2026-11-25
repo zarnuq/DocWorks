@@ -6,6 +6,7 @@ import { parseSlide, plainText } from "../../domain/pptx/slide-model";
 import { Fill, writeFill } from "../../domain/pptx/shape-style";
 import { TABLE_STYLES } from "../../domain/pptx/table";
 import { dropLinks } from "../../domain/pptx/links";
+import { syncEquationFallbacks } from "../../domain/pptx/equation";
 import { OoxmlPackage, PackageSnapshot, parseXml, relsPathOf, ResourceBundle } from "../ooxml/ooxml-package";
 
 interface SlideRef {
@@ -103,6 +104,15 @@ function placeholderXml(ph: Element, id: number): string {
 
 /** A .pptx package: slide list and slide operations on top of the live-DOM OOXML package. */
 export class PptxDocument extends OoxmlPackage {
+  /** Moved equations take their fallback pictures with them (see equation.ts). */
+  override async save(): Promise<Uint8Array> {
+    for (const { path } of this.slides()) {
+      const slide = this.xml(path);
+      if (slide && syncEquationFallbacks(slide)) this.touch(path);
+    }
+    return super.save();
+  }
+
   slideSize = { cx: 9144000, cy: 6858000 };
 
   static async load(data: ArrayBuffer | Uint8Array): Promise<PptxDocument> {

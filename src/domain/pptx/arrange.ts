@@ -8,6 +8,7 @@ import type { ResourceBundle } from "../../infrastructure/ooxml/ooxml-package";
 import type { PptxDocument } from "../../infrastructure/pptx/pptx-document";
 import type { Rect } from "./geometry";
 import { nextShapeId, setRect } from "./slide-edit";
+import { shownBranch } from "./equation";
 
 const SHAPE_TAGS = new Set(["sp", "cxnSp", "pic", "graphicFrame", "grpSp", "contentPart", "AlternateContent"]);
 const num = (el: Element | null, attr: string) => Number(el?.getAttribute(attr) ?? 0);
@@ -19,7 +20,11 @@ export function topLevel(el: Element): Element {
   return cur;
 }
 
+/** The element an item stands for: an mc:AlternateContent's shown shape (an equation's math, else its Fallback). */
+const shownItem = (item: Element) => (item.localName === "AlternateContent" ? shownBranch(item) ?? item : item);
+
 export function xfrmOf(item: Element): Element | null {
+  item = shownItem(item);
   if (item.localName === "grpSp") return kid(kid(item, "grpSpPr", NS.p), "xfrm", NS.a);
   if (item.localName === "graphicFrame") return kid(item, "xfrm", NS.p);
   return kid(kid(item, "spPr", NS.p), "xfrm", NS.a);
@@ -35,6 +40,7 @@ export function itemRect(item: Element): Rect {
 
 /** Move / resize an item; a group keeps its child coordinates, so its children follow. */
 export function setItemRect(item: Element, r: Rect): void {
+  item = shownItem(item);
   if (item.localName !== "grpSp") return setRect(item, r);
   const xfrm = xfrmOf(item)!;
   const round = (v: number) => String(Math.round(v));

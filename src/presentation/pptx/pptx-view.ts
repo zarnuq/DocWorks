@@ -47,7 +47,9 @@ import { electronSpeller, notePasteKey, runEditCommand, type Speller, wantsPlain
 import { looksLikeMarkdown, markdownImages } from "../../core/utils/markdown";
 import { vaultPicture, vaultPictures } from "../common/images";
 import { specialCharacters } from "../common/special-chars";
-import { COMMON_SHORTCUTS, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
+import { equationDialog } from "../common/equation-dialog";
+import { equationLatex, insertEquation, setEquation } from "../../domain/pptx/equation";
+import { COMMON_SHORTCUTS, registerMenuSearchKey, registerShortcutsKey, shortcutsDialog, SLIDES_SHORTCUTS } from "../common/shortcuts";
 import { EDITING_KEYS, editableFocused, FONTS, menuItem, pickColor, promptText, shieldEditingKeys, showValue, subMenu, Toolbar, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
 import { openDrawer, watchNarrow } from "../common/narrow";
 import { Autosave, reloadOnOutsideChange } from "../common/autosave";
@@ -278,6 +280,7 @@ export class PptxView extends FileView {
       });
     }
     registerShortcutsKey(this.scope, () => this.shortcutsHelp());
+    registerMenuSearchKey(this.scope, () => !!this.toolbar?.focusSearch());
     // Ctrl+E / Ctrl+L: PowerPoint's centre / left align in its layout; otherwise kept for the text boxes (as other
     // editing keys). One handler each: the first handler for a key takes it.
     for (const [key, id] of [["e", "AlignCenter"], ["l", "AlignLeft"]] as const) {
@@ -479,6 +482,12 @@ export class PptxView extends FileView {
       if (t === this.stageEl || this.slideHostEl.contains(t)) this.startMarquee(e);
     });
     this.stageEl.addEventListener("contextmenu", (e) => !this.settings.readOnly && this.contextMenu(e));
+    // Double-click an equation to edit it.
+    this.stageEl.addEventListener("dblclick", (e) => {
+      const shapeEl = (e.target as HTMLElement).closest(".pptx-shape:not(.is-inherited)");
+      const rs = shapeEl ? this.rendered.find((r) => r.el === shapeEl) : null;
+      if (rs?.shape.equation && !this.settings.readOnly) this.equation(rs.shape.el);
+    });
     this.stageEl.addEventListener("paste", (e) => !this.settings.readOnly && this.onPaste(e));
     this.stageEl.addEventListener("dragover", (e) => e.preventDefault());
     this.stageEl.addEventListener("drop", (e) => {
@@ -1505,6 +1514,11 @@ export class PptxView extends FileView {
         for (const [title, fn] of tableActions(table, range)) item(title, () => this.editShape(frame, (f) => fn(f.getElementsByTagNameNS(NS.a, "tbl")[0])));
       }
     }
+    if (rs?.shape.equation) {
+      const el = rs.shape.el;
+      menu.addSeparator();
+      item("Edit equation…", () => this.equation(el));
+    }
     // A picture: replace it, or undo a crop or colour changes.
     if (rs?.shape.kind === "pic" && !rs.shape.media) {
       const el = rs.shape.el;
@@ -2249,7 +2263,18 @@ export class PptxView extends FileView {
         return { transition: xml && readTransition(xml), steps: xml ? readAnimations(xml) : [] };
       },
     };
-    new Slideshow(deck, start, (i) => this.goTo(i)).open(previewTransition);
+    // Ctrl+P (the pen) is Obsidian's command palette: the show's own scope takes it first while it runs.
+    const scope = new Scope(this.app.scope);
+    const show = new Slideshow(deck, start, (i) => {
+      this.app.keymap.popScope(scope);
+      this.goTo(i);
+    });
+    scope.register(["Mod"], "p", () => {
+      show.setTool(show.tool === "pen" ? "none" : "pen");
+      return false;
+    });
+    this.app.keymap.pushScope(scope);
+    show.open(previewTransition);
   }
 
   private pushHistory(): void {
@@ -2539,6 +2564,30 @@ export class PptxView extends FileView {
       window.getSelection()?.removeAllRanges();
       window.getSelection()?.addRange(range);
     }
+  }
+
+  /** Insert › Equation (no `el`), or edit the equation shape `el`; an emptied equation is deleted. */
+  private equation(el?: Element): void {
+    if (!this.doc || this.settings.readOnly) return;
+    void equationDialog(this.app, el ? equationLatex(el) ?? "" : null).then((latex) => {
+      const slide = this.currentSlideXml();
+      if (latex === null || !this.doc || !slide) return;
+      // Undone or reloaded while the dialog was open.
+      if (el && el.ownerDocument !== slide) return;
+      if (el && !latex.trim()) {
+        this.mutate(() => topLevel(el).remove());
+        this.setSelection([]);
+      } else if (el) {
+        this.mutate(() => setEquation(el, latex));
+      } else if (latex.trim()) {
+        const { cx, cy } = this.doc.slideSize;
+        // A first guess at its size; PowerPoint fits the box to the equation when it next edits it.
+        const w = Math.min(cx * 0.8, Math.max(cx * 0.15, latex.length * 110000));
+        let added: Element | null = null;
+        this.mutate(() => (added = insertEquation(slide, latex, { x: (cx - w) / 2, y: cy * 0.42, w, h: cy * 0.12 })));
+        if (added) this.setSelection([topLevel(added)]);
+      }
+    });
   }
 
   private deleteSelected(): void {
@@ -2847,6 +2896,7 @@ export class PptxView extends FileView {
         this.caretOrEnd();
         this.withText(() => insertPlainText(ch), false);
       }));
+      menuItem(mn, "Equation", () => this.equation());
       menuItem(mn, "Comment", () => this.commentsDialog());
       mn.addSeparator();
       menuItem(mn, "New slide", () => this.mutate((d) => (this.index = d.addSlide(this.index))));

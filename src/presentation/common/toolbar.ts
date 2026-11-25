@@ -2,6 +2,7 @@ import { SaveStatus } from "./save-status";
 import { rovingToolbar } from "./keyboard";
 import { versions } from "./version-history";
 import { versionHistoryDialog, type VersionedView } from "./version-dialog";
+import { MenuSearch, recordMenu, type MenuEntry } from "./menu-search";
 import { App, FileView, Menu, MenuItem, Modal, setIcon, Setting, Modifier, Scope } from "obsidian";
 
 export const FONTS = ["Aptos", "Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Verdana", "Segoe UI", "Trebuchet MS", "Courier New"];
@@ -51,6 +52,7 @@ const VIEW_ITEMS = new Set(["Export…", "Copy", "Copy as Markdown table", "Copy
 /** Set while a read-only file's menu is being built: other items are left out. */
 let viewOnly = false;
 VIEW_ITEMS.add("Create note from selection");
+VIEW_ITEMS.add("Compare documents");
 const hidden = (title: string) => viewOnly && !VIEW_ITEMS.has(title);
 const menuIcon = (title: string) => (menuBarIcons ? MENU_ICONS[title] ?? (/^Ungroup /.test(title) ? "ungroup" : /^Group /.test(title) ? "group" : undefined) : undefined);
 
@@ -90,6 +92,18 @@ export function subMenu(m: Menu, title: string, build: (m: Menu) => void): void 
   });
 }
 
+/** Build a menu bar menu: its items get MENU_ICONS, and a read-only file's leave out what changes the file. */
+function buildMenuBar(readOnly: boolean, build: () => void): void {
+  menuBarIcons = true;
+  viewOnly = readOnly;
+  try {
+    build();
+  } finally {
+    menuBarIcons = false;
+    viewOnly = false;
+  }
+}
+
 /** Separators only between items: leftovers of removed items (read-only menus) are dropped. */
 function tidySeparators(menu: Menu): void {
   const addItem = menu.addItem.bind(menu), addSeparator = menu.addSeparator.bind(menu);
@@ -111,6 +125,9 @@ export class Toolbar {
   private group: HTMLElement;
   menubar: HTMLElement | null = null;
   private more: HTMLButtonElement | null = null;
+  /** The menu row's menus, for the menu search box. */
+  private menus: [name: string, build: (m: Menu) => void][] = [];
+  private search: MenuSearch | null = null;
   private tests = new Map<HTMLElement, () => boolean>();
   /** Whether the row is wider than the bar; replaced in tests (jsdom has no layout). */
   overflows = (): boolean => this.el.scrollWidth > this.el.clientWidth;
@@ -198,20 +215,14 @@ export class Toolbar {
   /** A menu in the menu row above the toolbar; `build` runs each time it opens, so items show the current state. */
   menu(name: string, build: (m: Menu) => void, open?: (e: MouseEvent) => boolean): HTMLButtonElement {
     if (this.readOnly && !VIEW_MENUS.has(name)) return createEl("button");
+    this.menus.push([name, build]);
     const b = this.menuRow().createEl("button", { text: name, cls: "dw-menu-btn", attr: { "aria-haspopup": "menu" } });
     b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", (e) => {
       if (open?.(e)) return;
       const menu = new Menu();
       if (this.readOnly) tidySeparators(menu);
-      menuBarIcons = true;
-      viewOnly = this.readOnly;
-      try {
-        build(menu);
-      } finally {
-        menuBarIcons = false;
-        viewOnly = false;
-      }
+      buildMenuBar(this.readOnly, () => build(menu));
       showBelow(menu, b);
     });
     b.addEventListener("keydown", (e) => {
@@ -240,6 +251,13 @@ export class Toolbar {
     b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", onClick);
     return b;
+  }
+
+  /** Alt+/: focus the menu search box; false when the bar has none. */
+  focusSearch(): boolean {
+    if (!this.search) return false;
+    this.search.focus();
+    return true;
   }
 
   /** Start the next group. */
@@ -348,6 +366,17 @@ export class Toolbar {
       showBelow(menu, more);
     });
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => this.fit()).observe(this.el);
+    if (this.menus.length) {
+      // Google's "Menus" box, first in the row; never folds.
+      this.search = new MenuSearch(() => {
+        const entries: MenuEntry[] = [];
+        buildMenuBar(this.readOnly, () => {
+          for (const [name, build] of this.menus) entries.push(...recordMenu(name, build));
+        });
+        return entries;
+      });
+      this.el.prepend(this.search.el);
+    }
     const end = this.el.createDiv({ cls: "dw-end" });
     if (this.readOnly) end.createSpan({ cls: "dw-status", text: "View only" });
     // The end area grows on its own ("Couldn't save" + Retry, the word count): the bar's size doesn't change, so refit.
@@ -438,6 +467,24 @@ export function promptText(app: App, title: string, value: string, password = fa
     new Setting(modal.contentEl)
       .addButton((b) => b.setButtonText("Save").setCta().onClick(submit))
       .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()));
+    modal.onClose = () => resolve(result);
+    modal.open();
+  });
+}
+
+/** Ask a yes / no question; resolves true for `ok`. */
+export function confirmDialog(app: App, title: string, text: string, ok: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let result = false;
+    const modal = new Modal(app);
+    modal.titleEl.setText(title);
+    modal.contentEl.createEl("p", { text });
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()))
+      .addButton((b) => b.setButtonText(ok).setCta().onClick(() => {
+        result = true;
+        modal.close();
+      }));
     modal.onClose = () => resolve(result);
     modal.open();
   });

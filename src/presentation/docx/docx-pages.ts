@@ -9,6 +9,7 @@ import { EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
 import { Cell, layoutPages, Line, PageLayout, PageSetup, PageSize, Row, sectionSetups, Spacer, TopBlock, Unit } from "../../domain/docx/pages";
 import { sectionBreaks } from "../../domain/docx/sections";
+import { drawLineNumbers } from "./line-numbers";
 import { docxSchema as schema } from "../../domain/docx/schema";
 
 interface PagesOptions {
@@ -498,6 +499,7 @@ export function pagesPlugin(opts: PagesOptions): Plugin<PagesState> {
         view.dispatch(view.state.tr.setMeta(pagesKey, next).setMeta("addToHistory", false));
         fixPageHeights(view, opts);
         shadeNarrowPages(view, opts);
+        drawLineNumbers(view, !!opts.setup());
         if (scroller) scroller.scrollTop = scrollTop;
         // The header / footer just drawn may be taller than the margins assumed: lay out again once with their real size.
         const setup = opts.setup();

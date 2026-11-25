@@ -2,10 +2,10 @@ import { insertPivot, Pivot, pivotAt, pivotItems, readPivots, refreshPivot } fro
 import { formulaSparklines, readSparklines, Sparkline } from "../../domain/xlsx/sparklines";
 import { addComment, commentsOf, editComment, removeThread, resolveThread, CommentThread } from "../../domain/xlsx/comments";
 import { assertAction, hasPassword, isProtected, setProtected, unprotectWithPassword } from "../../domain/xlsx/protection";
-import { App, FileView, FuzzySuggestModal, KeymapEventHandler, Menu, Modal, Modifier, Notice, Scope, Setting, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, KeymapEventHandler, Menu, Modal, Modifier, Notice, Scope, Setting, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { detectSeparator, removeDuplicates, splitSources, splitText } from "../../domain/xlsx/cleanup";
 import { importCsv, parseCsv, rangeToMarkdown, sheetToCsv } from "../../domain/xlsx/csv";
-import { addName, deleteName, listNames, renameName, setNameRange } from "../../domain/xlsx/names";
+import { addName, deleteName, listNames, renameName, setNameRange, listFunctions, NamedFunction, setFunction } from "../../domain/xlsx/names";
 import { groupRange, setGroupCollapsed, ungroupRange } from "../../domain/xlsx/outline";
 import { XlsxWorkbook } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Sheet, Workbook } from "../../domain/xlsx/workbook-model";
@@ -32,10 +32,10 @@ import { copyLink } from "../common/copy-link";
 import { runEditCommand } from "../common/spelling";
 import { specialCharacters } from "../common/special-chars";
 import { insertCheckboxes, toggleCheckboxes } from "../../domain/xlsx/checkbox";
-import { COMMON_SHORTCUTS, registerShortcutsKey, SHEETS_SHORTCUTS, shortcutsDialog } from "../common/shortcuts";
+import { COMMON_SHORTCUTS, registerMenuSearchKey, registerShortcutsKey, SHEETS_SHORTCUTS, shortcutsDialog } from "../common/shortcuts";
 import { escapeToEditor, focusRegions, returnFocusAfterOverlays } from "../common/keyboard";
 
-import { FONTS, menuItem, PaperTheme, pickColor, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems, ZOOMS, zoomLabel } from "../common/toolbar";
+import { FONTS, menuItem, PaperTheme, pickColor, Toolbar, promptText, showValue, shieldEditingKeys, subMenu, addFileItems, ZOOMS, zoomLabel, confirmDialog } from "../common/toolbar";
 import { Note, notesOf, setNote } from "../../domain/xlsx/notes";
 import { pagePlan, PrintSettings, printSettings, setPrintSettings } from "../../domain/xlsx/print";
 import { DEFAULT_SETTINGS, DocWorksSettings, kindOfExtension, paperFor } from "../common/settings";
@@ -44,6 +44,7 @@ import { keyName, shortcutRows } from "../common/commands";
 import { caret, type Ribbon } from "../common/ribbon";
 import type { StatusBar } from "../common/status-bar";
 import { buildOfficeUi } from "../common/office-ui";
+import { FilePicker } from "../common/file-picker";
 import { showContextMenu, type CtxEntry } from "../common/context-menu";
 import { XL_FILE_MENU, XL_QAT, XL_SHORTCUTS, excelTabs, type XlCommandId } from "./excel-ui";
 import { canExportPdf, renderPdf } from "../common/pdf";
@@ -60,6 +61,16 @@ import type { ChartModel } from "../../domain/pptx/chart";
 import { renderChart } from "../pptx/chart-renderer";
 import { chartFormatForm, defaultChartFormat } from "../common/chart-form";
 import { IMAGE_MIME } from "../../core/utils/images";
+import { newRangeName, normalizeSqref, ProtectedRange, protectedRangeAt, protectedRanges, setProtectedRange } from "../../domain/xlsx/protected-ranges";
+import { addSlicer, deleteSlicer, makeTable, moveSlicer, regionAround, setSlicerSelection, sheetSlicers, sheetTables, slicerItems, tableAt } from "../../domain/xlsx/slicers";
+
+
+/** An edit stopped at a protected range, for its warning. */
+class ProtectedEdit extends Error {
+  constructor(public range: ProtectedRange) {
+    super("Protected range");
+  }
+}
 
 export const VIEW_TYPE_XLSX = "doc-works-xlsx-view";
 const THEME_KEY = "doc-works-xlsx-theme";
@@ -104,6 +115,7 @@ export class XlsxView extends FileView {
   private statusEl!: HTMLElement;
   /** The Excel-style interface (beta setting), instead of the Google toolbar. */
   private ribbon: Ribbon | null = null;
+  private toolbar: Toolbar | null = null;
   private statusBar: StatusBar | null = null;
   private cmds: Commands | null = null;
   private zoomSelect: HTMLSelectElement | null = null;
@@ -194,6 +206,7 @@ export class XlsxView extends FileView {
       return [this.contentEl.querySelector<HTMLElement>(".dw-menubar"), this.contentEl.querySelector<HTMLElement>(".dw-toolbar"), this.contentEl.querySelector<HTMLElement>(".dw-rb-tabs"), this.contentEl.querySelector<HTMLElement>(".dw-rb-panel"), this.nameBox?.parentElement, this.grid?.input, this.tabsEl, this.findEl, this.contentEl.querySelector<HTMLElement>(".dw-statusbar")];
     });
     registerShortcutsKey(this.scope, () => this.shortcutsHelp());
+    registerMenuSearchKey(this.scope, () => !!this.toolbar?.focusSearch());
     this.scope.register(["Mod"], "f", () => {
       this.openFind();
       return false;
@@ -266,6 +279,7 @@ export class XlsxView extends FileView {
     }
     status.remove();
     this.edits.onReload = () => this.afterReload();
+    this.edits.beforeCommit = (cells) => this.checkProtected(cells);
     this.edits.onCellsChanged = (cells) => {
       const rowsBySheet = new Map<Sheet, Set<number>>();
       for (const { sheet, row } of cells) {
@@ -313,7 +327,7 @@ export class XlsxView extends FileView {
       editLink: () => void this.editLink(),
       sparklines: () => this.sparklines(this.sheet),
       dropdown: (row, col) => validationAt(this.sheet, row, col)?.type === "list",
-      moveChart: (key, box) => this.change(() => moveChart(this.edits!, key, box)),
+      moveChart: (key, box) => this.change(() => (key.startsWith("slicer:") ? moveSlicer(this.edits!, this.sheet, key.slice(7), box) : moveChart(this.edits!, key, box))),
       note: (row, col) => this.notes().get(cellName(row, col))?.text ?? null,
       comment: (row, col) => this.comments().get(cellName(row, col))?.some(t => !t.resolved) ?? false,
       invalid: (row, col) => this.invalid(row, col),
@@ -475,6 +489,19 @@ export class XlsxView extends FileView {
     try {
       fn();
     } catch (err) {
+      if (err instanceof ProtectedEdit) {
+        void this.protectedWarning(err.range).then((ok) => {
+          if (!ok) return;
+          this.protectedOk = true;
+          try {
+            this.change(fn);
+          } finally {
+            this.protectedOk = false;
+          }
+        });
+        // Taken as done (the cell editor closes): the warning decides, and Cancel drops it, as in Google Sheets.
+        return true;
+      }
       new Notice(err instanceof FormulaSyntaxError ? `There's a problem with this formula: ${err.message}` : (err as Error).message);
       return false;
     }
@@ -635,7 +662,7 @@ export class XlsxView extends FileView {
   }
 
   private charts(sheet = this.sheet) {
-    return this.sheetChartModels(sheet).map(({ chart, model }) => ({
+    return [...this.sheetChartModels(sheet).map(({ chart, model }) => ({
       key: chart.path,
       ...chart.box,
       draw: (el: HTMLElement) => {
@@ -649,7 +676,72 @@ export class XlsxView extends FileView {
         }
         for (const child of Array.from(cached.el.children)) el.appendChild(child.cloneNode(true));
       },
+    })), ...this.slicerBoxes(sheet)];
+  }
+
+  /** Table slicers, drawn like charts (dragged and resized the same way): a caption, a clear button, the values. */
+  private slicerBoxes(sheet: Sheet) {
+    return sheetSlicers(this.wb, sheet).filter((sl) => sl.box).map((sl) => ({
+      key: `slicer:${sl.name}`,
+      ...sl.box!,
+      draw: (el: HTMLElement) => {
+        const items = slicerItems(this.wb, sheet, sl);
+        const box = el.createDiv({ cls: "xlsx-slicer" });
+        const head = box.createDiv({ cls: "xlsx-slicer-head" });
+        head.createSpan({ cls: "xlsx-slicer-caption", text: sl.caption });
+        const filtered = items.some((i) => !i.selected);
+        head.createEl("button", { cls: "xlsx-slicer-clear", text: "✕", attr: { "aria-label": "Clear filter", "data-slicer-clear": "1", disabled: filtered ? null : "" } });
+        const list = box.createDiv({ cls: "xlsx-slicer-items", attr: { role: "listbox", "aria-multiselectable": "true", "aria-label": sl.caption } });
+        for (const item of items) {
+          list.createEl("button", { cls: item.selected ? "xlsx-slicer-item is-selected" : "xlsx-slicer-item", text: item.value || "(blank)", attr: { role: "option", "aria-selected": String(item.selected), "data-slicer-value": item.value } });
+        }
+      },
     }));
+  }
+
+  /** A click on a slicer: one value alone, Ctrl+click adds or removes one, ✕ shows everything (Excel's slicer). */
+  private slicerClick(name: string, e: MouseEvent): void {
+    const sl = sheetSlicers(this.wb, this.sheet).find((x) => x.name === name);
+    if (!sl) return;
+    if (e.type === "contextmenu") {
+      const menu = new Menu();
+      menu.addItem((i) => i.setTitle("Clear filter").setIcon("filter-x").onClick(() => this.change(() => setSlicerSelection(this.edits!, this.sheet, sl, null))));
+      menu.addItem((i) => i.setTitle("Delete slicer").setIcon("trash").onClick(() => this.change(() => deleteSlicer(this.edits!, this.sheet, sl))));
+      this.refocusAfter(menu);
+      menu.showAtMouseEvent(e);
+      return;
+    }
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-slicer-clear]")) return void this.change(() => setSlicerSelection(this.edits!, this.sheet, sl, null));
+    const value = target.closest<HTMLElement>("[data-slicer-value]")?.dataset.slicerValue;
+    if (value === undefined) return;
+    const items = slicerItems(this.wb, this.sheet, sl);
+    let next = new Set([value]);
+    if (e.ctrlKey || e.metaKey) {
+      next = new Set(items.filter((i) => i.selected).map((i) => i.value));
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      if (!next.size) return;
+    }
+    this.change(() => setSlicerSelection(this.edits!, this.sheet, sl, next.size === items.length ? null : next));
+  }
+
+  /** Data › Add a slicer: for the selected column of its table (offering to make the range a table first). */
+  private async addSlicerAtSelection(): Promise<void> {
+    if (!this.edits || !this.grid) return;
+    const sel = this.grid.selection();
+    let table = tableAt(this.wb, this.sheet, sel.r1, sel.c1);
+    if (!table) {
+      const f = this.sheet.filter;
+      const range = sel.r1 !== sel.r2 || sel.c1 !== sel.c2 ? sel : f && sel.r1 >= f.r1 && sel.r1 <= f.r2 && sel.c1 >= f.c1 && sel.c1 <= f.c2 ? f : regionAround(this.sheet, sel.r1, sel.c1);
+      const ok = await confirmDialog(this.app, "Make a table?", `A slicer filters a table. Make ${rangeName(range)} a table (its first row as headings) and add a slicer for column ${colName(sel.c1)}?`, "Make table");
+      if (!ok) return;
+      if (!this.change(() => (table = makeTable(this.edits!, this.sheet, range)))) return;
+    }
+    const t = table!;
+    const column = Math.min(Math.max(sel.c1 - t.ref.c1, 0), t.columns.length - 1);
+    const at = { x: this.sheet.colX(t.ref.c2 + 1) + 24, y: this.sheet.rowY(t.ref.r1) };
+    this.change(() => addSlicer(this.edits!, this.sheet, sheetTables(this.wb, this.sheet).find((x) => x.id === t.id) ?? t, column, at));
   }
 
   private pictureMenu(key: string, e: MouseEvent): void {
@@ -660,6 +752,7 @@ export class XlsxView extends FileView {
   }
 
   private chartMenu(path: string, e: MouseEvent): void {
+    if (path.startsWith("slicer:")) return this.slicerClick(path.slice(7), e);
     const found = this.sheetChartModels().find((c) => c.chart.path === path);
     if (!found) return;
     const menu = new Menu();
@@ -758,6 +851,136 @@ export class XlsxView extends FileView {
   }
 
   /** Data › Named ranges: list, add, edit, rename and delete. */
+  /** An edit was just confirmed (once), or "Don't show this again for 5 minutes" was ticked. */
+  private protectedOk = false;
+  private protectedSnooze = 0;
+
+  /** Edits.beforeCommit: an edit touching a protected range stops for Google's warning. */
+  private checkProtected(cells: Iterable<{ sheet: Sheet; row: number; col: number }>): void {
+    if (this.protectedOk || Date.now() < this.protectedSnooze) return;
+    for (const { sheet, row, col } of cells) {
+      const range = protectedRangeAt(sheet, row, col);
+      if (range) throw new ProtectedEdit(range);
+    }
+  }
+
+  /** Google's "Heads up!": true to make the edit anyway. */
+  private protectedWarning(range: ProtectedRange): Promise<boolean> {
+    return new Promise((resolve) => {
+      let ok = false;
+      let snooze = false;
+      const modal = new Modal(this.app);
+      modal.titleEl.setText("Heads up!");
+      modal.contentEl.createEl("p", { text: `You're trying to edit part of this sheet that shouldn't be changed accidentally ("${range.name}", ${range.sqref}). Edit anyway?` });
+      new Setting(modal.contentEl).setName("Don't show this again for 5 minutes").addToggle((t) => t.onChange((v) => (snooze = v)));
+      new Setting(modal.contentEl)
+        .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()))
+        .addButton((b) => b.setButtonText("OK").setCta().onClick(() => {
+          ok = true;
+          if (snooze) this.protectedSnooze = Date.now() + 5 * 60_000;
+          modal.close();
+        }));
+      modal.onClose = () => {
+        resolve(ok);
+        this.grid?.focusGrid();
+      };
+      modal.open();
+    });
+  }
+
+  /** Data › Protected sheets and ranges: the sheet's ranges that warn before an edit. */
+  private protectedRangesDialog(): void {
+    if (!this.edits || !this.grid) return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Protected sheets and ranges");
+    modal.modalEl.addClass("xlsx-names-modal");
+    const save = (index: number | null, name: string, ref: string) => {
+      const sqref = normalizeSqref(ref);
+      if (!sqref) return void new Notice("That isn't a range.");
+      if (this.change(() => setProtectedRange(this.edits!, this.sheet, index, { name: name || newRangeName(this.sheet), sqref }))) draw();
+    };
+    const draw = () => {
+      modal.contentEl.empty();
+      if (isProtected(this.sheet)) modal.contentEl.createEl("p", { cls: "setting-item-description", text: "This sheet is protected: its locked cells can't be edited, and these ranges don't warn." });
+      protectedRanges(this.sheet).forEach((p, i) => {
+        let name = p.name, ref = p.sqref;
+        new Setting(modal.contentEl)
+          .addText((t) => {
+            t.inputEl.setAttribute("aria-label", "Description");
+            t.setValue(name).onChange((v: string) => (name = v.trim()));
+          })
+          .addText((t) => {
+            t.inputEl.setAttribute("aria-label", "Range");
+            t.setValue(ref).onChange((v: string) => (ref = v.trim()));
+          })
+          .addButton((b) => b.setButtonText("Save").onClick(() => save(i, name, ref)))
+          .addButton((b) => b.setButtonText("Remove").onClick(() => {
+            if (this.change(() => setProtectedRange(this.edits!, this.sheet, i, null))) draw();
+          }));
+      });
+      let name = "", ref = rangeName(this.grid!.selection());
+      new Setting(modal.contentEl).setName("Add a range").setDesc("Editing it shows a warning first.").setHeading();
+      new Setting(modal.contentEl)
+        .addText((t) => {
+          t.inputEl.setAttribute("aria-label", "New description");
+          t.setPlaceholder("Enter a description").onChange((v: string) => (name = v.trim()));
+        })
+        .addText((t) => {
+          t.inputEl.setAttribute("aria-label", "New range");
+          t.setValue(ref).onChange((v: string) => (ref = v.trim()));
+        })
+        .addButton((b) => b.setButtonText("Add").setCta().onClick(() => save(null, name, ref)));
+    };
+    draw();
+    modal.open();
+  }
+
+  /** Data › Named functions, as Google's: the workbook's LAMBDA names, each editable or removable. */
+  private namedFunctionsDialog(): void {
+    if (!this.edits) return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Named functions");
+    const draw = () => {
+      modal.contentEl.empty();
+      const fns = listFunctions(this.wb);
+      if (!fns.length) modal.contentEl.createEl("p", { cls: "setting-item-description", text: "Named functions let you reuse a formula by its name in any cell." });
+      for (const fn of fns) {
+        new Setting(modal.contentEl)
+          .setName(`${fn.name}(${fn.params.join(", ")})`)
+          .setDesc(fn.description || `=${fn.body}`)
+          .addButton((b) => b.setButtonText("Edit").onClick(() => this.namedFunctionForm(fn, draw)))
+          .addButton((b) => b.setButtonText("Remove").onClick(() => {
+            if (this.change(() => deleteName(this.edits!, fn.name))) draw();
+          }));
+      }
+      new Setting(modal.contentEl).addButton((b) => b.setButtonText("Add new function").setCta().onClick(() => this.namedFunctionForm(null, draw)));
+    };
+    draw();
+    modal.open();
+  }
+
+  /** The add / edit form of a named function; `done` redraws the list. */
+  private namedFunctionForm(fn: NamedFunction | null, done: () => void): void {
+    const modal = new Modal(this.app);
+    modal.titleEl.setText(fn ? "Edit named function" : "New named function");
+    const f: NamedFunction = fn ? { ...fn, params: [...fn.params] } : { name: "", params: [], body: "", description: "" };
+    let params = f.params.join(", ");
+    new Setting(modal.contentEl).setName("Function name").addText((t) => t.setPlaceholder("TAX").setValue(f.name).onChange((v) => (f.name = v.trim())));
+    new Setting(modal.contentEl).setName("Function description").addText((t) => t.setValue(f.description).onChange((v) => (f.description = v.trim())));
+    new Setting(modal.contentEl).setName("Argument placeholders").setDesc("Separated by commas.").addText((t) => t.setValue(params).onChange((v) => (params = v)));
+    new Setting(modal.contentEl).setName("Formula definition").addTextArea((t) => t.setPlaceholder("=price * (1 + rate)").setValue(f.body ? `=${f.body}` : "").onChange((v) => (f.body = v.trim())));
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()))
+      .addButton((b) => b.setButtonText(fn ? "Update" : "Create").setCta().onClick(() => {
+        f.params = params.split(",").map((p) => p.trim()).filter(Boolean);
+        if (this.change(() => setFunction(this.edits!, fn?.name ?? null, f))) {
+          modal.close();
+          done();
+        }
+      }));
+    modal.open();
+  }
+
   private namedRangesDialog(): void {
     if (!this.edits || !this.grid) return;
     const modal = new Modal(this.app);
@@ -1329,7 +1552,7 @@ export class XlsxView extends FileView {
     bar.addEventListener("mousedown", (e) => {
       if ((e.target as HTMLElement).closest("button")) e.preventDefault();
     });
-    const tb = new Toolbar(bar, this.settings.readOnly);
+    const tb = (this.toolbar = new Toolbar(bar, this.settings.readOnly));
     const zoomTo = (z: string) => this.setZoom(z);
 
     // --- The row: everyday controls, as Google Sheets' toolbar ---
@@ -1461,10 +1684,13 @@ export class XlsxView extends FileView {
       menuItem(m, "Sort Z → A", () => this.sort(true));
       menuItem(m, this.sheet.filter ? "Remove filter" : "Create a filter", () => this.toggleFilter());
       menuItem(m, "Data validation", () => this.validationDialog());
+      menuItem(m, "Add a slicer", () => void this.addSlicerAtSelection());
       m.addSeparator();
       menuItem(m, "Remove duplicates…", () => this.removeDuplicatesDialog());
       menuItem(m, "Split text to columns…", () => this.splitTextDialog());
       menuItem(m, "Named ranges…", () => this.namedRangesDialog());
+      menuItem(m, "Named functions…", () => this.namedFunctionsDialog());
+      menuItem(m, "Protected sheets and ranges…", () => this.protectedRangesDialog());
       m.addSeparator();
       this.groupItems(m, "row", r.r1, r.r2);
       this.groupItems(m, "col", r.c1, r.c2);
@@ -1518,6 +1744,7 @@ export class XlsxView extends FileView {
     this.stats = undefined;
     this.ribbon?.destroy();
     this.ribbon = null;
+    this.toolbar = null;
     this.statusBar = null;
     this.cmds = null;
     this.toggles.clear();
@@ -2480,22 +2707,6 @@ export class XlsxView extends FileView {
   // ---------------------------------------------------------------------------
 
 
-}
-
-/** Pick one of `files` by fuzzy search. */
-class FilePicker extends FuzzySuggestModal<TFile> {
-  constructor(app: App, private files: TFile[], private choose: (f: TFile) => void) {
-    super(app);
-  }
-  getItems(): TFile[] {
-    return this.files;
-  }
-  getItemText(f: TFile): string {
-    return f.path;
-  }
-  onChooseItem(f: TFile): void {
-    this.choose(f);
-  }
 }
 
 /** A box for a note's text (several lines); resolves null when cancelled. */

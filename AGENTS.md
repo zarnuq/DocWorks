@@ -69,9 +69,20 @@ Unreleased (2026-11-14, more on 2026-11-16):
   process4 add and remove with every shape still standing for a data point; balance1 and equation2 are refused
   (their picture has a fixed meaning). **Not checked against a PowerPoint-made cycle or hierarchy**: none was on
   this machine; those fixtures in `tests/smartart-layouts.test.ts` are written from the format's rules.
-- Not built: equations on slides (PowerPoint's a14:m inside mc:AlternateContent). None of the vault's 29 decks has
-  one; it needs the slide walker to read the Choice branch, a math run in the text model and the minimal-diff
-  writer, and can't be checked without PowerPoint. Slides with equations show PowerPoint's fallback picture.
+- Added 2026-11-21: menu search (Alt+/, all three editors), smart chips (@ menu and Insert › Smart chips: date,
+  dropdown, file link, person mailto), Tools › Citations (APA / MLA / Chicago, Word's bibliography part), Tools ›
+  Compare documents (new "Comparison of A and B.docx" with tracked changes), equations on slides (Insert ›
+  Equation, double-click to edit). Slide equations: **not checked against PowerPoint**; LibreOffice shows the
+  Fallback (our text fallback for edited / new ones). Compare doesn't track formatting-only changes and drops
+  pictures, links, notes and list numbering from inserted content. GUI tests for all five in `scripts/gui-test.py`.
+- Added 2026-11-21 (later): Tools › Line numbers (Google's choices; Word's Layout › Line Numbers in the Office
+  layout), Insert › Building blocks (also in the @ menu), slideshow laser pointer / pen / erase, Data › Protected
+  sheets and ranges (warning mode, the owner's choice: Excel ignores x:protectedRanges unless the sheet is
+  protected, where they mean ranges left editable), Data › Named functions (Excel LAMBDA names), Data › Add a slicer
+  (table slicers; makes the range a table first when asked). GUI tests for all six in `scripts/gui-test.py`.
+  LibreOffice draws the line numbers; it drops slicers (keeps the table) and shows Err:509 for named functions (no
+  LAMBDA). **Slicers aren't checked against Excel** (no Excel or Excel-made slicer here): Excel may offer to repair.
+  A press on a sheet chart or slicer that doesn't move is its click (the drag captures the pointer).
 - Mobile: tried in `dev:mobile` emulation at 400 px (no errors in any editor); the views are padded above
   Obsidian's floating navigation bar (it hid the sheet tabs). A narrow pane (a phone) fits the document page to
   its width until a zoom is picked there (`narrowZoom` in docx-view). Still not tried on a real phone.
@@ -106,8 +117,8 @@ interrupted saves; a check that external workbook references never refresh by th
 
 ## Handy dev facts
 
-- LibreOffice for layout checks: `/nix/store/gpmxgr6l4mmgmhz8v9p2860fgw0mpi06-libreoffice-26.8.0.3-wrapped/bin/soffice`
-  (or set `SOFFICE`). It substitutes Aptos with Liberation Serif, so don't trust it for Aptos documents.
+- LibreOffice for layout checks: none installed; `nix build --no-link --print-out-paths nixpkgs#libreoffice` and set
+  `SOFFICE=<path>/bin/soffice` (2026-11-21: `/nix/store/g8iq8j6y4ncjq1r580py9bndi2zy9s51-libreoffice-26.8.3.1-wrapped`). It substitutes Aptos with Liberation Serif, so don't trust it for Aptos documents.
 - `obsidian eval` output is sometimes lost: store results in `window.__m`, then read them with a second eval.
 - `obsidian dev:screenshot` can lag one command behind; take it twice.
 - Electron's `remote` (dialog, printToPDF) is available; its debugger is already attached by the CLI.

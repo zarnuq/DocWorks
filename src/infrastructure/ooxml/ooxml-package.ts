@@ -136,6 +136,11 @@ export class OoxmlPackage {
     return this.rels(path).find((r) => r.type === type)?.target ?? null;
   }
 
+  /** Every part's path: XML parts and the zip's other files. */
+  partPaths(): string[] {
+    return [...new Set([...this.parts.keys(), ...Object.keys(this.zip.files).filter((p) => !this.zip.files[p].dir), ...this.binaryEdits.keys()])];
+  }
+
   mediaPaths(): string[] {
     return [...new Set([...Object.keys(this.zip.files), ...this.binaryEdits.keys()])]
       .filter((p) => (!this.managedBinary.has(p) || this.binaryEdits.has(p) || this.originalBinary.has(p)) && /^[^/]+\/media\//.test(p) && (this.binaryEdits.has(p) || (!!this.zip.files[p] && !this.zip.files[p].dir)))

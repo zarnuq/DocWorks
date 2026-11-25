@@ -9,7 +9,7 @@ import { tableReference } from "./tables";
  */
 import { NS_S } from "../../infrastructure/xlsx/xlsx-workbook";
 import { Node, parseFormula } from "./formula";
-import { EvalContext, Unsupported, evaluate, evaluateArray, isVolatile } from "./formula-evaluator";
+import { EvalContext, Unsupported, evaluate, evaluateArray, isVolatile, paramKey } from "./formula-evaluator";
 import { Rect } from "./references";
 import { ErrorValue, Scalar } from "./number-format";
 import { Cell, Sheet, Workbook } from "./workbook-model";
@@ -124,6 +124,8 @@ export class Calc {
         break;
       }
       case "name": {
+        // A named function's parameter (or a name already followed).
+        if (seen.has(paramKey(node.name))) break;
         const def = this.name(node.name, sheet) ?? tableReference(this.wb, sheet, info.cell.row, info.cell.col, node.name);
         if (def && !seen.has(node.name.toLowerCase())) {
           seen.add(node.name.toLowerCase());
@@ -131,15 +133,24 @@ export class Calc {
         }
         break;
       }
-      case "call":
+      case "call": {
         if (isVolatile(node.name) || node.name === "ANCHORARRAY") info.always = true;
         node.args.forEach((a) => this.collect(a, sheet, info, seen));
+        // A named function: what its body reads is a dependency too (its parameters aren't names).
+        const def = this.name(node.name, sheet);
+        if (def?.type === "call" && def.name === "LAMBDA" && !seen.has(node.name.toLowerCase())) {
+          seen.add(node.name.toLowerCase());
+          const params = new Set(def.args.slice(0, -1).map((p) => (p.type === "name" ? paramKey(p.name) : "")));
+          const body = def.args[def.args.length - 1];
+          if (body) this.collect(body, sheet, info, new Set([...seen, ...params]));
+        }
         // Google's exported formula text: its references are dependencies too.
         if (node.name === "__XLUDF.DUMMYFUNCTION" && node.args[0]?.type === "str") {
           const inner = this.parse(node.args[0].value);
           if (inner) this.collect(inner, sheet, info, seen);
         }
         break;
+      }
       case "un":
         this.collect(node.arg, sheet, info, seen);
         break;
